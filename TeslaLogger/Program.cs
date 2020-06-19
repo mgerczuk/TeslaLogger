@@ -614,7 +614,7 @@ namespace TeslaLogger
             UpdateTeslalogger.Chmod("nohup.out", 666, false);
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Ssl3 | SecurityProtocolType.Tls | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
 
-            Logfile.Log("TeslaLogger Version: " + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version);
+            Logfile.Log("TeslaLogger Version: " + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version + " (TeslaCAN)");
             Logfile.Log("Logfile Version: " + System.Reflection.Assembly.GetAssembly(typeof(Logfile)).GetName().Version);
             Logfile.Log("SRTM Version: " + System.Reflection.Assembly.GetAssembly(typeof(SRTM.SRTMData)).GetName().Version);
                                     try
