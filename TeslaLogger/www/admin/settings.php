@@ -13,11 +13,12 @@ require("tools.php");
 	<script src="https://code.jquery.com/jquery-1.12.4.js"></script>
 	<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
 	<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/timepicker/1.3.5/jquery.timepicker.min.css">
+	<link rel='stylesheet' id='genericons-css'  href='https://www.impala64.de/blog/tesla/wp-content/themes/twentyfourteen/genericons/genericons.css?ver=3.0.3' type='text/css' media='all' />
 	<script src="//cdnjs.cloudflare.com/ajax/libs/timepicker/1.3.5/jquery.timepicker.min.js"></script>
 	<script>
 	
 	$( function() {
-		$( "button" ).button();
+		//$( "button" ).button();
 	
 		$('.timepicker').timepicker({
 			timeFormat: 'HH:mm',
@@ -52,10 +53,12 @@ require("tools.php");
 		
 		if ($content === FALSE)
 		{
+			// Default Values for fresh install
 			echo ("$('#radio_kw').prop('checked', true);\r\n");
 			echo ("$('#radio_celsius').prop('checked', true);\r\n");
 			echo ("$('#radio_km').prop('checked', true);\r\n");
-			echo ("$('#radio_en').prop('checked', true);\r\n");			
+			echo ("$('#radio_en').prop('checked', true);\r\n");		
+			echo ("$('#radio_all').prop('checked', true);\r\n");	
 		}
 		else
 		{
@@ -152,11 +155,16 @@ require("tools.php");
   }
 
 </script>
-<button onclick="window.location.href='password.php';"><?php t("Zugangsdaten"); ?></button>
-<button onclick="window.location.href='restore.php';"><?php t("Restore DB"); ?></button>
-<h1>SETTINGS</h1>
+<body style="padding-top: 5px; padding-left: 10px;">
+<?php 
+include "menu.php";
+echo(menu("Logfile"));
+?>
 <div>
 <table>
+<tr><td><h1 style="margin-top:0px;"><?php t("Zugangsdaten"); ?></h1></td><td></td></tr>
+<tr><td></td><td><button onclick="window.location.href='password.php';"  style="float: right;"><?php t("Zugangsdaten"); ?></button></td></tr>
+<tr><td><h1>SETTINGS</h1></td><td></td></tr>
 	<tr><td valign="top"><b><?php t("Language"); ?>:</b></td><td>
 		<input id="radio_de" type="radio" value="de" name="Language" /> Deutsch<br>
 		<input id="radio_en" type="radio" value="en" name="Language" /> English<br>
@@ -167,7 +175,7 @@ require("tools.php");
 	<tr><td valign="top"><b><?php t("Temperatur"); ?>:</b></td><td><input id="radio_celsius" type="radio" value="celsius" name="Temperature"> Celsius<br><input id="radio_fahrenheit" type="radio" value="fahrenheit" name="Temperature"> Fahrenheit </td></tr>
 	<tr><td valign="top"><b><?php t("Längenmaß"); ?>:</b></td><td><input id="radio_km" type="radio" value="km" name="Length"> km<br><input id="radio_mile" type="radio" value="mile" name="Length"> mile </td></tr>
 	<tr><td><b><?php t("Daten anonym teilen"); ?>:</b></td><td><input id="checkboxSharedata" type="checkbox" value="sharedata"> Enable</td><td><img id="ShareDataHelp" src="img/icon-help-24.png" /></td></tr>
-	<tr><td valign="top"><b><?php t("Automatische updates"); ?>:</b></td><td><input id="radio_all" type="radio" value="all" name="update"> all<br><input id="radio_stable" type="radio" value="stable" name="update"> stable<br><input id="radio_none" type="radio" value="none" name="update"> none</td></tr>
+	<tr><td valign="top"><b><?php t("Automatische Updates"); ?>:</b></td><td><input id="radio_all" type="radio" value="all" name="update"> All<br><input id="radio_stable" type="radio" value="stable" name="update"> Stable<br><input id="radio_none" type="radio" value="none" name="update"> None</td></tr>
 	<tr><td><b><?php t("Schlafen"); ?>:</b></td><td><input id="checkboxSleep" type="checkbox" value="sleep"> Enable</td></tr>
 	<tr><td></td><td><input class="startdate timepicker text-center"></input> to <input class="enddate timepicker text-center"></input></td></tr>
 	<tr><td valign="top"><b><?php t("URL Admin Panel"); ?>:</b></td><td><input id="URL_Admin" style="width:100%;" placeholder="http://raspberry/admin/"></td></tr>
@@ -217,6 +225,7 @@ if (strlen($taskertoken) > 7)
 </table>
 </div>
 
+<!--
 <h1>Your Data</h1>
 <button onclick="window.location.href='https://teslalogger.de/degradation_token.php?token=<?PHP echo($taskertoken); ?>';"><?php t("My Degradation"); ?></button>
 <button onclick="window.location.href='https://teslalogger.de/mycharging.php?token=<?PHP echo($taskertoken); ?>';"><?php t("My charging AVG"); ?></button>
@@ -225,6 +234,7 @@ if (strlen($taskertoken) > 7)
 <button onclick="window.location.href='https://teslalogger.de/charger.php';"><?php t("Fleet charging AVG"); ?></button>
 <button onclick="window.location.href='https://teslalogger.de/map.php';"><?php t("Fleet Fast Charging Map"); ?></button>
 <button onclick="window.location.href='https://teslalogger.de/firmware.php';"><?php t("Firmware Tracker"); ?></button>
+-->
 
 <div id="dialog-confirm" title="Info" style="display:none;">
 <?php t("TextShare"); ?>
