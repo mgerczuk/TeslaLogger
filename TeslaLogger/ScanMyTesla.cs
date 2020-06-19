@@ -43,7 +43,7 @@ namespace TeslaLogger
             {
                 try
                 {
-                    System.Threading.Thread.Sleep(2500);
+                    System.Threading.Thread.Sleep(500);
 
                     if (!fastmode && response == "not found")
                     {
@@ -75,7 +75,7 @@ namespace TeslaLogger
 
         private void InsertData(string response)
         {
-            Logfile.Log("ScanMyTesla: " + response);
+            //Logfile.Log("ScanMyTesla: " + response);
         }
 
         public async Task<String> GetDataFromWebservice()
@@ -90,7 +90,7 @@ namespace TeslaLogger
                 });
 
                 DateTime start = DateTime.UtcNow;
-                var result = await client.PostAsync("http://teslalogger.de/get_scanmytesla.php", content);
+                var result = await client.PostAsync("http://teslacan.fritz.box:8080/get_scanmytesla", content);
                 resultContent = await result.Content.ReadAsStringAsync();
 
                 DBHelper.addMothershipDataToDB("teslalogger.de/get_scanmytesla.php", start, (int)result.StatusCode);
