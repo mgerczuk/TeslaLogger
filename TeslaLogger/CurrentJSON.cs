@@ -1,8 +1,8 @@
-﻿namespace TeslaLogger
-{
-    using System;
-    using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 
+namespace TeslaLogger
+{
     public class CurrentJSON
     {      
         public bool current_charging = false;
@@ -46,6 +46,8 @@
         public bool current_is_sentry_mode = false;
         public bool current_is_preconditioning = false;
 
+        public string current_country_code = "";
+
         public DateTime lastScanMyTeslaReceived = DateTime.MinValue;
         public double? SMTCellTempAvg = null;
         public double? SMTCellMinV = null;
@@ -72,21 +74,25 @@
                 {
                     if (current_trip_end == DateTime.MinValue)
                     {
-                        duration = (int)((TimeSpan)(DateTime.Now - current_trip_start)).TotalSeconds;
+                        duration = (int)(DateTime.Now - current_trip_start).TotalSeconds;
                         distance = current_odometer - current_trip_km_start;
                         trip_kwh = (current_trip_start_range - current_ideal_battery_range_km) * Wh_TR;
 
                         if (distance > 0)
+                        {
                             trip_avg_wh = trip_kwh / distance * 1000;
+                        }
                     }
                     else
                     {
-                        duration = (int)((TimeSpan)(current_trip_end - current_trip_start)).TotalSeconds;
+                        duration = (int)(current_trip_end - current_trip_start).TotalSeconds;
                         distance = current_trip_km_end - current_trip_km_start;
                         trip_kwh = (current_trip_start_range - current_trip_end_range) * Wh_TR;
 
                         if (distance > 0)
+                        {
                             trip_avg_wh = trip_kwh / distance * 1000;
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -95,10 +101,11 @@
                     duration = 0;
                 }
                 if (duration < 0)
+                {
                     duration = 0;
+                }
 
-
-                var values = new Dictionary<string, object>
+                Dictionary<string, object> values = new Dictionary<string, object>
                 {
                    { "charging", current_charging},
                    { "driving", current_driving },
@@ -130,7 +137,8 @@
                    { "inside_temperature", current_inside_temperature },
                    { "battery_heater", current_battery_heater },
                    { "is_preconditioning", current_is_preconditioning },
-                   { "sentry_mode", current_is_sentry_mode }
+                   { "sentry_mode", current_is_sentry_mode },
+                   { "country_code", current_country_code }
                 };
 
                 TimeSpan ts = DateTime.Now - lastScanMyTeslaReceived;
