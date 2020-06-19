@@ -2225,7 +2225,7 @@ FROM
             {
                 string contents;
                 using (var wc = new System.Net.WebClient())
-                    contents = wc.DownloadString("https://raw.githubusercontent.com/bassmaster187/TeslaLogger/master/TeslaLogger/Properties/AssemblyInfo.cs");
+                    contents = wc.DownloadString("https://gitlab.fritz.box/root/teslalogger/raw/master2/TeslaLogger/Properties/AssemblyInfo.cs");
 
                 Match m = regexAssemblyVersion.Match(contents);
                 string version = m.Groups[1].Value;
