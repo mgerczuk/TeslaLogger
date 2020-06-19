@@ -207,7 +207,7 @@ namespace TeslaLogger
 
                     exec_mono("rm", "-rf /etc/teslalogger/git");
                     exec_mono("mkdir", "/etc/teslalogger/git");
-                    exec_mono("git", "clone https://github.com/bassmaster187/TeslaLogger /etc/teslalogger/git/");
+                    exec_mono("git", "clone -b master2 https://gitlab.fritz.box/root/teslalogger.git /etc/teslalogger/git/");
 
                     Tools.CopyFilesRecursively(new System.IO.DirectoryInfo("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"), new System.IO.DirectoryInfo("/var/lib/grafana/plugins"));
                     Tools.CopyFilesRecursively(new System.IO.DirectoryInfo("/etc/teslalogger/git/TeslaLogger/www"), new System.IO.DirectoryInfo("/var/www/html"));
