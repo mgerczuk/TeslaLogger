@@ -3,14 +3,18 @@ using System.Collections.Generic;
 using System.Text;
 using System.IO;
 using MySql.Data.MySqlClient;
+using System.Text.RegularExpressions;
+using System.Reflection;
 
 namespace TeslaLogger
 {
     internal class UpdateTeslalogger
     {
-        private static string cmd_restart_path = "/tmp/teslalogger-cmd-restart.txt";
+        readonly private static string cmd_restart_path = "/tmp/teslalogger-cmd-restart.txt";
         private static bool shareDataOnStartup = false;
         private static System.Threading.Timer timer;
+
+        private static DateTime lastVersionCheck = DateTime.UtcNow;
 
         public static void Start(WebHelper wh)
         {
@@ -924,6 +928,93 @@ namespace TeslaLogger
             {
                 Logfile.Log("chmod " + filename + " " + ex.Message);
             }
+        }
+
+        public static void CheckForNewVersion()
+        {
+            try
+            {
+                TimeSpan ts = DateTime.UtcNow - lastVersionCheck;
+                if (ts.TotalMinutes > 120)
+                {
+                    Logfile.Log(" *** Check new Version ***");
+
+                    string online_version = WebHelper.GetOnlineTeslaloggerVersion();
+                    if (String.IsNullOrEmpty(online_version))
+                    {
+                        // recheck in 10 Minutes
+                        Logfile.Log("Empty Version String - recheck in 10 minutes");
+                        lastVersionCheck = lastVersionCheck.AddMinutes(10);
+                        return;
+                    }
+
+                    lastVersionCheck = DateTime.UtcNow;
+
+                    string currentVersion = Assembly.GetExecutingAssembly().GetName().Version.ToString();
+                    Tools.UpdateType updateType = Tools.UpdateSettings();
+
+                    if (UpdateNeeded(currentVersion, online_version, updateType))
+                    {
+                        // if update doesn't work, it will retry tomorrow
+                        lastVersionCheck = DateTime.UtcNow.AddDays(1);
+
+                        Logfile.Log("---------------------------------------------");
+                        Logfile.Log(" *** New Version Detected *** ");
+                        Logfile.Log("Current Version: " + currentVersion);
+                        Logfile.Log("Online Version: " + online_version);
+                        Logfile.Log("Start update!");
+
+                        string cmd_updated = "/etc/teslalogger/cmd_updated.txt";
+
+                        if (File.Exists(cmd_updated))
+                        {
+                            File.Delete(cmd_updated);
+                        }
+
+                        if (Tools.IsDocker())
+                        {
+                            Logfile.Log("  Docker detected!");
+                            File.WriteAllText("/tmp/teslalogger-cmd-restart.txt", "update");
+                        }
+                        else
+                        {
+                            Logfile.Log("Rebooting");
+                            UpdateTeslalogger.Exec_mono("reboot", "");
+                        }
+                    }
+
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+        }
+
+        public static bool UpdateNeeded(string currentVersion, string online_version, Tools.UpdateType updateType)
+        {
+            if (updateType == Tools.UpdateType.none)
+                return false;
+
+            if (updateType == Tools.UpdateType.stable || updateType == Tools.UpdateType.all)
+            {
+                Version cv = new Version(currentVersion);
+                Version ov = new Version(online_version);
+
+                if (cv.CompareTo(ov) < 0)
+                {
+                    if (updateType == Tools.UpdateType.all)
+                        return true;
+                    
+                    if (ov.Build == 0 && ov.Revision == 0)
+                        return true;
+                }
+
+                return false;
+            }
+
+            return false;
         }
     }
 }

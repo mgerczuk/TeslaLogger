@@ -9,6 +9,7 @@ namespace TeslaLogger
         public bool current_driving = false;
         public bool current_online = false;
         public bool current_sleeping = false;
+        public bool current_falling_asleep = false;
 
         public int current_speed = 0;
         public int current_power = 0;
@@ -61,11 +62,21 @@ namespace TeslaLogger
         public double? SMTBatteryPower = null;
 
         public string current_json = "";
+        DateTime lastJSONwrite = DateTime.MinValue;
+
+        public void CheckCreateCurrentJSON()
+        {
+            TimeSpan ts = DateTime.UtcNow - lastJSONwrite;
+            if (ts.TotalMinutes > 5)
+                CreateCurrentJSON();
+        }
 
         public void CreateCurrentJSON()
         {
             try
             {
+                lastJSONwrite = DateTime.UtcNow;
+
                 int duration = 0;
                 double distance = 0;
                 double trip_kwh = 0.0;
@@ -112,6 +123,7 @@ namespace TeslaLogger
                    { "driving", current_driving },
                    { "online", current_online },
                    { "sleeping", current_sleeping },
+                   { "falling_asleep", current_falling_asleep },
                    { "speed", current_speed},
                    { "power", current_power },
                    { "odometer", current_odometer },
@@ -125,6 +137,7 @@ namespace TeslaLogger
                    { "charger_power", current_charger_power},
                    { "car_version", current_car_version },
                    { "trip_start", current_trip_start.ToString("t",Tools.ciDeDE) },
+                   { "trip_start_dt", current_trip_start.ToString("s") },
                    { "trip_max_speed", current_trip_max_speed },
                    { "trip_max_power", current_trip_max_power },
                    { "trip_duration_sec", duration },
@@ -140,7 +153,7 @@ namespace TeslaLogger
                    { "is_preconditioning", current_is_preconditioning },
                    { "sentry_mode", current_is_sentry_mode },
                    { "country_code", current_country_code },
-                   { "country_code", current_state }
+                   { "state", current_state }
                 };
 
                 TimeSpan ts = DateTime.Now - lastScanMyTeslaReceived;

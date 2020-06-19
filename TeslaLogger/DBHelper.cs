@@ -75,6 +75,8 @@ namespace TeslaLogger
                     currentJSON.current_online = false;
                     currentJSON.current_sleeping = false;
                 }
+
+                currentJSON.CreateCurrentJSON();
             }
 
             using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
@@ -95,7 +97,7 @@ namespace TeslaLogger
                 int MaxPosid = GetMaxPosid();
                 CloseState(MaxPosid);
 
-                Logfile.Log("state: " + state);
+                //Logfile.Log("state: " + state);
 
                 MySqlCommand cmd = new MySqlCommand("insert state (StartDate, state, StartPos) values (@StartDate, @state, @StartPos)", con);
                 cmd.Parameters.AddWithValue("@StartDate", DateTime.Now);
@@ -115,6 +117,11 @@ namespace TeslaLogger
             DateTime end = DateTime.UtcNow;
             TimeSpan ts = end - start;
             double duration = ts.TotalSeconds;
+            AddMothershipDataToDB(command, duration, httpcode);
+        }
+
+        public static void AddMothershipDataToDB(string command, double duration, int httpcode)
+        {
 
             if (!mothershipCommands.ContainsKey(command))
             {
@@ -580,7 +587,6 @@ namespace TeslaLogger
                     sb.Append(lat.ToString(ci));
                     sb.Append(",");
                     sb.Append(lng.ToString(ci));
-                    // sb.Append("\r\n");
                 }
 
                 url = sb.ToString();
@@ -704,7 +710,7 @@ namespace TeslaLogger
         {
             try
             {
-                System.Threading.Thread.Sleep(5); 
+                System.Threading.Thread.Sleep(5);
 
                 using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
                 {
@@ -957,8 +963,6 @@ namespace TeslaLogger
 
         public static void StartDriveState()
         {
-            Logfile.Log("StartDriveState");
-
             using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
             {
                 con.Open();
@@ -1620,8 +1624,8 @@ namespace TeslaLogger
                         double lng = Convert.ToDouble(dr[1]);
                         dr.Close();
 
-                        WebHelper.ReverseGecocodingAsync(lat, lng, true).Wait();
-                        return DBHelper.currentJSON.current_country_code;
+                        WebHelper.ReverseGecocodingAsync(lat, lng, true, false).Wait();
+                        return currentJSON.current_country_code;
                     }
                 }
             }

@@ -6,7 +6,9 @@ using System.Data.SqlClient;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.Caching;
+using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -42,6 +44,7 @@ namespace TeslaLogger
 
         public ScanMyTesla scanMyTesla;
         private string _lastShift_State = "P";
+        readonly static Regex regexAssemblyVersion = new Regex("\n\\[assembly: AssemblyVersion\\(\"([0-9\\.]+)\"", RegexOptions.Compiled);
 
         static WebHelper()
         {
@@ -65,31 +68,8 @@ namespace TeslaLogger
         {
             if (!_newState.Equals(_lastShift_State))
             {
-                HandleShiftStateChange(_lastShift_State, _newState);
+                Program.HandleShiftStateChange(_lastShift_State, _newState);
                 _lastShift_State = _newState;
-            }
-        }
-
-        private void HandleShiftStateChange(string _oldState, string _newState)
-        {
-            Logfile.Log("Shift State Change: " + _oldState + " -> " + _newState);
-            if ((_oldState.Equals("D") || _oldState.Equals("R") || _oldState.Equals("N")) && _newState.Equals("P"))
-            {
-                Address addr = geofence.GetPOI(DBHelper.currentJSON.latitude, DBHelper.currentJSON.longitude, false);
-                HashSet<Geofence.SpecialFlags> specialFlags = Geofence.GetSpecialFlagsForLocationName(addr.name);
-                foreach (Geofence.SpecialFlags flag in specialFlags)
-                {
-                    switch (flag)
-                    {
-                        case Geofence.SpecialFlags.OpenChargePort:
-                            string result = PostCommand("command/charge_port_door_open", null).Result;
-                            Logfile.Log("openChargePort(): " + result);
-                            break;
-                        default:
-                            Logfile.Log("handleShiftStateChange(" + _oldState + ", " + _newState + ") default");
-                            break;
-                    }
-                }
             }
         }
 
@@ -233,14 +213,17 @@ namespace TeslaLogger
                 object r1 = ((Dictionary<string, object>)jsonResult)["response"];
                 Dictionary<string, object> r2 = (Dictionary<string, object>)r1;
 
-                if (r2["charging_state"] == null)
-                {
+                if (r2["charging_state"] == null || (resultContent != null && resultContent.Contains("vehicle unavailable")))
+                { 
                     if (justCheck)
                     {
                         return false;
                     }
 
-                    Logfile.Log("charging_state = null");
+                    if (r2["charging_state"] == null)
+                        Logfile.Log("charging_state = null");
+                    else if (resultContent != null && resultContent.Contains("vehicle unavailable"))
+                        Logfile.Log("charging_state: vehicle unavailable");
 
                     Thread.Sleep(10000);
 
@@ -256,6 +239,11 @@ namespace TeslaLogger
                 }
 
                 string battery_level = r2["battery_level"].ToString();
+                if (battery_level != null && Convert.ToInt32(battery_level) != DBHelper.currentJSON.current_battery_level)
+                {
+                    DBHelper.currentJSON.current_battery_level = Convert.ToInt32(battery_level);
+                    DBHelper.currentJSON.CreateCurrentJSON();
+                }
                 string charger_power = "";
                 if (r2["charger_power"] != null)
                 {
@@ -358,7 +346,7 @@ namespace TeslaLogger
                     if (lastCharging_State != "Complete")
                     {
                         DBHelper.InsertCharging(timestamp, battery_level, charge_energy_added, charger_power, (double)ideal_battery_range, charger_voltage, charger_phases, charger_actual_current, outside_temp.Result, true, charger_pilot_current, charge_current_request);
-                        System.Diagnostics.Debug.WriteLine(DateTime.Now.ToString() + " : Charging Complete");
+                        Logfile.Log("Charging Complete");
                     }
 
                     lastCharging_State = charging_state;
@@ -437,13 +425,13 @@ namespace TeslaLogger
                     { }
 
                     string vin = r2["vin"].ToString();
-                    Logfile.Log("vin :" + vin);
+                    Logfile.Log("vin: " + vin);
 
                     Tesla_id = r2["id"].ToString();
-                    Logfile.Log("id :" + Tesla_id);
+                    Logfile.Log("id: " + Tesla_id);
 
                     Tesla_vehicle_id = r2["vehicle_id"].ToString();
-                    Logfile.Log("vehicle_id :" + Tesla_vehicle_id);
+                    Logfile.Log("vehicle_id: " + Tesla_vehicle_id);
 
                     byte[] tempTasker = Encoding.UTF8.GetBytes(vin + ApplicationSettings.Default.TeslaName);
 
@@ -464,7 +452,7 @@ namespace TeslaLogger
                         TaskerHash = TaskerHash + "_" + ApplicationSettings.Default.Car;
                     }
 
-                    Logfile.Log("Tasker Config:\r\n Server Port : https://teslalogger.de\r\n Pfad : wakeup.php\r\n Attribute : t=" + TaskerHash);
+                    Logfile.Log("Tasker Config:\r\n Server Port: https://teslalogger.de\r\n Path: wakeup.php\r\n Attribute: t=" + TaskerHash);
 
                     try
                     {
@@ -731,9 +719,14 @@ namespace TeslaLogger
                 {
                     int maxRange = DBHelper.GetAvgMaxRage();
                     if (maxRange > 500)
+                    {
                         WriteCarSettings("0.169", "S Raven LR");
+                    }
                     else
+                    {
                         WriteCarSettings("0.163", "S Raven SR");
+                    }
+
                     return;
                 }
                 else
@@ -1081,7 +1074,7 @@ namespace TeslaLogger
 
                     if (ts.TotalMinutes > 10)
                     {
-                        if (GetLastShiftState() != "P")
+                        if (!GetLastShiftState().Equals("P"))
                         {
                             Logfile.Log("No Valid IsDriving since 10min! (shift_state=NULL)");
                         }
@@ -1147,7 +1140,7 @@ namespace TeslaLogger
 
                     if (ts.TotalMinutes > 10)
                     {
-                        Logfile.Log("No Valid IsDriving since 10min! (Exception)");
+                        Logfile.Log("No Valid IsDriving since 10min! (Exception: " + ex.GetType().ToString() + ")");
                         SetLastShiftState("P");
                         return false;
                     }
@@ -1211,7 +1204,6 @@ namespace TeslaLogger
                             Thread.Sleep(100);
                             byte[] buffer = new byte[1024];
                             Task<System.Net.WebSockets.WebSocketReceiveResult> response = ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-
 
                             string r = Encoding.UTF8.GetString(buffer);
                             System.Diagnostics.Debug.WriteLine(r);
@@ -1316,7 +1308,7 @@ namespace TeslaLogger
             
         }*/
 
-        public static async Task<string> ReverseGecocodingAsync(double latitude, double longitude, bool forceGeocoding = false)
+        public static async Task<string> ReverseGecocodingAsync(double latitude, double longitude, bool forceGeocoding = false, bool insertGeocodecache = true)
         {
             string url = "";
             string resultContent = "";
@@ -1389,11 +1381,7 @@ namespace TeslaLogger
                 if (country_code.Length > 0)
                 {
                     DBHelper.currentJSON.current_country_code = country_code;
-
-                    if (r2.ContainsKey("state"))
-                        DBHelper.currentJSON.current_state = r2["state"].ToString();
-                    else
-                        DBHelper.currentJSON.current_state = "";
+                    DBHelper.currentJSON.current_state = r2.ContainsKey("state") ? r2["state"].ToString() : "";
                 }
 
                 string road = "";
@@ -1455,7 +1443,10 @@ namespace TeslaLogger
 
                 System.Diagnostics.Debug.WriteLine(url + "\r\n" + adresse);
 
-                GeocodeCache.Instance.Insert(latitude, longitude, adresse);
+                if (insertGeocodecache)
+                {
+                    GeocodeCache.Instance.Insert(latitude, longitude, adresse);
+                }
 
                 if (!string.IsNullOrEmpty(ApplicationSettings.Default.MapQuestKey))
                 {
@@ -2116,6 +2107,8 @@ FROM
         {
             try
             {
+                Tools.SetThread_enUS();
+
                 Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin);
 
                 TimeSpan ts = DateTime.Now - lastTaskerWakeupfile;
@@ -2170,7 +2163,8 @@ FROM
 
                     { "OS", Tools.GetOsVersion() },
                     { "CC", DBHelper.currentJSON.current_country_code },
-                    { "ST", DBHelper.currentJSON.current_state }
+                    { "ST", DBHelper.currentJSON.current_state },
+                    { "UP", Tools.UpdateSettings().ToString() }
                 };
 
                 FormUrlEncodedContent content = new FormUrlEncodedContent(d);
@@ -2201,7 +2195,7 @@ FROM
             }
             catch (Exception ex)
             {
-                Logfile.Log("TaskerWakeupToken Exception: " + ex.Message);
+                Logfile.Log("TaskerWakeupToken Exception: " + ex.ToString());
             }
 
             return false;
@@ -2223,6 +2217,26 @@ FROM
             }
 
             return ret;
+        }
+
+        public static string GetOnlineTeslaloggerVersion()
+        {
+            try
+            {
+                string contents;
+                using (var wc = new System.Net.WebClient())
+                    contents = wc.DownloadString("https://raw.githubusercontent.com/bassmaster187/TeslaLogger/master/TeslaLogger/Properties/AssemblyInfo.cs");
+
+                Match m = regexAssemblyVersion.Match(contents);
+                string version = m.Groups[1].Value;
+
+                return version;
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+            return "";
         }
 
         public bool ExistsWakeupFile => System.IO.File.Exists(FileManager.GetFilePath(TLFilename.WakeupFilename)) || TaskerWakeupfile();

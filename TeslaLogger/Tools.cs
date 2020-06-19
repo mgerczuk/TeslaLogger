@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Web.Script.Serialization;
 
 namespace TeslaLogger
@@ -23,9 +24,17 @@ namespace TeslaLogger
 
         private static string _OSVersion = string.Empty;
 
+        public enum UpdateType { all, stable, none};
+
         public static void SetThread_enUS()
         {
             System.Threading.Thread.CurrentThread.CurrentCulture = ciEnUS;
+        }
+
+        public static void DebugLog(string text, [CallerFilePath] string _cfp = null, [CallerLineNumber] int _cln = 0)
+        {
+            string temp = text + " (" + Path.GetFileName(_cfp) + ":" + _cln + ")";
+            Logfile.Log(temp);
         }
 
         public static string GetMonoRuntimeVersion()
@@ -202,6 +211,35 @@ namespace TeslaLogger
             return false;
         }
 
+        internal static UpdateType UpdateSettings()
+        {
+            try
+            {
+                string filePath = FileManager.GetFilePath(TLFilename.SettingsFilename);
+
+                if (!File.Exists(filePath))
+                {
+                    return UpdateType.all;
+                }
+
+                string json = File.ReadAllText(filePath);
+                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+
+                if (IsPropertyExist(j, "update"))
+                {
+                    if (j["update"] == "stable")
+                        return UpdateType.stable;
+                    else if (j["update"] == "none")
+                        return UpdateType.none;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+
+            return UpdateType.all;
+        }
 
 
         internal static void GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin)
@@ -370,7 +408,7 @@ namespace TeslaLogger
                 if (File.Exists(modelPath))
                 {
                     string model = File.ReadAllText(modelPath);
-                    
+
                     if (model.Contains("Raspberry Pi "))
                     {
                         model += " /";
@@ -391,6 +429,8 @@ namespace TeslaLogger
             {
                 Logfile.Log(ex.ToString());
             }
+
+            ret = ret.Replace("\0", ""); // remove null bytes
 
             _OSVersion = ret;
             return ret;

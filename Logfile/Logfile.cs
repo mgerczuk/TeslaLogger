@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Runtime.CompilerServices;
 
 namespace TeslaLogger
 {
@@ -28,7 +29,6 @@ namespace TeslaLogger
                 return _logfilepath;
             }
         }
-
 
         public static void Log(string text)
         {
@@ -59,35 +59,30 @@ namespace TeslaLogger
                     {
                         Log("vehicle unavailable");
                         System.Threading.Thread.Sleep(30000);
-
                         return;
                     }
                     else if (inhalt.Contains("upstream internal error"))
                     {
                         Log("upstream internal error");
                         System.Threading.Thread.Sleep(10000);
-
                         return;
                     }
                     else if (inhalt.Contains("Connection refused"))
                     {
                         Log("Connection refused");
                         System.Threading.Thread.Sleep(30000);
-
                         return;
                     }
                     else if (inhalt.Contains("No route to host"))
                     {
                         Log("No route to host");
                         System.Threading.Thread.Sleep(60000);
-
                         return;
                     }
                     else if (inhalt.Contains("You have been temporarily blocked for making too many requests!"))
                     {
                         Log("temporarily blocked for making too many requests!");
                         System.Threading.Thread.Sleep(30000);
-
                         return;
                     }
                 }
@@ -262,6 +257,5 @@ namespace TeslaLogger
 
             return false;
         }
-
     }
 }
