@@ -24,12 +24,12 @@ namespace TeslaLogger
 
         private void Start()
         {
-            if (!Tools.UseScanMyTesla())
-            {
-                return;
-            }
+            //if (!Tools.UseScanMyTesla())
+            //{
+            //    return;
+            //}
 
-            Logfile.Log("Start ScanMyTesla Thread!");
+            Logfile.Log("Start TeslaCAN Thread!");
 
             string response = "";
 
@@ -51,7 +51,7 @@ namespace TeslaLogger
                 }
                 catch (Exception ex)
                 {
-                    Logfile.Log("Scanmytesla: " + ex.Message);
+                    Logfile.Log("TeslaCAN: " + ex.Message);
                     Logfile.WriteException(ex.ToString());
                     System.Threading.Thread.Sleep(20000);
                 }
