@@ -64,6 +64,7 @@
     <Compile Include="GeocodeCache.cs" />
     <Compile Include="MQTTClient.cs" />
     <Compile Include="ScanMyTesla.cs" />
+    <Compile Include="TeslaCanSync.cs" />
     <Compile Include="ShareData.cs" />
     <Compile Include="UpdateTeslalogger.cs" />
     <Compile Include="DBHelper.cs" />

@@ -43,6 +43,7 @@ namespace TeslaLogger
         private static int NominatimCount = 0;
 
         public ScanMyTesla scanMyTesla;
+        public TeslaCanSync teslaCanSync;
         private string _lastShift_State = "P";
         readonly static Regex regexAssemblyVersion = new Regex("\n\\[assembly: AssemblyVersion\\(\"([0-9\\.]+)\"", RegexOptions.Compiled);
 
@@ -463,6 +464,8 @@ namespace TeslaLogger
                     { }
 
                     scanMyTesla = new ScanMyTesla(TaskerHash);
+
+                    teslaCanSync = new TeslaCanSync(TaskerHash);
 
                     /*
                     dynamic jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);

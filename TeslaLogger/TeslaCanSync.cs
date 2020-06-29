@@ -2,32 +2,24 @@
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using MySql.Data.MySqlClient;
 
 namespace TeslaLogger
 {
-    public class ScanMyTesla
+    public class TeslaCanSync
     {
         private string token;
         private System.Threading.Thread thread;
-        private bool fastmode = false;
         private bool run = true;
 
-        public ScanMyTesla(string token)
+        public TeslaCanSync(string token)
         {
             this.token = token;
 
             thread = new System.Threading.Thread(new System.Threading.ThreadStart(Start));
             thread.Start();
-        }
-
-        public void FastMode(bool fast)
-        {
-            Logfile.Log("ScanMyTesla FastMode: " + fast.ToString());
-            fastmode = fast;
         }
 
         private void Start()
@@ -45,23 +37,10 @@ namespace TeslaLogger
             {
                 try
                 {
-                    System.Threading.Thread.Sleep(2500);
-
-                    if (!fastmode && response == "not found")
-                    {
-                        for (int s = 0; s < 300; s++)
-                        {
-                            if (fastmode)
-                            {
-                                break;
-                            }
-
-                            System.Threading.Thread.Sleep(100);
-                        }
-                    }
+                    System.Threading.Thread.Sleep(500);
 
                     response = GetDataFromWebservice().Result;
-                    if (response.StartsWith("not found") || response.StartsWith("ERROR:") || response.Contains("Resource Limit Is Reached"))
+                    if (response.StartsWith("not found") || response.StartsWith("ERROR:"))
                     {
                         System.Threading.Thread.Sleep(5000);
                     }
@@ -81,7 +60,7 @@ namespace TeslaLogger
 
         private void InsertData(string response)
         {
-            Logfile.Log("ScanMyTesla: " + response);
+            //Logfile.Log("ScanMyTesla: " + response);
         }
 
         public async Task<string> GetDataFromWebservice()
@@ -96,21 +75,14 @@ namespace TeslaLogger
                 });
 
                 DateTime start = DateTime.UtcNow;
-                HttpResponseMessage result = await client.PostAsync("http://teslalogger.de/get_scanmytesla.php", content);
+                HttpResponseMessage result = await client.PostAsync("http://teslacan.fritz.box:8080/get_scanmytesla", content);
                 resultContent = await result.Content.ReadAsStringAsync();
 
-                DBHelper.AddMothershipDataToDB("teslalogger.de/get_scanmytesla.php", start, (int)result.StatusCode);
+                DBHelper.AddMothershipDataToDB("teslacan.fritz.box:8080/get_scanmytesla", start, (int)result.StatusCode);
 
                 if (resultContent == "not found")
                 {
                     return "not found";
-                }
-
-                if (resultContent.Contains("Resource Limit Is Reached"))
-                {
-                    Logfile.Log("SMT: Resource Limit Is Reached");
-                    Thread.Sleep(25000);
-                    return "Resource Limit Is Reached";
                 }
 
                 string temp = resultContent;
@@ -172,7 +144,7 @@ namespace TeslaLogger
                             }
                             else
                             {
-                                DBHelper.currentJSON.SMTSpeed = Convert.ToDouble(line.Value);
+                                DBHelper.currentJSON.SMTSpeed = Convert.ToDouble(line.Value); 
                             }
                             break;
                         case "43":
@@ -223,7 +195,6 @@ namespace TeslaLogger
             catch (Exception ex)
             {
                 Logfile.ExceptionWriter(ex, resultContent);
-                Thread.Sleep(10000);
             }
 
             return "NULL";
