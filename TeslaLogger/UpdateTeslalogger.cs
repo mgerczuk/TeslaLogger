@@ -10,7 +10,7 @@ namespace TeslaLogger
 {
     internal class UpdateTeslalogger
     {
-        readonly private static string cmd_restart_path = "/tmp/teslalogger-cmd-restart.txt";
+        private static readonly string cmd_restart_path = "/tmp/teslalogger-cmd-restart.txt";
         private static bool shareDataOnStartup = false;
         private static System.Threading.Timer timer;
 
@@ -157,6 +157,14 @@ namespace TeslaLogger
                     Logfile.Log("CREATE TABLE OK");
                 }
 
+                if (!DBHelper.IndexExists("can_ix","can"))
+                {
+                    Logfile.Log("alter table can add index can_ix (id,datum)");
+                    DBHelper.ExecuteSQLQuery("alter table can add index can_ix (id,datum)", 600);
+                    Logfile.Log("ALTER TABLE OK");
+                }
+                
+
                 DBHelper.EnableMothership();
 
                 CheckDBCharset();
@@ -210,7 +218,20 @@ namespace TeslaLogger
 
                     Exec_mono("rm", "-rf /etc/teslalogger/git");
                     Exec_mono("mkdir", "/etc/teslalogger/git");
-                    Exec_mono("git", "clone --progress -b master2 https://gitlab.fritz.box/root/teslalogger.git /etc/teslalogger/git/", true, true);
+                    Exec_mono("mozroots", "--import --sync --machine");
+                    for (int x = 1; x < 10; x++)
+                    {
+                        Logfile.Log("git clone: try " + x);
+                        Exec_mono("git", "clone --progress -b master2 https://gitlab.fritz.box/root/teslalogger.git /etc/teslalogger/git/", true, true);
+
+                        if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
+                        {
+                            Logfile.Log("git clone success!");
+                            break;
+                        }
+                        Logfile.Log("Git failed. Retry in 30 sec!");
+                        System.Threading.Thread.Sleep(30000);
+                    }
 
                     Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"), new DirectoryInfo("/var/lib/grafana/plugins"));
                     Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/www"), new DirectoryInfo("/var/www/html"));
@@ -288,8 +309,8 @@ namespace TeslaLogger
                 if (File.Exists(phpinipath))
                 {
                     string phpini = File.ReadAllText("/etc/php/7.0/apache2/php.ini");
-                    string newphpini = System.Text.RegularExpressions.Regex.Replace(phpini, "(post_max_size\\s*=)(.*)", "$1 50M");
-                    newphpini = System.Text.RegularExpressions.Regex.Replace(newphpini, "(upload_max_filesize\\s*=)(.*)", "$1 50M");
+                    string newphpini = Regex.Replace(phpini, "(post_max_size\\s*=)(.*)", "$1 50M");
+                    newphpini = Regex.Replace(newphpini, "(upload_max_filesize\\s*=)(.*)", "$1 50M");
 
                     File.WriteAllText(phpinipath, newphpini);
 
@@ -425,8 +446,8 @@ namespace TeslaLogger
                         else
                         {
                             ht.Add(key, key +" xxx");
+                        }
                     }
-                }
                 }
                 catch (Exception ex)
                 {
@@ -707,7 +728,7 @@ namespace TeslaLogger
                             else
                             {
                                 Logfile.Log("Title of " + f + " not translated!");
-                        }
+                            }
                         }
 
                         if (URL_Admin.Length > 0)
@@ -751,14 +772,14 @@ namespace TeslaLogger
         {
             try
             {
-                System.Text.RegularExpressions.Regex regexAlias = new System.Text.RegularExpressions.Regex("\\\"alias\\\":.*?\\\"(.+)\\\"");
+                Regex regexAlias = new Regex("\\\"alias\\\":.*?\\\"(.+)\\\"");
 
-                System.Text.RegularExpressions.MatchCollection matches = regexAlias.Matches(content);
+                MatchCollection matches = regexAlias.Matches(content);
 
-                foreach (System.Text.RegularExpressions.Match match in matches)
+                foreach (Match match in matches)
                 {
                     content = ReplaceAliasTag(content, match.Groups[1].Value, dictLanguage);
-            }
+                }
             }
             catch (Exception ex)
             {
@@ -776,7 +797,7 @@ namespace TeslaLogger
                 return content;
             }
 
-            System.Text.RegularExpressions.Regex regexAlias = new System.Text.RegularExpressions.Regex("\\\"alias\\\":.*?\\\""+ v +"\\\"");
+            Regex regexAlias = new Regex("\\\"alias\\\":.*?\\\""+ v +"\\\"");
             string replace = "\"alias\": \""+dictLanguage[v]+"\"";
 
             return regexAlias.Replace(content, replace);
@@ -790,7 +811,7 @@ namespace TeslaLogger
                 return content;
             }
 
-            System.Text.RegularExpressions.Regex regexAlias = new System.Text.RegularExpressions.Regex("\\\"name\\\":.*?\\\"" + v + "\\\"");
+            Regex regexAlias = new Regex("\\\"name\\\":.*?\\\"" + v + "\\\"");
             string replace = "\"name\": \"" + dictLanguage[v] + "\"";
 
             return regexAlias.Replace(content, replace);
@@ -804,7 +825,7 @@ namespace TeslaLogger
                 return content;
             }
 
-            System.Text.RegularExpressions.Regex regexAlias = new System.Text.RegularExpressions.Regex("\\\"title\\\":.*?\\\"" + v + "\\\"");
+            Regex regexAlias = new Regex("\\\"title\\\":.*?\\\"" + v + "\\\"");
             string replace = "\"title\": \"" + dictLanguage[v] + "\"";
 
             return regexAlias.Replace(content, replace);
@@ -836,7 +857,7 @@ namespace TeslaLogger
             else
             {
                 return content.Replace(v, dictLanguage[v]);
-        }
+            }
         }
 
         public static string Exec_mono(string cmd, string param, bool logging = true, bool stderr2stdout = false)
@@ -885,8 +906,8 @@ namespace TeslaLogger
                         }
                         else
                         {
-                        Logfile.Log("Error: " + line);
-                }
+                            Logfile.Log("Error: " + line);
+                        }
                     }
 
                     sb.AppendLine(line);
@@ -940,7 +961,7 @@ namespace TeslaLogger
                     Logfile.Log(" *** Check new Version ***");
 
                     string online_version = WebHelper.GetOnlineTeslaloggerVersion();
-                    if (String.IsNullOrEmpty(online_version))
+                    if (string.IsNullOrEmpty(online_version))
                     {
                         // recheck in 10 Minutes
                         Logfile.Log("Empty Version String - recheck in 10 minutes");
@@ -979,7 +1000,7 @@ namespace TeslaLogger
                         else
                         {
                             Logfile.Log("Rebooting");
-                            UpdateTeslalogger.Exec_mono("reboot", "");
+                            Exec_mono("reboot", "");
                         }
                     }
 
@@ -995,7 +1016,9 @@ namespace TeslaLogger
         public static bool UpdateNeeded(string currentVersion, string online_version, Tools.UpdateType updateType)
         {
             if (updateType == Tools.UpdateType.none)
+            {
                 return false;
+            }
 
             if (updateType == Tools.UpdateType.stable || updateType == Tools.UpdateType.all)
             {
@@ -1005,10 +1028,14 @@ namespace TeslaLogger
                 if (cv.CompareTo(ov) < 0)
                 {
                     if (updateType == Tools.UpdateType.all)
+                    {
                         return true;
+                    }
                     
                     if (ov.Build == 0 && ov.Revision == 0)
+                    {
                         return true;
+                }
                 }
 
                 return false;

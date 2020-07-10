@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Text;
 
 namespace TeslaLogger
 {
@@ -62,13 +63,15 @@ namespace TeslaLogger
         public double? SMTBatteryPower = null;
 
         public string current_json = "";
-        DateTime lastJSONwrite = DateTime.MinValue;
+        private DateTime lastJSONwrite = DateTime.MinValue;
 
         public void CheckCreateCurrentJSON()
         {
             TimeSpan ts = DateTime.UtcNow - lastJSONwrite;
             if (ts.TotalMinutes > 5)
+            {
                 CreateCurrentJSON();
+            }
         }
 
         public void CreateCurrentJSON()
@@ -137,14 +140,14 @@ namespace TeslaLogger
                    { "charger_power", current_charger_power},
                    { "car_version", current_car_version },
                    { "trip_start", current_trip_start.ToString("t",Tools.ciDeDE) },
-                   { "trip_start_dt", current_trip_start.ToString("s") },
+                   { "trip_start_dt", current_trip_start.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") },
                    { "trip_max_speed", current_trip_max_speed },
                    { "trip_max_power", current_trip_max_power },
                    { "trip_duration_sec", duration },
                    { "trip_kwh", trip_kwh },
                    { "trip_avg_kwh", trip_avg_wh },
                    { "trip_distance", distance },
-                   { "ts", DateTime.Now.ToString("s")},
+                   { "ts", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")},
                    { "latitude", latitude },
                    { "longitude", longitude },
                    { "charge_limit_soc", charge_limit_soc},
@@ -170,6 +173,7 @@ namespace TeslaLogger
                 current_json = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(values);
 
                 FileManager.WriteCurrentJsonFile(current_json);
+                //FileManager.WriteCurrentJsonFile(new Tools.JsonFormatter(current_json).Format());
             }
             catch (Exception ex)
             {

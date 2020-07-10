@@ -15,7 +15,9 @@ namespace TeslaLogger
         {
             OpenChargePort,
             HighFrequencyLogging,
-            EnableSentryMode
+            EnableSentryMode,
+            SetChargeLimit,
+            ClimateOff
         }
 
         public string name;
@@ -23,6 +25,31 @@ namespace TeslaLogger
         public double lng;
         public int radius;
         public Dictionary<SpecialFlags, string> specialFlags;
+        private bool isHome = false;
+        private bool isWork = false;
+
+        public bool IsHome
+        {
+            get => isHome; set
+            {
+                isHome = value;
+                if (value)
+                {
+                    isWork = false;
+                }
+            }
+        }
+        public bool IsWork
+        {
+            get => isWork; set
+            {
+                isWork = value;
+                if (value)
+                {
+                    isHome = false;
+                }
+            }
+        }
 
         public Address(string name, double lat, double lng, int radius)
         {
@@ -50,11 +77,13 @@ namespace TeslaLogger
         private FileSystemWatcher fsw;
 
         public bool RacingMode = false;
+        bool _RacingMode = false;
 
         private static int FSWCounter = 0;
 
-        public Geofence()
+        public Geofence(bool RacingMode)
         {
+            _RacingMode = RacingMode;
             Init();
             
             if (fsw == null)
@@ -77,7 +106,7 @@ namespace TeslaLogger
         {
             List<Address> list = new List<Address>();
 
-            if (File.Exists(FileManager.GetFilePath(TLFilename.GeofenceRacingFilename)) && ApplicationSettings.Default.RacingMode)
+            if (File.Exists(FileManager.GetFilePath(TLFilename.GeofenceRacingFilename)) && _RacingMode)
             {
                 ReadGeofenceFile(list, FileManager.GetFilePath(TLFilename.GeofenceRacingFilename));
                 RacingMode = true;
@@ -155,9 +184,9 @@ namespace TeslaLogger
 
                             int radius = 50;
 
-                            string[] args = line.Split(',');
+                            string[] args = Regex.Split(line, ",");
 
-                            if (args.Length > 3)
+                            if (args.Length > 3 && args[3] != null && args[3].Length > 0)
                             {
                                 int.TryParse(args[3], out radius);
                             }
@@ -167,7 +196,7 @@ namespace TeslaLogger
                                 double.Parse(args[2].Trim(), Tools.ciEnUS.NumberFormat),
                                 radius);
 
-                            if (args.Length > 4)
+                            if (args.Length > 4 && args[4] != null)
                             {
                                 string flags = args[4];
                                 Logfile.Log(args[0].Trim() + ": special flags found: " + flags);
@@ -197,27 +226,21 @@ namespace TeslaLogger
                             uniqueNameList.Add(addr.name);
                         }
                     }
-                    if (uniqueNameList.Count > 0)
+                    foreach (Address addr in list)
                     {
-                        foreach (Address addr in list)
+                        bool keepAddr = true;
+                        foreach (string localName in uniqueNameList)
                         {
-                            bool keepAddr = true;
-                            foreach (string localName in uniqueNameList)
+                            if (addr != null && addr.name != null && localName != null && localName.Equals(addr.name))
                             {
-                                if (addr != null && addr.name != null)
-                                {
-                                    if (localName.Equals(addr.name))
-                                    {
-                                        Logfile.Log("replace " + addr.name + " with value(s) from " + filename);
-                                        keepAddr = false;
-                                        break;
-                                    }
-                                }
+                                Logfile.Log("replace " + addr.name + " with value(s) from " + filename);
+                                keepAddr = false;
+                                break;
                             }
-                            if (keepAddr)
-                            {
-                                localList.Add(addr);
-                            }
+                        }
+                        if (keepAddr)
+                        {
+                            localList.Add(addr);
                         }
                     }
                     list.Clear();
@@ -246,6 +269,22 @@ namespace TeslaLogger
                 {
                     SpecialFlag_ESM(_addr, flag);
                 }
+                else if (flag.Equals("home"))
+                {
+                    _addr.IsHome = true;
+                }
+                else if (flag.Equals("work"))
+                {
+                    _addr.IsWork = true;
+                }
+                else if (flag.StartsWith("scl"))
+                {
+                    SpecialFlag_SCL(_addr, flag);
+                }
+                else if (flag.StartsWith("cof"))
+                {
+                    SpecialFlag_COF(_addr, flag);
+                }
             }
         }
 
@@ -255,12 +294,42 @@ namespace TeslaLogger
             Match m = Regex.Match(_flag, pattern);
             if (m.Success && m.Groups.Count == 3 && m.Groups[1].Captures.Count == 1 && m.Groups[2].Captures.Count == 1)
             {
-                _addr.specialFlags.Add(Address.SpecialFlags.EnableSentryMode, m.Groups[0].Captures[1].ToString() + "->" + m.Groups[0].Captures[2].ToString());
+                _addr.specialFlags.Add(Address.SpecialFlags.EnableSentryMode, m.Groups[1].Captures[0].ToString() + "->" + m.Groups[2].Captures[0].ToString());
             }
             else
             {
                 // default
                 _addr.specialFlags.Add(Address.SpecialFlags.EnableSentryMode, "RND->P");
+            }
+        }
+
+        private static void SpecialFlag_COF(Address _addr, string _flag)
+        {
+            string pattern = "cof:([PRND]+)->([PRND]+)";
+            Match m = Regex.Match(_flag, pattern);
+            if (m.Success && m.Groups.Count == 3 && m.Groups[1].Captures.Count == 1 && m.Groups[2].Captures.Count == 1)
+            {
+                _addr.specialFlags.Add(Address.SpecialFlags.ClimateOff, m.Groups[1].Captures[0].ToString() + "->" + m.Groups[2].Captures[0].ToString());
+            }
+            else
+            {
+                // default
+                _addr.specialFlags.Add(Address.SpecialFlags.ClimateOff, "RND->P");
+            }
+        }
+
+        private static void SpecialFlag_SCL(Address _addr, string _flag)
+        {
+            string pattern = "scl:([0-9]+)";
+            Match m = Regex.Match(_flag, pattern);
+            if (m.Success && m.Groups.Count == 2 && m.Groups[1].Captures.Count == 1)
+            {
+                _addr.specialFlags.Add(Address.SpecialFlags.SetChargeLimit, m.Groups[1].Captures[0].ToString());
+            }
+            else
+            {
+                // default
+                _addr.specialFlags.Add(Address.SpecialFlags.SetChargeLimit, "80");
             }
         }
 

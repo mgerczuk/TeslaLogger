@@ -6,7 +6,6 @@ using System.Data.SqlClient;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.Caching;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -45,14 +44,14 @@ namespace TeslaLogger
         public ScanMyTesla scanMyTesla;
         public TeslaCanSync teslaCanSync;
         private string _lastShift_State = "P";
-        readonly static Regex regexAssemblyVersion = new Regex("\n\\[assembly: AssemblyVersion\\(\"([0-9\\.]+)\"", RegexOptions.Compiled);
+        private static readonly Regex regexAssemblyVersion = new Regex("\n\\[assembly: AssemblyVersion\\(\"([0-9\\.]+)\"", RegexOptions.Compiled);
 
         static WebHelper()
         {
             //Damit Mono keine Zertifikatfehler wirft :-(
             ServicePointManager.ServerCertificateValidationCallback += (p1, p2, p3, p4) => true;
 
-            geofence = new Geofence();
+            geofence = new Geofence(ApplicationSettings.Default.RacingMode);
         }
 
         public WebHelper()
@@ -60,7 +59,7 @@ namespace TeslaLogger
             carSettings = CarSettings.ReadSettings();
         }
 
-        private string GetLastShiftState()
+        internal string GetLastShiftState()
         {
             return _lastShift_State;
         }
@@ -222,9 +221,13 @@ namespace TeslaLogger
                     }
 
                     if (r2["charging_state"] == null)
+                    {
                         Logfile.Log("charging_state = null");
+                    }
                     else if (resultContent != null && resultContent.Contains("vehicle unavailable"))
+                    {
                         Logfile.Log("charging_state: vehicle unavailable");
+                    }
 
                     Thread.Sleep(10000);
 
@@ -339,7 +342,7 @@ namespace TeslaLogger
                 if (charging_state == "Charging")
                 {
                     lastCharging_State = charging_state;
-                    DBHelper.InsertCharging(timestamp, battery_level, charge_energy_added, charger_power, (double)ideal_battery_range, charger_voltage, charger_phases, charger_actual_current, outside_temp.Result, false, charger_pilot_current, charge_current_request);
+                    DBHelper.InsertCharging(timestamp, battery_level, charge_energy_added, charger_power, (double)ideal_battery_range, charger_voltage, charger_phases, charger_actual_current, outside_temp.Result, Program.IsHighFrequenceLoggingEnabled(true) ? true : false, charger_pilot_current, charge_current_request);
                     return true;
                 }
                 else if (charging_state == "Complete")
@@ -501,7 +504,10 @@ namespace TeslaLogger
             string resultContent = "";
             try
             {
-                HttpClient client = new HttpClient();
+                HttpClient client = new HttpClient
+                {
+                    Timeout = TimeSpan.FromSeconds(11)
+                };
                 client.DefaultRequestHeaders.Add("User-Agent", "C# App");
                 client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
 
@@ -723,6 +729,15 @@ namespace TeslaLogger
                     int maxRange = DBHelper.GetAvgMaxRage();
                     if (maxRange > 500)
                     {
+                        if (double.TryParse(carSettings.DB_Wh_TR, System.Globalization.NumberStyles.Any, Tools.ciEnUS, out double wh))
+                        {
+                            if (wh >= 0.174 && wh <= 0.181)
+                            {
+                                WriteCarSettings("0.178", "S Raven LR P");
+                                return;
+                            }
+                        }
+
                         WriteCarSettings("0.169", "S Raven LR");
                     }
                     else
@@ -1818,8 +1833,7 @@ FROM
 
         private async Task<double?> GetOutsideTempAsync()
         {
-            string cacheKey = "GetOutsideTempAsync";
-            object cacheValue = MemoryCache.Default.Get(cacheKey);
+            object cacheValue = MemoryCache.Default.Get(Program.TLMemCacheKey.GetOutsideTempAsync.ToString());
             if (cacheValue != null)
             {
                 return (double)cacheValue;
@@ -1829,6 +1843,13 @@ FROM
             try
             {
                 resultContent = await GetCommand("climate_state");
+
+                if (resultContent == null || resultContent.Length == 0 || resultContent == "NULL")
+                {
+                    Logfile.Log("GetOutsideTempAsync: NULL");
+                    return null;
+                }
+
                 Tools.SetThread_enUS();
                 object jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
                 object r1 = ((Dictionary<string, object>)jsonResult)["response"];
@@ -1892,7 +1913,7 @@ FROM
                     Thread.Sleep(5000);
                 }
 
-                MemoryCache.Default.Add(cacheKey, (double)outside_temp, DateTime.Now.AddMinutes(1));
+                MemoryCache.Default.Add(Program.TLMemCacheKey.GetOutsideTempAsync.ToString(), (double)outside_temp, DateTime.Now.AddMinutes(1));
                 return (double)outside_temp;
             }
             catch (Exception ex)
@@ -1915,7 +1936,10 @@ FROM
             string resultContent = "";
             try
             {
-                HttpClient client = new HttpClient();
+                HttpClient client = new HttpClient
+                {
+                    Timeout = TimeSpan.FromSeconds(11)
+                };
                 client.DefaultRequestHeaders.Add("User-Agent", "C# App");
                 client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
 
@@ -1936,7 +1960,7 @@ FROM
             return "NULL";
         }
 
-        public async Task<string> PostCommand(string cmd, string data)
+        public async Task<string> PostCommand(string cmd, string data, bool _json = false)
         {
             Logfile.Log("PostCommand: " + cmd + " - " + data);
 
@@ -1946,10 +1970,19 @@ FROM
                 HttpClient client = new HttpClient();
                 client.DefaultRequestHeaders.Add("User-Agent", "C# App");
                 client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
+                //if (_json)
+                //{
+                //    client.DefaultRequestHeaders.TryAddWithoutValidation("contenttype", "application/json");
+                //}
 
                 string url = apiaddress + "api/1/vehicles/" + Tesla_id + "/" + cmd;
 
                 StringContent queryString = data != null ? new StringContent(data) : null;
+                
+                if (_json && data != null)
+                {
+                    queryString = new StringContent(data, Encoding.UTF8, "application/json");
+                }
                 
                 DateTime start = DateTime.UtcNow;
                 HttpResponseMessage result = await client.PostAsync(url, data != null ? queryString : null);
@@ -2198,6 +2231,8 @@ FROM
             }
             catch (Exception ex)
             {
+                Logfile.Log("TaskerWakeupToken Exception: " + ex.Message);
+                Logfile.ExceptionWriter(ex, "TaskerWakeupToken Exception");
                 Logfile.Log("TaskerWakeupToken Exception: " + ex.ToString());
             }
 
@@ -2215,7 +2250,7 @@ FROM
             if (ExistsWakeupFile)
             {
                 Logfile.Log("Delete Wakeup file");
-                System.IO.File.Delete(FileManager.GetFilePath(TLFilename.WakeupFilename));
+                System.IO.File.Delete(FileManager.GetWakeupTeslaloggerPath);
                 ret = true;
             }
 
@@ -2227,8 +2262,10 @@ FROM
             try
             {
                 string contents;
-                using (var wc = new System.Net.WebClient())
+                using (WebClient wc = new WebClient())
+                {
                     contents = wc.DownloadString("https://gitlab.fritz.box/root/teslalogger/raw/master2/TeslaLogger/Properties/AssemblyInfo.cs");
+                }
 
                 Match m = regexAssemblyVersion.Match(contents);
                 string version = m.Groups[1].Value;
@@ -2242,6 +2279,6 @@ FROM
             return "";
         }
 
-        public bool ExistsWakeupFile => System.IO.File.Exists(FileManager.GetFilePath(TLFilename.WakeupFilename)) || TaskerWakeupfile();
+        public bool ExistsWakeupFile => System.IO.File.Exists(FileManager.GetWakeupTeslaloggerPath) || TaskerWakeupfile();
     }
 }

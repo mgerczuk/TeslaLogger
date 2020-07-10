@@ -26,6 +26,11 @@ namespace TeslaLogger
             GoSleep
         }
 
+        public enum TLMemCacheKey
+        {
+            GetOutsideTempAsync
+        }
+
         // encapsulate state
         private static TeslaState _currentState = TeslaState.Start;
 
@@ -35,13 +40,13 @@ namespace TeslaLogger
         private static DateTime lastCarUsed = DateTime.Now;
         private static DateTime lastOdometerChanged = DateTime.Now;
         private static DateTime lastTryTokenRefresh = DateTime.Now;
+        private static string lastSetChargeLimitAddressName = string.Empty;
         private static bool goSleepWithWakeup = false;
         private static double odometerLastTrip;
         private static bool highFrequencyLogging = false;
         private static int highFrequencyLoggingTicks = 0;
         private static int highFrequencyLoggingTicksLimit = 100;
         private static DateTime highFrequencyLoggingUntil = DateTime.Now;
-
         private enum HFLMode
         {
             Ticks,
@@ -111,10 +116,12 @@ namespace TeslaLogger
                                 break;
 
                             case TeslaState.Park:
+                                // this state is currently unused
                                 Thread.Sleep(5000);
                                 break;
 
                             case TeslaState.WaitForSleep:
+                                // this state is currently unused
                                 Thread.Sleep(5000);
                                 break;
 
@@ -128,19 +135,19 @@ namespace TeslaLogger
                     {
                         Logfile.ExceptionWriter(ex, "main loop");
                     }
-                    }
+                }
 
             }
             catch (Exception ex)
-                    {
+            {
                 Logfile.Log(ex.Message);
                 Logfile.ExceptionWriter(ex, "main loop");
-                    }
+            }
             finally
-                    {
+            {
                 Logfile.Log("Teslalogger Stopped!");
-                    }
-                }
+            }
+        }
 
         private static void InitDebugLogging()
         {
@@ -151,8 +158,8 @@ namespace TeslaLogger
             }
         }
 
-        private static bool IsHighFrequenceLoggingEnabled(bool justcheck = false)
-            {
+        public static bool IsHighFrequenceLoggingEnabled(bool justcheck = false)
+        {
             if (highFrequencyLogging)
             {
                 switch (highFrequencyLoggingMode)
@@ -163,14 +170,14 @@ namespace TeslaLogger
                             if (!justcheck)
                             {
                                 highFrequencyLoggingTicks++;
-            }
+                            }
                             return true;
                         }
                         break;
                     case HFLMode.Time:
                         TimeSpan ts = highFrequencyLoggingUntil - DateTime.Now;
                         if (ts.TotalMilliseconds > 0)
-            {
+                        {
                             return true;
                         } 
                         break;
@@ -214,7 +221,7 @@ namespace TeslaLogger
                 {
                     round++;
                     Thread.Sleep(1000);
-                    if (File.Exists(FileManager.GetFilePath(TLFilename.WakeupFilename)))
+                    if (File.Exists(FileManager.GetWakeupTeslaloggerPath))
                     {
 
                         if (webhelper.DeleteWakeupFile())
@@ -324,6 +331,8 @@ namespace TeslaLogger
             }
             else
             {
+                webhelper.IsDriving(true); // insert a last position. Maybe the last one is too old
+
                 DriveFinished();
 
                 ShareData sd = new ShareData(webhelper.TaskerHash);
@@ -368,7 +377,7 @@ namespace TeslaLogger
                     lastCarUsed = DateTime.Now;
                     if (IsHighFrequenceLoggingEnabled())
                     {
-                        Logfile.Log("HighFrequenceLogging ...");
+                        Logfile.Log("HighFrequencyLogging ...");
                     }
                     else
                     {
@@ -388,7 +397,8 @@ namespace TeslaLogger
         private static void HandleState_Online()
         {
             {
-                if (webhelper.IsDriving() && DBHelper.currentJSON.current_speed > 0)
+                //if (webhelper.IsDriving() && DBHelper.currentJSON.current_speed > 0)
+                if (webhelper.IsDriving() && (webhelper.GetLastShiftState().Equals("R") || webhelper.GetLastShiftState().Equals("N") || webhelper.GetLastShiftState().Equals("D")))
                 {
                     webhelper.ResetLastChargingState();
                     lastCarUsed = DateTime.Now;
@@ -414,9 +424,9 @@ namespace TeslaLogger
                         }
                     }
 
-                    SetCurrentState(TeslaState.Drive);
                     webhelper.StartStreamThread(); // für altitude
                     DBHelper.StartDriveState();
+                    SetCurrentState(TeslaState.Drive);
 
                     Task.Run(() => webhelper.DeleteWakeupFile());
                     return;
@@ -699,6 +709,7 @@ namespace TeslaLogger
         {
             Tools.SetThread_enUS();
             UpdateTeslalogger.Chmod("nohup.out", 666, false);
+            UpdateTeslalogger.Chmod("backup.sh", 777, false);
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Ssl3 | SecurityProtocolType.Tls | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
 
             Logfile.Log("TeslaLogger Version: " + Assembly.GetExecutingAssembly().GetName().Version + " (TeslaCAN)");
@@ -963,6 +974,11 @@ namespace TeslaLogger
                                 break;
                             case Address.SpecialFlags.EnableSentryMode:
                                 break;
+                            case Address.SpecialFlags.SetChargeLimit:
+                                HandleSpecialFlag_SetChargeLimit(addr, flag.Value);
+                                break;
+                            case Address.SpecialFlags.ClimateOff:
+                                break;
                             default:
                                 Logfile.Log("handleShiftStateChange unhandled special flag " + flag.ToString());
                                 break;
@@ -1000,6 +1016,11 @@ namespace TeslaLogger
                         case Address.SpecialFlags.EnableSentryMode:
                             HandleSpeciaFlag_EnableSentryMode(flag.Value, _oldState, _newState);
                             break;
+                        case Address.SpecialFlags.SetChargeLimit:
+                            break;
+                        case Address.SpecialFlags.ClimateOff:
+                            HandleSpeciaFlag_ClimateOff(flag.Value, _oldState, _newState);
+                            break;
                         default:
                             Logfile.Log("handleShiftStateChange unhandled special flag " + flag.ToString());
                             break;
@@ -1016,6 +1037,28 @@ namespace TeslaLogger
             }*/
         }
 
+        private static void HandleSpecialFlag_SetChargeLimit(Address _addr, string _flagconfig)
+        {
+            string pattern = "([0-9]+)";
+            Match m = Regex.Match(_flagconfig, pattern);
+            if (m.Success && m.Groups.Count == 2 && m.Groups[1].Captures.Count == 1)
+            {
+                if (m.Groups[1].Captures[0] != null && int.TryParse(m.Groups[1].Captures[0].ToString(), out int chargelimit))
+                {
+                    if (!lastSetChargeLimitAddressName.Equals(_addr.name))
+                    {
+                        Task.Factory.StartNew(() =>
+                        {
+                            Logfile.Log($"SetChargeLimit to {chargelimit} ...");
+                            string result = webhelper.PostCommand("command/set_charge_limit", "{\"percent\":" + chargelimit + "}", true).Result;
+                            Logfile.Log("set_charge_limit(): " + result);
+                            lastSetChargeLimitAddressName = _addr.name;
+                        });
+                    }
+                }
+            }
+        }
+
         private static void HandleSpecialFlag_HighFrequencyLogging(string _flagconfig)
         {
             string pattern = "([0-9]+)([a-z])";
@@ -1028,16 +1071,16 @@ namespace TeslaLogger
                     switch (m.Groups[2].Captures[0].ToString())
                     {
                         case "s":
-                            until.AddSeconds(duration);
+                            until = until.AddSeconds(duration);
                             break;
                         case "m":
-                            until.AddMinutes(duration);
+                            until = until.AddMinutes(duration);
                             break;
                         case "h":
-                            until.AddHours(duration);
+                            until = until.AddHours(duration);
                             break;
                         case "d":
-                            until.AddDays(duration);
+                            until = until.AddDays(duration);
                             break;
                         default:
                             Logfile.Log("HandleSpecialFlagHighFrequencyLogging unhandled time parameter: " + m.Groups[1].Captures[0].ToString() + m.Groups[2].Captures[0].ToString());
@@ -1066,9 +1109,12 @@ namespace TeslaLogger
             Match m = Regex.Match(_flagconfig, pattern);
             if (m.Success && m.Groups.Count == 3 && m.Groups[1].Captures.Count == 1 && m.Groups[2].Captures.Count == 1 && m.Groups[1].Captures[0].ToString().Contains(_oldState) && m.Groups[2].Captures[0].ToString().Contains(_newState))
             {
+                Task.Factory.StartNew(() =>
+                {
                 Logfile.Log("OpenChargePort ...");
                 string result = webhelper.PostCommand("command/charge_port_door_open", null).Result;
-                Logfile.Log("openChargePort(): " + result);
+                    Logfile.Log("charge_port_door_open(): " + result);
+                });
             }
         }
 
@@ -1078,9 +1124,27 @@ namespace TeslaLogger
             Match m = Regex.Match(_flagconfig, pattern);
             if (m.Success && m.Groups.Count == 3 && m.Groups[1].Captures.Count == 1 && m.Groups[2].Captures.Count == 1 && m.Groups[1].Captures[0].ToString().Contains(_oldState) && m.Groups[2].Captures[0].ToString().Contains(_newState))
             {
+                Task.Factory.StartNew(() =>
+                {
                 Logfile.Log("EnableSentryMode ...");
-                string result = webhelper.PostCommand("command/set_sentry_mode?on=true", null).Result;
-                Logfile.Log("EnableSentryMode(): " + result);
+                    string result = webhelper.PostCommand("command/set_sentry_mode", "{\"on\":true}", true).Result;
+                    Logfile.Log("set_sentry_mode(): " + result);
+                });
+            }
+        }
+
+        private static void HandleSpeciaFlag_ClimateOff(string _flagconfig, string _oldState, string _newState)
+        {
+            string pattern = "([PRND]+)->([PRND]+)";
+            Match m = Regex.Match(_flagconfig, pattern);
+            if (m.Success && m.Groups.Count == 3 && m.Groups[1].Captures.Count == 1 && m.Groups[2].Captures.Count == 1 && m.Groups[1].Captures[0].ToString().Contains(_oldState) && m.Groups[2].Captures[0].ToString().Contains(_newState))
+            {
+                Task.Factory.StartNew(() =>
+                {
+                    Logfile.Log("ClimateOff ...");
+                    string result = webhelper.PostCommand("command/auto_conditioning_stop", null).Result;
+                    Logfile.Log("auto_conditioning_stop(): " + result);
+                });
             }
         }
     }

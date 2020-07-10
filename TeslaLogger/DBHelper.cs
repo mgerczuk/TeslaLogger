@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Net;
 using System.Runtime.Caching;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
@@ -24,6 +25,7 @@ namespace TeslaLogger
 
         public static void EnableMothership()
         {
+            GetMothershipCommandsFromDB();
             mothershipEnabled = true;
         }
 
@@ -240,6 +242,22 @@ namespace TeslaLogger
             {
                 Logfile.Log(ex.Message);
             }
+        }
+
+        internal static bool IndexExists(string index, string table)
+        {
+            using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+            {
+                con.Open();
+                MySqlCommand cmd = new MySqlCommand("SELECT * FROM information_schema.statistics where table_name = '" + table + "' and INDEX_NAME ='" + index +"'", con);
+                MySqlDataReader dr = cmd.ExecuteReader();
+                if (dr.Read())
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static void UpdateMaxChargerPower(int id, int startChargingID, int endChargingID)
@@ -485,7 +503,10 @@ namespace TeslaLogger
             currentJSON.current_speed = 0;
             currentJSON.current_power = 0;
 
-            UpdateTripElevation(StartPos, MaxPosId);
+            Task.Factory.StartNew(() =>
+              {
+                  UpdateTripElevation(StartPos, MaxPosId);
+              });
         }
 
         public static void UpdateTripElevation(int startPos, int maxPosId)
@@ -519,8 +540,6 @@ namespace TeslaLogger
                     string sql = null;
                     try
                     {
-                        System.Threading.Thread.Sleep(1);
-
                         double latitude = (double)dr[1];
                         double longitude = (double)dr[2];
 
@@ -710,8 +729,6 @@ namespace TeslaLogger
         {
             try
             {
-                System.Threading.Thread.Sleep(5);
-
                 using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
                 {
                     con.Open();
@@ -1611,8 +1628,6 @@ namespace TeslaLogger
         {
             try
             {
-                System.Threading.Thread.Sleep(5);
-
                 using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
                 {
                     con.Open();
