@@ -64,7 +64,7 @@ namespace TeslaLogger
             return _lastShift_State;
         }
 
-        private void SetLastShiftState(string _newState)
+        internal void SetLastShiftState(string _newState)
         {
             if (!_newState.Equals(_lastShift_State))
             {
