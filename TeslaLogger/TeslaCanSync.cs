@@ -12,25 +12,22 @@ namespace TeslaLogger
 {
     public class TeslaCanSync
     {
-        private const int SECONDS = 10;
+        private const int SECONDS = 5;
 
-        private readonly bool run = true;
-        private readonly Thread thread;
         private readonly string token;
 
         public TeslaCanSync(string token)
         {
             this.token = token;
 
-            thread = new Thread(Start);
-            thread.Start();
+            new Thread(Start).Start();
         }
 
         private void Start()
         {
             Logfile.Log("Start refactored TeslaCAN Thread!");
 
-            while (run)
+            while (true)
             {
                 try
                 {
@@ -52,8 +49,12 @@ namespace TeslaLogger
                 }
                 catch (Exception ex)
                 {
-                    Logfile.Log("TeslaCAN: " + ex.Message);
-                    Logfile.WriteException(ex.ToString());
+                    if (!((ex as AggregateException)?.InnerExceptions[0] is HttpRequestException))
+                    {
+                        Logfile.Log("TeslaCAN: " + ex.Message);
+                        Logfile.WriteException(ex.ToString());
+                    }
+
                     Thread.Sleep(20000);
                 }
             }
@@ -61,14 +62,14 @@ namespace TeslaLogger
 
         private async Task<Data> GetTeslaCanData()
         {
-            HttpClient client = new HttpClient();
-            FormUrlEncodedContent content = new FormUrlEncodedContent(new[]
+            var client = new HttpClient();
+            var content = new FormUrlEncodedContent(new[]
             {
                 new KeyValuePair<string, string>("t", token)
             });
 
-            DateTime start = DateTime.UtcNow;
-            HttpResponseMessage result =
+            var start = DateTime.UtcNow;
+            var result =
                 await client.PostAsync("http://teslacan.fritz.box:8080/get_scanmytesla", content);
             var resultContent = await result.Content.ReadAsStringAsync();
 
@@ -76,14 +77,14 @@ namespace TeslaLogger
 
             if (resultContent == "not found") return null;
 
-            string temp = resultContent;
+            var temp = resultContent;
             var i = temp.IndexOf("\r\n");
-            string id = temp.Substring(0, i);
+            var id = temp.Substring(0, i);
 
             temp = temp.Substring(i + 2);
 
             i = temp.IndexOf("\r\n");
-            string date = temp.Substring(0, i);
+            var date = temp.Substring(0, i);
             temp = temp.Substring(i + 2);
 
             dynamic j = new JavaScriptSerializer().DeserializeObject(temp);
@@ -102,18 +103,15 @@ namespace TeslaLogger
             DBHelper.currentJSON.lastScanMyTeslaReceived = data.Timestamp;
             DBHelper.currentJSON.CreateCurrentJSON();
 
-            StringBuilder sb = new StringBuilder();
+            var sb = new StringBuilder();
             sb.Append("INSERT INTO `can` (`datum`, `id`, `val`) VALUES ");
-            bool first = true;
+            var first = true;
 
-            string sqlDate = data.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
+            var sqlDate = data.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
 
-            foreach (KeyValuePair<string, object> line in data.Values)
+            foreach (var line in data.Values)
             {
-                if (line.Value.ToString().Contains("Infinity") || line.Value.ToString().Contains("NaN"))
-                {
-                    continue;
-                }
+                if (line.Value.ToString().Contains("Infinity") || line.Value.ToString().Contains("NaN")) continue;
 
                 switch (line.Key)
                 {
@@ -154,13 +152,9 @@ namespace TeslaLogger
 
 
                 if (first)
-                {
                     first = false;
-                }
                 else
-                {
                     sb.Append(",");
-                }
 
                 sb.Append("('");
                 sb.Append(sqlDate);
@@ -171,26 +165,27 @@ namespace TeslaLogger
                 sb.Append(")");
             }
 
-            using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+            using (var con = new MySqlConnection(DBHelper.DBConnectionstring))
             {
                 con.Open();
-                MySqlCommand cmd = new MySqlCommand(sb.ToString(), con);
+                var cmd = new MySqlCommand(sb.ToString(), con);
                 cmd.ExecuteNonQuery();
 
                 try
                 {
-                    string lastscanmyteslafilepaht = Path.Combine(FileManager.GetExecutingPath(), "LASTSCANMYTESLA");
+                    var lastscanmyteslafilepaht = Path.Combine(FileManager.GetExecutingPath(), "LASTSCANMYTESLA");
                     File.WriteAllText(lastscanmyteslafilepaht, sqlDate);
                 }
                 catch (Exception)
-                { }
+                {
+                }
             }
         }
 
         private class Data
         {
-            public Dictionary<string, object> Values;
             public DateTime Timestamp;
+            public Dictionary<string, object> Values;
         }
     }
 }
