@@ -78,8 +78,8 @@ namespace TeslaLogger
             {
                 var data = new Data
                 {
-                    Timestamp = DateTime.Parse(j["d"]),
-                    Values = (Dictionary<string, object>) j["dict"]
+                    Timestamp = DateTime.Parse(j1["d"]),
+                    Values = (Dictionary<string, object>) j1["dict"]
                 };
                 arr.Add(data);
             }
