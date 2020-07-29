@@ -66,7 +66,7 @@ namespace TeslaLogger
             var client = new HttpClient();
 
             var start = DateTime.UtcNow;
-            var result = await client.GetAsync("http://teslacan.fritz.box:8080/getdata?limit=4");
+            var result = await client.GetAsync("http://teslacan.fritz.box:8080/getdata?limit=12");
             var resultContent = await result.Content.ReadAsStringAsync();
 
             DBHelper.AddMothershipDataToDB("teslacan.fritz.box:8080/getdata", start, (int) result.StatusCode);
