@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading;
@@ -33,16 +34,16 @@ namespace TeslaLogger
                 {
                     var data = GetTeslaCanData().Result;
 
-                    if (data == null)
+                    if (data == null || data.Count == 0)
                     {
                         // car sleeping...
                         Thread.Sleep(20000);
                     }
                     else
                     {
-                        SaveData(data);
+                        foreach (var d in data) SaveData(d);
 
-                        var lag = DateTime.Now - data.Timestamp;
+                        var lag = DateTime.Now - data.Last().Timestamp;
                         if (lag < TimeSpan.FromSeconds(SECONDS))
                             Thread.Sleep((int) (SECONDS - lag.TotalSeconds + 0.5) * 1000);
                     }
@@ -60,42 +61,30 @@ namespace TeslaLogger
             }
         }
 
-        private async Task<Data> GetTeslaCanData()
+        private async Task<IList<Data>> GetTeslaCanData()
         {
             var client = new HttpClient();
-            var content = new FormUrlEncodedContent(new[]
-            {
-                new KeyValuePair<string, string>("t", token)
-            });
 
             var start = DateTime.UtcNow;
-            var result =
-                await client.PostAsync("http://teslacan.fritz.box:8080/get_scanmytesla", content);
+            var result = await client.GetAsync("http://teslacan.fritz.box:8080/getdata?limit=4");
             var resultContent = await result.Content.ReadAsStringAsync();
 
-            DBHelper.AddMothershipDataToDB("teslacan.fritz.box:8080/get_scanmytesla", start, (int) result.StatusCode);
+            DBHelper.AddMothershipDataToDB("teslacan.fritz.box:8080/getdata", start, (int) result.StatusCode);
 
-            if (resultContent == "not found") return null;
+            dynamic j = new JavaScriptSerializer().DeserializeObject(resultContent);
 
-            var temp = resultContent;
-            var i = temp.IndexOf("\r\n");
-            var id = temp.Substring(0, i);
-
-            temp = temp.Substring(i + 2);
-
-            i = temp.IndexOf("\r\n");
-            var date = temp.Substring(0, i);
-            temp = temp.Substring(i + 2);
-
-            dynamic j = new JavaScriptSerializer().DeserializeObject(temp);
-
-            var data = new Data
+            var arr = new List<Data>();
+            foreach (var j1 in j)
             {
-                Timestamp = DateTime.Parse(j["d"]),
-                Values = (Dictionary<string, object>) j["dict"]
-            };
+                var data = new Data
+                {
+                    Timestamp = DateTime.Parse(j["d"]),
+                    Values = (Dictionary<string, object>) j["dict"]
+                };
+                arr.Add(data);
+            }
 
-            return data;
+            return arr;
         }
 
         private static void SaveData(Data data)
