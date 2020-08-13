@@ -163,7 +163,37 @@ namespace TeslaLogger
                     DBHelper.ExecuteSQLQuery("alter table can add index can_ix (id,datum)", 600);
                     Logfile.Log("ALTER TABLE OK");
                 }
-                
+
+                if (!DBHelper.ColumnExists("pos", "battery_range_km"))
+                {
+                    Logfile.Log("ALTER TABLE pos ADD COLUMN battery_range_km DOUBLE NULL");
+                    DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN battery_range_km DOUBLE NULL", 600);
+                }
+
+                if (!DBHelper.ColumnExists("charging", "battery_range_km"))
+                {
+                    Logfile.Log("ALTER TABLE charging ADD COLUMN battery_range_km DOUBLE NULL");
+                    DBHelper.ExecuteSQLQuery("ALTER TABLE charging ADD COLUMN battery_range_km DOUBLE NULL", 600);
+                }
+
+                if (!DBHelper.ColumnExists("chargingstate", "cost_total"))
+                {
+                    Logfile.Log("ALTER TABLE chargingstate ADD Column cost_total");
+                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `chargingstate` 
+                        ADD COLUMN `cost_total` DOUBLE NULL DEFAULT NULL,
+                        ADD COLUMN `cost_currency` VARCHAR(3) NULL DEFAULT NULL,
+                        ADD COLUMN `cost_per_kwh` DOUBLE NULL DEFAULT NULL,
+                        ADD COLUMN `cost_per_session` DOUBLE NULL DEFAULT NULL,
+                        ADD COLUMN `cost_per_minute` DOUBLE NULL DEFAULT NULL,
+                        ADD COLUMN `cost_idle_fee_total` DOUBLE NULL DEFAULT NULL", 600);
+                }
+
+                if (!DBHelper.ColumnExists("chargingstate", "cost_kwh_meter_invoice"))
+                {
+                    Logfile.Log("ALTER TABLE chargingstate ADD Column cost_kwh_meter_invoice");
+                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `chargingstate` 
+                        ADD COLUMN `cost_kwh_meter_invoice` DOUBLE NULL DEFAULT NULL", 600);
+                }
 
                 DBHelper.EnableMothership();
 
@@ -218,7 +248,7 @@ namespace TeslaLogger
 
                     Exec_mono("rm", "-rf /etc/teslalogger/git");
                     Exec_mono("mkdir", "/etc/teslalogger/git");
-                    Exec_mono("mozroots", "--import --sync --machine");
+                    Exec_mono("cert-sync", "/etc/ssl/certs/ca-certificates.crt");
                     for (int x = 1; x < 10; x++)
                     {
                         Logfile.Log("git clone: try " + x);
@@ -386,6 +416,13 @@ namespace TeslaLogger
                 string s = DBViews.Trip;
                 s = s.Replace("0.190052356", wh.carSettings.Wh_TR);
 
+                Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range);
+                if (Range == "RR")
+                {
+                    s = s.Replace("`pos_start`.`ideal_battery_range_km` AS `StartRange`,", "`pos_start`.`battery_range_km` AS `StartRange`,");
+                    s = s.Replace("`pos_end`.`ideal_battery_range_km` AS `EndRange`,", "`pos_end`.`battery_range_km` AS `EndRange`,");
+                }
+
                 File.WriteAllText("view_trip.txt", s);
 
                 DBHelper.ExecuteSQLQuery(s, 300);
@@ -466,7 +503,7 @@ namespace TeslaLogger
             {
                 if (Tools.IsMono())
                 {
-                    Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin);
+                    Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range);
 
                     Dictionary<string, string> dictLanguage = GetLanguageDictionary(language);
 
@@ -502,6 +539,13 @@ namespace TeslaLogger
                         Logfile.Log("Update: " + f);
                         string s = File.ReadAllText(f);
                         s = s.Replace("0.190052356", wh.carSettings.Wh_TR);
+                        s = s.Replace("TASKERTOKEN", wh.TaskerHash);
+
+                        if (Range == "RR")
+                        {
+                            if (!(f.EndsWith("Akku Trips.json") || f.EndsWith("Speed Consumption.json")))
+                                s = s.Replace("ideal_battery_range_km", "battery_range_km");
+                        }
 
                         if (power == "kw")
                         {

@@ -53,9 +53,12 @@ namespace TeslaLogger
             Time
         }
         private static HFLMode highFrequencyLoggingMode = HFLMode.Ticks;
+        private static WebServer webServer;
 
         private static void Main(string[] args)
         {
+            CheckArgs(args);
+
             InitDebugLogging();
 
             CheckNewCredentials();
@@ -146,6 +149,28 @@ namespace TeslaLogger
             finally
             {
                 Logfile.Log("Teslalogger Stopped!");
+            }
+        }
+
+        private static void CheckArgs(string[] args)
+        {
+            if (args.Length > 0)
+            {
+                if (String.Compare(args[0], "setcost", true) == 0)
+                {
+                    DBHelper.SetCost(args);
+                    System.Environment.Exit(0);
+                }
+
+            }
+
+            if (args.Length > 1)
+            {
+                if (String.Compare(args[0], "getchargingstate",true) == 0)
+                {
+                    DBHelper.GetChargingstateStdOut(args);
+                    System.Environment.Exit(0);
+                }
             }
         }
 
@@ -686,6 +711,20 @@ namespace TeslaLogger
             UpdateTeslalogger.UpdateGrafana(webhelper);
 
             DBHelper.currentJSON.current_car_version = DBHelper.GetLastCarVersion();
+
+            try
+            {
+                Thread threadWebserver = new Thread(() =>
+                {
+                    webServer = new WebServer();
+                });
+                threadWebserver.Name = "WebserverThread";
+                threadWebserver.Start();
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
         }
 
         private static void InitStage2()
@@ -710,6 +749,8 @@ namespace TeslaLogger
             Tools.SetThread_enUS();
             UpdateTeslalogger.Chmod("nohup.out", 666, false);
             UpdateTeslalogger.Chmod("backup.sh", 777, false);
+            UpdateTeslalogger.Chmod("TeslaLogger.exe", 755, false);
+
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Ssl3 | SecurityProtocolType.Tls | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
 
             Logfile.Log("TeslaLogger Version: " + Assembly.GetExecutingAssembly().GetName().Version + " (TeslaCAN)");
@@ -1005,6 +1046,7 @@ namespace TeslaLogger
         public static void HandleShiftStateChange(string _oldState, string _newState)
         {
             Logfile.Log("ShiftStateChange: " + _oldState + " -> " + _newState);
+            lastCarUsed = DateTime.Now;
             Address addr = WebHelper.geofence.GetPOI(DBHelper.currentJSON.latitude, DBHelper.currentJSON.longitude, false);
             // process special flags for POI
             if (addr != null && addr.specialFlags != null && addr.specialFlags.Count > 0)

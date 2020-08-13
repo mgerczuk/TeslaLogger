@@ -142,6 +142,69 @@ namespace TeslaLogger
             }
         }
 
+        internal static void SetCost(string[] args)
+        {
+            try
+            {
+                Logfile.Log("SetCost");
+
+
+                string json = System.IO.File.ReadAllText(FileManager.GetSetCostPath);
+                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+
+                using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+                {
+                    con.Open();
+                    MySqlCommand cmd = new MySqlCommand("update chargingstate set cost_total = @cost_total, cost_currency=@cost_currency, cost_per_kwh=@cost_per_kwh, cost_per_session=@cost_per_session, cost_per_minute=@cost_per_minute, cost_idle_fee_total=@cost_idle_fee_total where id= @id", con);
+                    
+                    if (j["cost_total"] == null || j["cost_total"] == "" || j["cost_total"] == "0" || j["cost_total"] == "0.00")
+                        cmd.Parameters.AddWithValue("@cost_total", DBNull.Value);
+                    else
+                        cmd.Parameters.AddWithValue("@cost_total", j["cost_total"]);
+
+                    cmd.Parameters.AddWithValue("@cost_currency", j["cost_currency"]);
+                    cmd.Parameters.AddWithValue("@cost_per_kwh", j["cost_per_kwh"]);
+                    cmd.Parameters.AddWithValue("@cost_per_session", j["cost_per_session"]);
+                    cmd.Parameters.AddWithValue("@cost_per_minute", j["cost_per_minute"]);
+                    cmd.Parameters.AddWithValue("@cost_idle_fee_total", j["cost_idle_fee_total"]);
+                    cmd.Parameters.AddWithValue("@id", j["id"]);
+                    int done = cmd.ExecuteNonQuery();
+
+                    Logfile.Log("SetCost OK: " + done);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+        }
+
+        internal static void GetChargingstateStdOut(string[] args)
+        {
+            try
+            {
+                DataTable dt = new DataTable();
+                MySqlDataAdapter da = new MySqlDataAdapter("SELECT chargingstate.*, lat, lng, address, charging.charge_energy_added as kWh FROM chargingstate join pos on chargingstate.pos = pos.id join charging on chargingstate.EndChargingID = charging.id where chargingstate.id = @id", DBConnectionstring);
+                da.SelectCommand.Parameters.AddWithValue("@id", args[1]);
+                da.Fill(dt);
+
+                if (dt.Rows.Count > 0)
+                {
+                    string json = Tools.DataTableToJSONWithJavaScriptSerializer(dt);
+                    Console.OutputEncoding = Encoding.UTF8;
+                    Console.WriteLine(json);
+                }
+                else
+                {
+                    Console.WriteLine("not found!");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+        }
+
         private static void AddCommandToDB(string command)
         {
             using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
@@ -412,13 +475,18 @@ namespace TeslaLogger
                     }
                     dr.Close();
 
-                    cmd = new MySqlCommand("SELECT ideal_battery_range_km, battery_level, lat, lng FROM pos order by id desc limit 1", con);
+                    cmd = new MySqlCommand("SELECT ideal_battery_range_km, battery_range_km, battery_level, lat, lng FROM pos order by id desc limit 1", con);
                     dr = cmd.ExecuteReader();
                     if (dr.Read())
                     {
                         if (dr["ideal_battery_range_km"] != DBNull.Value)
                         {
                             currentJSON.current_ideal_battery_range_km = Convert.ToDouble(dr["ideal_battery_range_km"]);
+                        }
+
+                        if (dr["battery_range_km"] != DBNull.Value)
+                        {
+                            currentJSON.current_battery_range_km = Convert.ToDouble(dr["battery_range_km"]);
                         }
 
                         if (dr["battery_level"] != DBNull.Value)
@@ -1004,7 +1072,7 @@ namespace TeslaLogger
         }
 
 
-        public static void InsertPos(string timestamp, double latitude, double longitude, int speed, decimal power, double odometer, double ideal_battery_range_km, int battery_level, double? outside_temp, string altitude)
+        public static void InsertPos(string timestamp, double latitude, double longitude, int speed, decimal power, double odometer, double ideal_battery_range_km, double battery_range_km, int battery_level, double? outside_temp, string altitude)
         {
             double? inside_temp = currentJSON.current_inside_temperature;
 
@@ -1012,13 +1080,14 @@ namespace TeslaLogger
             {
                 con.Open();
 
-                MySqlCommand cmd = new MySqlCommand("insert pos (Datum, lat, lng, speed, power, odometer, ideal_battery_range_km, outside_temp, altitude, battery_level, inside_temp, battery_heater, is_preconditioning, sentry_mode) values (@Datum, @lat, @lng, @speed, @power, @odometer, @ideal_battery_range_km, @outside_temp, @altitude, @battery_level, @inside_temp, @battery_heater, @is_preconditioning, @sentry_mode )", con);
+                MySqlCommand cmd = new MySqlCommand("insert pos (Datum, lat, lng, speed, power, odometer, ideal_battery_range_km, battery_range_km, outside_temp, altitude, battery_level, inside_temp, battery_heater, is_preconditioning, sentry_mode) values (@Datum, @lat, @lng, @speed, @power, @odometer, @ideal_battery_range_km, @battery_range_km, @outside_temp, @altitude, @battery_level, @inside_temp, @battery_heater, @is_preconditioning, @sentry_mode )", con);
                 cmd.Parameters.AddWithValue("@Datum", UnixToDateTime(long.Parse(timestamp)).ToString("yyyy-MM-dd HH:mm:ss"));
                 cmd.Parameters.AddWithValue("@lat", latitude.ToString());
                 cmd.Parameters.AddWithValue("@lng", longitude.ToString());
                 cmd.Parameters.AddWithValue("@speed", (int)(speed * 1.60934M));
                 cmd.Parameters.AddWithValue("@power", (int)(power * 1.35962M));
                 cmd.Parameters.AddWithValue("@odometer", odometer.ToString());
+
 
                 if (ideal_battery_range_km == -1)
                 {
@@ -1027,6 +1096,15 @@ namespace TeslaLogger
                 else
                 {
                     cmd.Parameters.AddWithValue("@ideal_battery_range_km", ideal_battery_range_km.ToString());
+                }
+
+                if (battery_range_km == -1)
+                {
+                    cmd.Parameters.AddWithValue("@battery_range_km", DBNull.Value);
+                }
+                else
+                {
+                    cmd.Parameters.AddWithValue("@battery_range_km", battery_range_km.ToString());
                 }
 
                 if (outside_temp == null)
@@ -1086,6 +1164,11 @@ namespace TeslaLogger
                         currentJSON.current_ideal_battery_range_km = ideal_battery_range_km;
                     }
 
+                    if (battery_range_km >= 0)
+                    {
+                        currentJSON.current_battery_range_km = battery_range_km;
+                    }
+
                     if (currentJSON.current_trip_km_start == 0)
                     {
                         currentJSON.current_trip_km_start = odometer;
@@ -1108,7 +1191,7 @@ namespace TeslaLogger
         private static DateTime lastChargingInsert = DateTime.Today;
 
 
-        internal static void InsertCharging(string timestamp, string battery_level, string charge_energy_added, string charger_power, double ideal_battery_range, string charger_voltage, string charger_phases, string charger_actual_current, double? outside_temp, bool forceinsert, string charger_pilot_current, string charge_current_request)
+        internal static void InsertCharging(string timestamp, string battery_level, string charge_energy_added, string charger_power, double ideal_battery_range, double battery_range, string charger_voltage, string charger_phases, string charger_actual_current, double? outside_temp, bool forceinsert, string charger_pilot_current, string charge_current_request)
         {
             Tools.SetThread_enUS();
 
@@ -1117,7 +1200,8 @@ namespace TeslaLogger
                 charger_phases = "1";
             }
 
-            double kmRange = ideal_battery_range / (double)0.62137;
+            double kmIdeal_Battery_Range = ideal_battery_range / (double)0.62137;
+            double kmBattery_Range = battery_range / (double)0.62137;
 
             double powerkW = Convert.ToDouble(charger_power);
             double waitbetween2pointsdb = 1000.0 / powerkW;
@@ -1131,12 +1215,13 @@ namespace TeslaLogger
                 using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
                 {
                     con.Open();
-                    MySqlCommand cmd = new MySqlCommand("insert charging (Datum, battery_level, charge_energy_added, charger_power, ideal_battery_range_km, charger_voltage, charger_phases, charger_actual_current, outside_temp, charger_pilot_current, charge_current_request, battery_heater) values (@Datum, @battery_level, @charge_energy_added, @charger_power, @ideal_battery_range_km, @charger_voltage, @charger_phases, @charger_actual_current, @outside_temp, @charger_pilot_current, @charge_current_request, @battery_heater)", con);
+                    MySqlCommand cmd = new MySqlCommand("insert charging (Datum, battery_level, charge_energy_added, charger_power, ideal_battery_range_km, battery_range_km, charger_voltage, charger_phases, charger_actual_current, outside_temp, charger_pilot_current, charge_current_request, battery_heater) values (@Datum, @battery_level, @charge_energy_added, @charger_power, @ideal_battery_range_km, @battery_range_km, @charger_voltage, @charger_phases, @charger_actual_current, @outside_temp, @charger_pilot_current, @charge_current_request, @battery_heater)", con);
                     cmd.Parameters.AddWithValue("@Datum", UnixToDateTime(long.Parse(timestamp)).ToString("yyyy-MM-dd HH:mm:ss"));
                     cmd.Parameters.AddWithValue("@battery_level", battery_level);
                     cmd.Parameters.AddWithValue("@charge_energy_added", charge_energy_added);
                     cmd.Parameters.AddWithValue("@charger_power", charger_power);
-                    cmd.Parameters.AddWithValue("@ideal_battery_range_km", kmRange.ToString());
+                    cmd.Parameters.AddWithValue("@ideal_battery_range_km", kmIdeal_Battery_Range.ToString());
+                    cmd.Parameters.AddWithValue("@battery_range_km", kmBattery_Range.ToString());
                     cmd.Parameters.AddWithValue("@charger_voltage", int.Parse(charger_voltage));
                     cmd.Parameters.AddWithValue("@charger_phases", charger_phases);
                     cmd.Parameters.AddWithValue("@charger_actual_current", charger_actual_current);
@@ -1182,9 +1267,14 @@ namespace TeslaLogger
 
                 currentJSON.current_charge_energy_added = Convert.ToDouble(charge_energy_added);
                 currentJSON.current_charger_power = Convert.ToInt32(charger_power);
-                if (kmRange >= 0)
+                if (kmIdeal_Battery_Range >= 0)
                 {
-                    currentJSON.current_ideal_battery_range_km = kmRange;
+                    currentJSON.current_ideal_battery_range_km = kmIdeal_Battery_Range;
+                }
+
+                if (kmBattery_Range >= 0)
+                {
+                    currentJSON.current_battery_range_km = kmBattery_Range;
                 }
 
                 currentJSON.current_charger_voltage = int.Parse(charger_voltage);
@@ -1410,7 +1500,9 @@ namespace TeslaLogger
 
                         if (old_odometer != odometer)
                         {
-                            CombineChargingifNecessary(chargingstate_id, odometer, logging);
+                            double lastCharging_start_charge_energy_added = Convert.ToDouble(dr["start_charge_energy_added"]);
+
+                            CombineChargingifNecessary(chargingstate_id, odometer, logging, lastCharging_start_charge_energy_added);
                             old_odometer = odometer;
                         }
                     }
@@ -1423,7 +1515,7 @@ namespace TeslaLogger
             }
         }
 
-        private static void CombineChargingifNecessary(int chargingstate_id, double odometer, bool logging)
+        private static void CombineChargingifNecessary(int chargingstate_id, double odometer, bool logging, double lastCharging_start_charge_energy_added)
         { 
             if (logging)
             {
@@ -1461,17 +1553,23 @@ namespace TeslaLogger
                     newStartdate = (DateTime)dr["StartDate"];
                     newStartChargingID = (int)dr["StartChargingID"];
 
-                    DeleteChargingstate(newId);
-                    UpdateChargingstate(chargingstate_id, newStartdate, newStartChargingID);
+                    double start_charge_energy_added = Convert.ToDouble(dr["start_charge_energy_added"]);
+                    double charge_energy_added = Convert.ToDouble(dr["charge_energy_added"]);
+
+                    if (charge_energy_added <= lastCharging_start_charge_energy_added)
+                    {
+                        DeleteChargingstate(newId);
+                        UpdateChargingstate(chargingstate_id, newStartdate, newStartChargingID, charge_energy_added, lastCharging_start_charge_energy_added);
+                    }
                 }
             }
         }
 
-        private static void UpdateChargingstate(int chargingstate_id, DateTime StartDate, int StartChargingID)
+        private static void UpdateChargingstate(int chargingstate_id, DateTime StartDate, int StartChargingID, double charge_energy_added, double lastCharging_start_charge_energy_added)
         {
             try
             {
-                Logfile.Log($"Update Chargingstate {chargingstate_id} with new StartDate: {StartDate} /  StartChargingID: {StartChargingID}");
+                Logfile.Log($"Update Chargingstate {chargingstate_id} with new StartDate: {StartDate} /  StartChargingID: {StartChargingID} / charge_energy_added: {charge_energy_added} / lastCharging_start_charge_energy_added: {lastCharging_start_charge_energy_added}");
 
                 using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
                 {

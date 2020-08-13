@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -20,6 +21,7 @@ namespace TeslaLogger
         private static string _length = "km";
         private static string _language = "de";
         private static string _URL_Admin = "";
+        private static string _Range = "IR";
         private static DateTime lastGrafanaSettings = DateTime.UtcNow.AddDays(-1);
         private static DateTime lastSleepingHourMinutsUpdated = DateTime.UtcNow.AddDays(-1);
 
@@ -96,6 +98,23 @@ namespace TeslaLogger
             {
                 Logfile.Log("CopyFile Exception: " + ex.ToString());
             }
+        }
+
+        public static string DataTableToJSONWithJavaScriptSerializer(DataTable table)
+        {
+            JavaScriptSerializer jsSerializer = new JavaScriptSerializer();
+            List<Dictionary<string, object>> parentRow = new List<Dictionary<string, object>>();
+            Dictionary<string, object> childRow;
+            foreach (DataRow row in table.Rows)
+            {
+                childRow = new Dictionary<string, object>();
+                foreach (DataColumn col in table.Columns)
+                {
+                    childRow.Add(col.ColumnName, row[col]);
+                }
+                parentRow.Add(childRow);
+            }
+            return jsSerializer.Serialize(parentRow);
         }
 
         internal static void EndSleeping(out int stopSleepingHour, out int stopSleepingMinute)
@@ -250,7 +269,7 @@ namespace TeslaLogger
         }
 
 
-        internal static void GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin)
+        internal static void GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range)
         {
             TimeSpan ts = DateTime.UtcNow - lastGrafanaSettings;
             if (ts.TotalMinutes < 10)
@@ -260,6 +279,7 @@ namespace TeslaLogger
                 length =_length;
                 language =_language;
                 URL_Admin =_URL_Admin;
+                Range = _Range;
                 return;
             }
 
@@ -268,6 +288,7 @@ namespace TeslaLogger
             length = "km";
             language = "de";
             URL_Admin = "";
+            Range = "IR";
 
             try
             {
@@ -310,11 +331,20 @@ namespace TeslaLogger
                     }
                 }
 
+                if (IsPropertyExist(j, "Range"))
+                {
+                    if (j["Range"].ToString().Length > 0)
+                    {
+                        Range = j["Range"];
+                    }
+                }
+
                 _power = power;
                 _temperature = temperature;
                 _length = length;
                 _language = language;
                 _URL_Admin = URL_Admin;
+                _Range = Range;
 
                 lastGrafanaSettings = DateTime.UtcNow;
             }

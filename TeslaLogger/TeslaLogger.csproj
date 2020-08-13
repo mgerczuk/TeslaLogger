@@ -78,6 +78,7 @@
     </Compile>
     <Compile Include="Tools.cs" />
     <Compile Include="WebHelper.cs" />
+    <Compile Include="WebServer.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
