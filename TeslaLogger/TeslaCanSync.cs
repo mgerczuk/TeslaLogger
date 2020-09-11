@@ -16,17 +16,19 @@ namespace TeslaLogger
         private const int SECONDS = 5;
 
         private readonly string token;
+        Car car;
 
-        public TeslaCanSync(string token)
+        public TeslaCanSync(Car c)
         {
-            this.token = token;
+            this.token = c.TaskerHash;
+            this.car = c;
 
             new Thread(Start).Start();
         }
 
         private void Start()
         {
-            Logfile.Log("Start refactored TeslaCAN Thread!");
+            car.Log("Start refactored TeslaCAN Thread!");
 
             while (true)
             {
@@ -52,7 +54,7 @@ namespace TeslaLogger
                 {
                     if (!((ex as AggregateException)?.InnerExceptions[0] is HttpRequestException))
                     {
-                        Logfile.Log("TeslaCAN: " + ex.Message);
+                        car.Log("TeslaCAN: " + ex.Message);
                         Logfile.WriteException(ex.ToString());
                     }
 
@@ -87,63 +89,72 @@ namespace TeslaLogger
             return arr;
         }
 
-        private static void SaveData(Data data)
+        private void SaveData(Data data)
         {
-            DBHelper.currentJSON.lastScanMyTeslaReceived = data.Timestamp;
-            DBHelper.currentJSON.CreateCurrentJSON();
+            car.currentJSON.lastScanMyTeslaReceived = data.Timestamp;
+            car.currentJSON.CreateCurrentJSON();
 
             var sb = new StringBuilder();
-            sb.Append("INSERT INTO `can` (`datum`, `id`, `val`) VALUES ");
+            sb.Append("INSERT INTO `can` (`datum`, `id`, `val`, CarId) VALUES ");
             var first = true;
 
             var sqlDate = data.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
 
             foreach (var line in data.Values)
             {
-                if (line.Value.ToString().Contains("Infinity") || line.Value.ToString().Contains("NaN")) continue;
+                if (line.Value.ToString().Contains("Infinity") || line.Value.ToString().Contains("NaN"))
+                {
+                    continue;
+                }
 
                 switch (line.Key)
                 {
                     case "2":
-                        DBHelper.currentJSON.SMTCellTempAvg = Convert.ToDouble(line.Value);
+                        car.currentJSON.SMTCellTempAvg = Convert.ToDouble(line.Value);
                         break;
                     case "5":
-                        DBHelper.currentJSON.SMTCellMinV = Convert.ToDouble(line.Value);
+                        car.currentJSON.SMTCellMinV = Convert.ToDouble(line.Value);
                         break;
                     case "6":
-                        DBHelper.currentJSON.SMTCellAvgV = Convert.ToDouble(line.Value);
+                        car.currentJSON.SMTCellAvgV = Convert.ToDouble(line.Value);
                         break;
                     case "7":
-                        DBHelper.currentJSON.SMTCellMaxV = Convert.ToDouble(line.Value);
+                        car.currentJSON.SMTCellMaxV = Convert.ToDouble(line.Value);
                         break;
                     case "28":
-                        DBHelper.currentJSON.SMTBMSmaxCharge = Convert.ToDouble(line.Value);
+                        car.currentJSON.SMTBMSmaxCharge = Convert.ToDouble(line.Value);
                         break;
                     case "29":
-                        DBHelper.currentJSON.SMTBMSmaxDischarge = Convert.ToDouble(line.Value);
+                        car.currentJSON.SMTBMSmaxDischarge = Convert.ToDouble(line.Value);
                         break;
                     case "442":
                         if (Convert.ToDouble(line.Value) == 287.6) // SNA - Signal not Available
                         {
-                            DBHelper.currentJSON.SMTSpeed = 0;
-                            Logfile.Log("SMT Speed: Signal not Available");
+                            car.currentJSON.SMTSpeed = 0;
+                            car.Log("SMT Speed: Signal not Available");
                         }
                         else
                         {
-                            DBHelper.currentJSON.SMTSpeed = Convert.ToDouble(line.Value);
+                            car.currentJSON.SMTSpeed = Convert.ToDouble(line.Value);
                         }
 
                         break;
                     case "43":
-                        DBHelper.currentJSON.SMTBatteryPower = Convert.ToDouble(line.Value);
+                        car.currentJSON.SMTBatteryPower = Convert.ToDouble(line.Value);
                         break;
+                        default:
+                            break;
                 }
 
 
                 if (first)
+                {
                     first = false;
+                }
                 else
+                {
                     sb.Append(",");
+                }
 
                 sb.Append("('");
                 sb.Append(sqlDate);
@@ -151,6 +162,8 @@ namespace TeslaLogger
                 sb.Append(line.Key);
                 sb.Append(",");
                 sb.Append(Convert.ToDouble(line.Value).ToString(Tools.ciEnUS));
+                sb.Append(",");
+                sb.Append(car.CarInDB);
                 sb.Append(")");
             }
 
