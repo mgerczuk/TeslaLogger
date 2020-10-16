@@ -1,7 +1,6 @@
 ﻿using MySql.Data.MySqlClient;
 using System;
 using System.Collections.Generic;
-using System.Collections.Specialized;
 using System.Data;
 using System.IO;
 using System.Linq;
@@ -9,7 +8,7 @@ using System.Net;
 using System.Runtime.Caching;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Web;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
 namespace TeslaLogger
@@ -35,7 +34,7 @@ namespace TeslaLogger
                 Logfile.Log("HttpListener is not Supported!!!");
                 return;
             }
-            
+
             try
             {
                 int httpport = Tools.GetHttpPort();
@@ -93,7 +92,7 @@ namespace TeslaLogger
                 Logfile.Log(ex.ToString());
             }
 
-            while (true)
+            while (listener != null)
             {
                 try
                 {
@@ -117,10 +116,14 @@ namespace TeslaLogger
                 HttpListenerRequest request = context.Request;
                 HttpListenerResponse response = context.Response;
 
-                if (request.Url.LocalPath == null)
-                    localpath = "NULL";
-                else
+                if (request.Url.LocalPath != null)
+                {
                     localpath = request.Url.LocalPath;
+                }
+                else
+                {
+                    localpath = "NULL";
+                }
 
                 switch (true)
                 {
@@ -146,6 +149,12 @@ namespace TeslaLogger
                     case bool _ when request.Url.LocalPath.Equals("/admin/GetPOI"):
                         Admin_GetPOI(request, response);
                         break;
+                    case bool _ when request.Url.LocalPath.Equals("/admin/update"):
+                        Admin_Update(request, response);
+                        break;
+                    case bool _ when request.Url.LocalPath.Equals("/admin/updategrafana"):
+                        updategrafana(request, response);
+                        break;
                     // get car values
                     case bool _ when Regex.IsMatch(request.Url.LocalPath, @"/get/[0-9]+/.+"):
                         Get_CarValue(request, response);
@@ -154,12 +163,35 @@ namespace TeslaLogger
                     case bool _ when Regex.IsMatch(request.Url.LocalPath, @"/command/[0-9]+/.+"):
                         SendCarCommand(request, response);
                         break;
+                    case bool _ when Regex.IsMatch(request.Url.LocalPath, @"/currentjson/[0-9]+"):
+                        GetCurrentJson(request, response);
+                        break;
                     // Tesla API debug
                     case bool _ when Regex.IsMatch(request.Url.LocalPath, @"/debug/TeslaAPI/[0-9]+/.+"):
-                        Debug_TeslaAPI(request.Url.LocalPath, request, response);
+                        Debug_TeslaAPI(request, response);
                         break;
                     case bool _ when request.Url.LocalPath.Equals("/debug/TeslaLogger/states"):
                         Debug_TeslaLoggerStates(request, response);
+                        break;
+                    case bool _ when request.Url.LocalPath.Equals("/debug/TeslaLogger/messages"):
+                        Debug_TeslaLoggerMessages(request, response);
+                        break;
+                    // developer features
+                    case bool _ when request.Url.LocalPath.Equals("/dev/dumpJSON/on"):
+                        Dev_DumpJSON(response, true);
+                        break;
+                    case bool _ when request.Url.LocalPath.Equals("/dev/dumpJSON/off"):
+                        Dev_DumpJSON(response, false);
+                        break;
+                    case bool _ when request.Url.LocalPath.Equals("/dev/verbose/on"):
+                        Program.VERBOSE = true;
+                        Logfile.Log("VERBOSE on");
+                        WriteString(response, "VERBOSE on");
+                        break;
+                    case bool _ when request.Url.LocalPath.Equals("/dev/verbose/off"):
+                        Program.VERBOSE = false;
+                        Logfile.Log("VERBOSE off");
+                        WriteString(response, "VERBOSE off");
                         break;
                     default:
                         response.StatusCode = (int)HttpStatusCode.NotFound;
@@ -174,9 +206,66 @@ namespace TeslaLogger
             }
         }
 
+
+        private void Debug_TeslaLoggerMessages(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            response.AddHeader("Content-Type", "text/html; charset=utf-8");
+            WriteString(response, "<html><head></head><body><table border=\"1\">" + string.Concat(Tools.debugBuffer.Select(a => string.Format("<tr><td>{0}&nbsp;{1}</td></tr>", a.Key, a.Value))) + "</table></body></html>");
+        }
+
+        private void GetCurrentJson(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            System.Diagnostics.Debug.WriteLine(request.Url.LocalPath);
+
+            Match m = Regex.Match(request.Url.LocalPath, @"/currentjson/([0-9]+)");
+            if (m.Success && m.Groups.Count == 2 && m.Groups[1].Captures.Count == 1)
+            {
+                int.TryParse(m.Groups[1].Captures[0].ToString(), out int CarID);
+                try
+                {
+                    if (CurrentJSON.jsonStringHolder.TryGetValue(CarID, out string json))
+                    {
+                        WriteString(response, json);
+                    }
+                    else
+                    {
+                        response.StatusCode = (int)HttpStatusCode.NotFound;
+                        WriteString(response, @"URL Not Found!");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    WriteString(response, ex.ToString());
+                    Logfile.ExceptionWriter(ex, request.Url.LocalPath);
+                }
+            }
+        }
+
+        private void updategrafana(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            Tools.lastGrafanaSettings = DateTime.UtcNow.AddDays(-1);
+            Task.Run(() => { UpdateTeslalogger.UpdateGrafana(); });
+            WriteString(response, @"OK");
+        }
+
+        private void Admin_Update(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            // TODO copy what update.php does
+            WriteString(response, "");
+        }
+
+        private void Dev_DumpJSON(HttpListenerResponse response, bool v)
+        {
+            foreach (Car car in Car.allcars)
+            {
+                car.GetTeslaAPIState().DumpJSON = v;
+            }
+            WriteString(response, $"DumpJSON {v}");
+        }
+
         private void SendCarCommand(HttpListenerRequest request, HttpListenerResponse response)
         {
-            Match m = Regex.Match(request.Url.LocalPath, @"/get/([0-9]+)/(.+)");
+            Match m = Regex.Match(request.Url.LocalPath, @"/command/([0-9]+)/(.+)");
             if (m.Success && m.Groups.Count == 3 && m.Groups[1].Captures.Count == 1 && m.Groups[2].Captures.Count == 1)
             {
                 string command = m.Groups[2].Captures[0].ToString();
@@ -189,7 +278,7 @@ namespace TeslaLogger
                         // check if command is in list of allowed commands
                         if (AllowedTeslaAPICommands.Contains(command))
                         {
-                            switch(command)
+                            switch (command)
                             {
                                 case "auto_conditioning_start":
                                     WriteString(response, car.webhelper.PostCommand("command/auto_conditioning_start", null).Result);
@@ -223,11 +312,16 @@ namespace TeslaLogger
                                         WriteString(response, car.webhelper.PostCommand("command/set_sentry_mode", "{\"on\":true}", true).Result);
                                     }
                                     break;
+                                default:
+                                    WriteString(response, "");
+                                    break;
                             }
+                            return;
                         }
                     }
                 }
             }
+            WriteString(response, "");
         }
 
         private void SetPassword(HttpListenerRequest request, HttpListenerResponse response)
@@ -246,6 +340,8 @@ namespace TeslaLogger
                 string email = r["email"];
                 string password = r["password"];
                 int teslacarid = Convert.ToInt32(r["carid"]);
+                bool freesuc = r["freesuc"];
+
                 int id = Convert.ToInt32(r["id"]);
 
                 if (id == -1)
@@ -256,20 +352,25 @@ namespace TeslaLogger
                     {
                         con.Open();
 
-                        MySqlCommand cmd = new MySqlCommand("select max(id)+1 from cars", con);
-                        int newid = Convert.ToInt32(cmd.ExecuteScalar());
+                        using (MySqlCommand cmd = new MySqlCommand("select max(id)+1 from cars", con))
+                        {
+                            int newid = Convert.ToInt32(cmd.ExecuteScalar());
 
-                        cmd = new MySqlCommand("insert cars (id, tesla_name, tesla_password, tesla_carid, display_name) values (@id, @tesla_name, @tesla_password, @tesla_carid, @display_name)", con);
-                        cmd.Parameters.AddWithValue("@id", newid);
-                        cmd.Parameters.AddWithValue("@tesla_name", email);
-                        cmd.Parameters.AddWithValue("@tesla_password", password);
-                        cmd.Parameters.AddWithValue("@tesla_carid", teslacarid);
-                        cmd.Parameters.AddWithValue("@display_name", "Car " + newid);
-                        cmd.ExecuteNonQuery();
+                            using (var cmd2 = new MySqlCommand("insert cars (id, tesla_name, tesla_password, tesla_carid, display_name, freesuc) values (@id, @tesla_name, @tesla_password, @tesla_carid, @display_name, @freesuc)", con))
+                            {
+                                cmd2.Parameters.AddWithValue("@id", newid);
+                                cmd2.Parameters.AddWithValue("@tesla_name", email);
+                                cmd2.Parameters.AddWithValue("@tesla_password", password);
+                                cmd2.Parameters.AddWithValue("@tesla_carid", teslacarid);
+                                cmd2.Parameters.AddWithValue("@display_name", "Car " + newid);
+                                cmd2.Parameters.AddWithValue("@freesuc", freesuc ? 1 : 0);
+                                cmd2.ExecuteNonQuery();
 
-                        Car nc = new Car(newid, email, password, teslacarid, "", DateTime.MinValue, "", "", "", "", "", "");
+                                Car nc = new Car(newid, email, password, teslacarid, "", DateTime.MinValue, "", "", "", "", "", "", null);
 
-                        WriteString(response, "OK");
+                                WriteString(response, "OK");
+                            }
+                        }
                     }
                 }
                 else
@@ -281,21 +382,24 @@ namespace TeslaLogger
                     {
                         con.Open();
 
-                        MySqlCommand cmd = new MySqlCommand("update cars set tesla_name=@tesla_name, tesla_password=@tesla_password, tesla_carid=@ where id=@id", con);
-                        cmd.Parameters.AddWithValue("@id", dbID);
-                        cmd.Parameters.AddWithValue("@tesla_name", email);
-                        cmd.Parameters.AddWithValue("@tesla_password", password);
-                        cmd.Parameters.AddWithValue("@tesla_carid", teslacarid);
-                        cmd.ExecuteNonQuery();
-
-                        Car c = Car.GetCarByID(dbID);
-                        if (c != null)
+                        using (MySqlCommand cmd = new MySqlCommand("update cars set tesla_name=@tesla_name, tesla_password=@tesla_password, tesla_carid=@tesla_carid, freesuc=@freesuc where id=@id", con))
                         {
-                            c.ExitTeslaLogger("Credentials changed!");
-                        }
+                            cmd.Parameters.AddWithValue("@id", dbID);
+                            cmd.Parameters.AddWithValue("@tesla_name", email);
+                            cmd.Parameters.AddWithValue("@tesla_password", password);
+                            cmd.Parameters.AddWithValue("@tesla_carid", teslacarid);
+                            cmd.Parameters.AddWithValue("@freesuc", freesuc ? 1 : 0);
+                            cmd.ExecuteNonQuery();
 
-                        Car nc = new Car(dbID, email, password, teslacarid, "", DateTime.MinValue, "", "", "", "", "", "");
-                        WriteString(response, "OK");
+                            Car c = Car.GetCarByID(dbID);
+                            if (c != null)
+                            {
+                                c.ExitTeslaLogger("Credentials changed!");
+                            }
+
+                            Car nc = new Car(dbID, email, password, teslacarid, "", DateTime.MinValue, "", "", "", "", "", "", null);
+                            WriteString(response, "OK");
+                        }
                     }
                 }
             }
@@ -327,7 +431,7 @@ namespace TeslaLogger
                             }
                             else
                             {
-                                response.AddHeader("Content-Type", "application/json");
+                                response.AddHeader("Content-Type", "application/json; charset=utf-8");
                                 WriteString(response, "{\"response\":{ \"value\":\"" + state[TeslaAPIState.Key.Value].ToString() + "\", \"timestamp\":" + state[TeslaAPIState.Key.Timestamp] + "} }");
                                 return;
                             }
@@ -342,24 +446,35 @@ namespace TeslaLogger
         {
             Logfile.Log("Admin: ReloadGeofence ...");
             WebHelper.geofence.Init();
-            
+
             if (request.QueryString.Count == 1 && string.Concat(request.QueryString.GetValues(0)).Equals("html"))
             {
-                IEnumerable<string> trs = WebHelper.geofence.sortedList.Select(
-                    a => string.Format("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td></tr>",
+                IEnumerable<string> geofence = WebHelper.geofence.geofenceList.Select(
+                    a => string.Format("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>geofence</td></tr>",
                         a.name,
                         a.lat,
-                        a.lng, 
+                        a.lng,
                         a.radius,
                         string.Concat(a.specialFlags.Select(
                             sp => string.Format("{0}<br/>",
                             sp.ToString()))
-                        ),
-                        a.geofenceSource.ToString()
+                        )
+                    )
+                );
+                IEnumerable<string> geofenceprivate = WebHelper.geofence.geofencePrivateList.Select(
+                    a => string.Format("<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>geofence-private</td></tr>",
+                        a.name,
+                        a.lat,
+                        a.lng,
+                        a.radius,
+                        string.Concat(a.specialFlags.Select(
+                            sp => string.Format("{0}<br/>",
+                            sp.ToString()))
+                        )
                     )
                 );
                 response.AddHeader("Content-Type", "text/html; charset=utf-8");
-                WriteString(response, "<html><head></head><body><table border=\"1\">" + string.Concat(trs) + "</table></body></html>");
+                WriteString(response, "<html><head></head><body><table border=\"1\">" + string.Concat(geofence) + string.Concat(geofenceprivate) + "</table></body></html>");
             }
             else
             {
@@ -408,6 +523,7 @@ namespace TeslaLogger
                     { $"Car #{car.CarInDB} GetOdometerLastTrip()", car.GetOdometerLastTrip().ToString() },
                     { $"Car #{car.CarInDB} WebHelper.lastIsDriveTimestamp", car.GetWebHelper().lastIsDriveTimestamp.ToString() },
                     { $"Car #{car.CarInDB} WebHelper.lastUpdateEfficiency", car.GetWebHelper().lastUpdateEfficiency.ToString() },
+                    { $"Car #{car.CarInDB} TeslaAPIState", car.GetTeslaAPIState().ToString(true).Replace(Environment.NewLine, "<br />") },
                 };
                 string carHTMLtable = "<table>" + string.Concat(carvalues.Select(a => string.Format("<tr><td>{0}</td><td>{1}</td></tr>", a.Key, a.Value))) + "</table>";
                 values.Add($"Car #{car.CarInDB}", carHTMLtable);
@@ -424,7 +540,7 @@ namespace TeslaLogger
             WriteString(response, "<html><head></head><body><table>" + string.Concat(trs) + "</table></body></html>");
         }
 
-        private void Debug_TeslaAPI(string path, HttpListenerRequest request, HttpListenerResponse response)
+        private void Debug_TeslaAPI(HttpListenerRequest request, HttpListenerResponse response)
         {
             Match m = Regex.Match(request.Url.LocalPath, @"/debug/TeslaAPI/([0-9]+)/(.+)");
             if (m.Success && m.Groups.Count == 3 && m.Groups[1].Captures.Count == 1 && m.Groups[2].Captures.Count == 1)
@@ -436,7 +552,7 @@ namespace TeslaLogger
                     Car car = Car.GetCarByID(CarID);
                     if (car != null && car.GetWebHelper().TeslaAPI_Commands.TryGetValue(value, out string TeslaAPIJSON))
                     {
-                        response.AddHeader("Content-Type", "application/json");
+                        response.AddHeader("Content-Type", "application/json; charset=utf-8");
                         WriteString(response, TeslaAPIJSON);
                     }
                     else
@@ -482,29 +598,31 @@ namespace TeslaLogger
                 using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
                 {
                     con.Open();
-                    MySqlCommand cmd = new MySqlCommand("update chargingstate set cost_total = @cost_total, cost_currency=@cost_currency, cost_per_kwh=@cost_per_kwh, cost_per_session=@cost_per_session, cost_per_minute=@cost_per_minute, cost_idle_fee_total=@cost_idle_fee_total, cost_kwh_meter_invoice=@cost_kwh_meter_invoice  where id= @id", con);
-
-                    if (DBHelper.DBNullIfEmptyOrZero(j["cost_total"]) is DBNull && DBHelper.IsZero(j["cost_per_session"]))
+                    using (MySqlCommand cmd = new MySqlCommand("update chargingstate set cost_total = @cost_total, cost_currency=@cost_currency, cost_per_kwh=@cost_per_kwh, cost_per_session=@cost_per_session, cost_per_minute=@cost_per_minute, cost_idle_fee_total=@cost_idle_fee_total, cost_kwh_meter_invoice=@cost_kwh_meter_invoice  where id= @id", con))
                     {
-                        cmd.Parameters.AddWithValue("@cost_total", 0);
+
+                        if (DBHelper.DBNullIfEmptyOrZero(j["cost_total"]) is DBNull && DBHelper.IsZero(j["cost_per_session"]))
+                        {
+                            cmd.Parameters.AddWithValue("@cost_total", 0);
+                        }
+                        else
+                        {
+                            cmd.Parameters.AddWithValue("@cost_total", DBHelper.DBNullIfEmptyOrZero(j["cost_total"]));
+                        }
+
+                        cmd.Parameters.AddWithValue("@cost_currency", DBHelper.DBNullIfEmpty(j["cost_currency"]));
+                        cmd.Parameters.AddWithValue("@cost_per_kwh", DBHelper.DBNullIfEmpty(j["cost_per_kwh"]));
+                        cmd.Parameters.AddWithValue("@cost_per_session", DBHelper.DBNullIfEmpty(j["cost_per_session"]));
+                        cmd.Parameters.AddWithValue("@cost_per_minute", DBHelper.DBNullIfEmpty(j["cost_per_minute"]));
+                        cmd.Parameters.AddWithValue("@cost_idle_fee_total", DBHelper.DBNullIfEmpty(j["cost_idle_fee_total"]));
+                        cmd.Parameters.AddWithValue("@cost_kwh_meter_invoice", DBHelper.DBNullIfEmpty(j["cost_kwh_meter_invoice"]));
+
+                        cmd.Parameters.AddWithValue("@id", j["id"]);
+                        int done = cmd.ExecuteNonQuery();
+
+                        Logfile.Log("SetCost OK: " + done);
+                        WriteString(response, "OK");
                     }
-                    else
-                    {
-                        cmd.Parameters.AddWithValue("@cost_total", DBHelper.DBNullIfEmptyOrZero(j["cost_total"]));
-                    }
-
-                    cmd.Parameters.AddWithValue("@cost_currency", DBHelper.DBNullIfEmpty(j["cost_currency"]));
-                    cmd.Parameters.AddWithValue("@cost_per_kwh", DBHelper.DBNullIfEmpty(j["cost_per_kwh"]));
-                    cmd.Parameters.AddWithValue("@cost_per_session", DBHelper.DBNullIfEmpty(j["cost_per_session"]));
-                    cmd.Parameters.AddWithValue("@cost_per_minute", DBHelper.DBNullIfEmpty(j["cost_per_minute"]));
-                    cmd.Parameters.AddWithValue("@cost_idle_fee_total", DBHelper.DBNullIfEmpty(j["cost_idle_fee_total"]));
-                    cmd.Parameters.AddWithValue("@cost_kwh_meter_invoice", DBHelper.DBNullIfEmpty(j["cost_kwh_meter_invoice"]));
-
-                    cmd.Parameters.AddWithValue("@id", j["id"]);
-                    int done = cmd.ExecuteNonQuery();
-
-                    Logfile.Log("SetCost OK: " + done);
-                    WriteString(response, "OK");
                 }
             }
             catch (Exception ex)
@@ -521,13 +639,17 @@ namespace TeslaLogger
 
             try
             {
-                Logfile.Log("HTTP getchargingstate");                
-                DataTable dt = new DataTable();
-                MySqlDataAdapter da = new MySqlDataAdapter("SELECT chargingstate.*, lat, lng, address, charging.charge_energy_added as kWh FROM chargingstate join pos on chargingstate.pos = pos.id join charging on chargingstate.EndChargingID = charging.id where chargingstate.id = @id", DBHelper.DBConnectionstring);
-                da.SelectCommand.Parameters.AddWithValue("@id", id);
-                da.Fill(dt);
+                Logfile.Log("HTTP getchargingstate");
+                using (DataTable dt = new DataTable())
+                {
+                    using (MySqlDataAdapter da = new MySqlDataAdapter("SELECT chargingstate.*, lat, lng, address, charging.charge_energy_added as kWh FROM chargingstate join pos on chargingstate.pos = pos.id join charging on chargingstate.EndChargingID = charging.id where chargingstate.id = @id", DBHelper.DBConnectionstring))
+                    {
+                        da.SelectCommand.Parameters.AddWithValue("@id", id);
+                        da.Fill(dt);
 
-                responseString = dt.Rows.Count > 0 ? Tools.DataTableToJSONWithJavaScriptSerializer(dt) : "not found!";
+                        responseString = dt.Rows.Count > 0 ? Tools.DataTableToJSONWithJavaScriptSerializer(dt) : "not found!";
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -543,11 +665,15 @@ namespace TeslaLogger
 
             try
             {
-                DataTable dt = new DataTable();
-                MySqlDataAdapter da = new MySqlDataAdapter("SELECT id, display_name, tasker_hash, model_name, vin, tesla_name, tesla_carid FROM cars order by display_name", DBHelper.DBConnectionstring);
-                da.Fill(dt);
+                using (DataTable dt = new DataTable())
+                {
+                    using (MySqlDataAdapter da = new MySqlDataAdapter("SELECT id, display_name, tasker_hash, model_name, vin, tesla_name, tesla_carid, lastscanmytesla, freesuc FROM cars order by display_name", DBHelper.DBConnectionstring))
+                    {
+                        da.Fill(dt);
 
-                responseString = dt.Rows.Count > 0 ? Tools.DataTableToJSONWithJavaScriptSerializer(dt) : "not found!";
+                        responseString = dt.Rows.Count > 0 ? Tools.DataTableToJSONWithJavaScriptSerializer(dt) : "not found!";
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -587,6 +713,8 @@ namespace TeslaLogger
                             case "lng":
                                 double.TryParse(request.QueryString.GetValues(key)[0], out lng);
                                 break;
+                            default:
+                                break;
                         }
                     }
                 }
@@ -598,12 +726,14 @@ namespace TeslaLogger
                         Dictionary<string, object> data = new Dictionary<string, object>()
                         {
                             { "name", addr.name },
+                            { "rawName", addr.rawName },
                             { "lat", addr.lat },
                             { "lng", addr.lng },
                             { "radius", addr.radius },
                             { "IsHome", addr.IsHome },
                             { "IsWork", addr.IsWork },
-                            { "Source", addr.geofenceSource.ToString() },
+                            { "IsCharger", addr.IsCharger },
+                            { "NoSleep", addr.NoSleep },
                         };
                         Dictionary<string, object> specialflags = new Dictionary<string, object>();
                         foreach (KeyValuePair<Address.SpecialFlags, string> flag in addr.specialFlags)
@@ -611,7 +741,7 @@ namespace TeslaLogger
                             specialflags.Add(flag.Key.ToString(), flag.Value);
                         }
                         data.Add("SpecialFlags", specialflags);
-                        response.AddHeader("Content-Type", "application/json");
+                        response.AddHeader("Content-Type", "application/json; charset=utf-8");
                         WriteString(response, new JavaScriptSerializer().Serialize(data));
                         return;
                     }
@@ -630,13 +760,15 @@ namespace TeslaLogger
                 using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
                 {
                     con.Open();
-                    MySqlCommand cmd = new MySqlCommand("Select max(id) from pos", con);
-                    MySqlDataReader dr = cmd.ExecuteReader();
-                    if (dr.Read() && dr[0] != DBNull.Value)
+                    using (MySqlCommand cmd = new MySqlCommand("Select max(id) from pos", con))
                     {
-                        int.TryParse(dr[0].ToString(), out to);
+                        MySqlDataReader dr = cmd.ExecuteReader();
+                        if (dr.Read() && dr[0] != DBNull.Value)
+                        {
+                            int.TryParse(dr[0].ToString(), out to);
+                        }
+                        con.Close();
                     }
-                    con.Close();
                 }
             }
             catch (Exception) { }

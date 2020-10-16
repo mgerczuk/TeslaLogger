@@ -1,11 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.SqlClient;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Caching;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Web.Script.Serialization;
 using MySql.Data.MySqlClient;
@@ -26,12 +30,14 @@ namespace TeslaLogger
         private static string _URL_Admin = "";
         private static string _URL_Grafana = "http://raspberry:3000/";
         private static string _Range = "IR";
-        private static DateTime lastGrafanaSettings = DateTime.UtcNow.AddDays(-1);
+        public static DateTime lastGrafanaSettings = DateTime.UtcNow.AddDays(-1);
         private static DateTime lastSleepingHourMinutsUpdated = DateTime.UtcNow.AddDays(-1);
 
         private static string _OSVersion = string.Empty;
 
         public enum UpdateType { all, stable, none};
+
+        internal static SortedList<DateTime, string> debugBuffer = new SortedList<DateTime, string>();
 
         public static void SetThread_enUS()
         {
@@ -43,13 +49,160 @@ namespace TeslaLogger
             return (long)(dateTime - new DateTime(1970, 1, 1)).TotalSeconds;
         }
 
-        public static void DebugLog(string text, [CallerFilePath] string _cfp = null, [CallerLineNumber] int _cln = 0)
+        public static void DebugLog(MySqlCommand cmd, [CallerFilePath] string _cfp = null, [CallerLineNumber] int _cln = 0, [CallerMemberName] string _cmn = null)
         {
+            try
+            {
+                string msg = "SQL" + Environment.NewLine + cmd.CommandText;
+                foreach (MySqlParameter p in cmd.Parameters)
+                {
+                    string pValue = "";
+                    switch (p.DbType)
+                    {
+                        case DbType.AnsiString:
+                        case DbType.AnsiStringFixedLength:
+                        case DbType.Date:
+                        case DbType.DateTime:
+                        case DbType.DateTime2:
+                        case DbType.Guid:
+                        case DbType.String:
+                        case DbType.StringFixedLength:
+                        case DbType.Time:
+                            if (p.Value != null)
+                            {
+                                pValue = $"'{p.Value.ToString().Replace("'", "\\'")}'";
+                            }
+                            else
+                            {
+                                pValue = "'NULL'";
+                            }
+                            break;
+                        case DbType.Decimal:
+                        case DbType.Double:
+                        case DbType.Int16:
+                        case DbType.Int32:
+                        case DbType.Int64:
+                        case DbType.UInt16:
+                        case DbType.UInt32:
+                        case DbType.UInt64:
+                        case DbType.VarNumeric:
+                        case DbType.Object:
+                        case DbType.SByte:
+                        case DbType.Single:
+                        case DbType.Binary:
+                        case DbType.Boolean:
+                        case DbType.Byte:
+                        case DbType.Currency:
+                        case DbType.DateTimeOffset:
+                        case DbType.Xml:
+                        default:
+                            if (p.Value != null)
+                            {
+                                pValue = p.Value.ToString();
+                            }
+                            else
+                            {
+                                pValue = "NULL";
+                            }
+                            break;
+                    }
+                    msg = msg.Replace(p.ParameterName, pValue);
+                }
+                DebugLog($"{_cmn}: " + msg, null, _cfp, _cln);
+            }
+            catch (Exception ex)
+            {
+                DebugLog("Exception in SQL DEBUG", ex);
+            }
+        }
+
+        public static void DebugLog(string text, Exception ex = null, [CallerFilePath] string _cfp = null, [CallerLineNumber] int _cln = 0)
+        {
+            string temp = "DEBUG : " + text + " (" + Path.GetFileName(_cfp) + ":" + _cln + ")";
+            AddToBuffer(temp);
             if (Program.VERBOSE)
             {
-                string temp = "DEBUG : " + text + " (" + Path.GetFileName(_cfp) + ":" + _cln + ")";
                 Logfile.Log(temp);
             }
+            if (ex != null)
+            {
+                string exmsg = $"DEBUG : Exception {ex.GetType()} {ex}";
+                AddToBuffer(exmsg);
+                if (Program.VERBOSE)
+                {
+                    Logfile.Log(exmsg);
+                }
+            }
+        }
+
+        private static void AddToBuffer(string msg)
+        {
+            DateTime dt = DateTime.Now;
+            if (debugBuffer.ContainsKey(dt))
+            {
+                dt = dt.AddMilliseconds(1);
+            }
+            try
+            {
+                debugBuffer.Add(DateTime.Now, msg);
+                if (debugBuffer.Count > 500)
+                {
+                    DateTime firstKey = debugBuffer.Keys.First();
+                    debugBuffer.Remove(firstKey);
+                }
+            }
+            // ignore failed inserts
+            catch (Exception) {  }
+        }
+
+        // source: https://stackoverflow.com/questions/6994852
+        private static void TraceException(Exception e)
+        {
+            try
+            {
+                MethodBase site = e.TargetSite;//Get the methodname from the exception.
+                string methodName = site == null ? "" : site.Name;//avoid null ref if it's null.
+                methodName = ExtractBracketed(methodName);
+
+                StackTrace stkTrace = new System.Diagnostics.StackTrace(e, true);
+                for (int i = 0; i < 3; i++)
+                {
+                    //In most cases GetFrame(0) will contain valid information, but not always. That's why a small loop is needed. 
+                    var frame = stkTrace.GetFrame(i);
+                    int lineNum = frame.GetFileLineNumber();//get the line and column numbers
+                    int colNum = frame.GetFileColumnNumber();
+                    string className = ExtractBracketed(frame.GetMethod().ReflectedType.FullName);
+                    Logfile.Log(ThreadAndDateInfo + "Exception: " + className + "." + methodName + ", Ln " + lineNum + " Col " + colNum + ": " + e.Message);
+                    if (lineNum + colNum > 0)
+                        break; //exit the for loop if you have valid info. If not, try going up one frame...
+                }
+
+            }
+            catch (Exception ee)
+            {
+                //Avoid any situation that the Trace is what crashes you application. While trace can log to a file. Console normally not output to the same place.
+                Logfile.Log("Tracing exception in TraceException(Exception e)" + ee.Message);
+            }
+        }
+
+        private static string ExtractBracketed(string str)
+        {
+            string s;
+            if (str.IndexOf('<') > -1) //using the Regex when the string does not contain <brackets> returns an empty string.
+                s = Regex.Match(str, @"\<([^>]*)\>").Groups[1].Value;
+            else
+                s = str;
+            if (s.Length == 0)
+                return "'Emtpy'"; //for log visibility we want to know if something it's empty.
+            else
+                return s;
+
+        }
+
+        private static string ThreadAndDateInfo
+        {
+            //returns thread number and precise date and time.
+            get { return "[" + Thread.CurrentThread.ManagedThreadId + " - " + DateTime.Now.ToString("dd/MM HH:mm:ss.ffffff") + "] "; }
         }
 
         public static string GetMonoRuntimeVersion()
@@ -72,7 +225,7 @@ namespace TeslaLogger
             return GetMonoRuntimeVersion() != "NULL";
         }
 
-        public static void CopyFilesRecursively(DirectoryInfo source, DirectoryInfo target)
+        public static void CopyFilesRecursively(DirectoryInfo source, DirectoryInfo target, string excludeFile = null)
         {
             try
             {
@@ -83,11 +236,16 @@ namespace TeslaLogger
 
                 foreach (FileInfo file in source.GetFiles())
                 {
-                    string p = Path.Combine(target.FullName, file.Name);
-
-                    Logfile.Log("Copy '" + file.FullName + "' to '" + p + "'");
-
-                    File.Copy(file.FullName, p, true);
+                    if (excludeFile != null && file.Name.Equals(excludeFile))
+                    {
+                        Logfile.Log($"CopyFilesRecursively: skip {excludeFile}");
+                    }
+                    else
+                    {
+                        string p = Path.Combine(target.FullName, file.Name);
+                        Logfile.Log("Copy '" + file.FullName + "' to '" + p + "'");
+                        File.Copy(file.FullName, p, true);
+                    }
                 }
             }
             catch (Exception ex)
@@ -175,6 +333,11 @@ namespace TeslaLogger
                 if (IsPropertyExist(j, "HTTPPort"))
                 {
                     int.TryParse(j["HTTPPort"], out httpport);
+
+                    if (httpport == 0)
+                    {
+                        httpport = 5000;
+                    }
                 }
             }
             catch (Exception ex)
@@ -182,6 +345,32 @@ namespace TeslaLogger
                 Logfile.Log(ex.ToString());
             }
             return httpport;
+        }
+
+        internal static bool UseOpenTopoData()
+        {
+            try
+            {
+                string filePath = FileManager.GetFilePath(TLFilename.SettingsFilename);
+                if (!File.Exists(filePath))
+                {
+                    Logfile.Log("settings file not found at " + filePath);
+                    return false;
+                }
+                string json = File.ReadAllText(filePath);
+                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                if (IsPropertyExist(j, "UseOpenTopoData"))
+                {
+                    if(bool.TryParse(j["UseOpenTopoData"], out bool useOpenTopoData)) {
+                        return useOpenTopoData;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+            return false;
         }
 
         internal static void StartSleeping(out int startSleepingHour, out int startSleepingMinutes)
@@ -236,8 +425,16 @@ namespace TeslaLogger
             }
         }
 
-        public static string Exec_mono(string cmd, string param, bool logging = true, bool stderr2stdout = false)
+        // timeout in seconds
+        // https://docs.microsoft.com/de-de/dotnet/api/system.diagnostics.process.exitcode?view=netcore-3.1
+        public static string Exec_mono(string cmd, string param, bool logging = true, bool stderr2stdout = false, int timeout = 0)
         {
+            Logfile.Log("Exec_mono: " + cmd + " " + param);
+
+            StringBuilder sb = new StringBuilder();
+
+            bool bTimeout = false;
+
             try
             {
                 if (!Tools.IsMono())
@@ -245,24 +442,32 @@ namespace TeslaLogger
                     return "";
                 }
 
-                Logfile.Log("execute: " + cmd + " " + param);
-
-                StringBuilder sb = new StringBuilder();
-
-                System.Diagnostics.Process proc = new System.Diagnostics.Process
+                using (Process proc = new Process())
                 {
-                    EnableRaisingEvents = false
-                };
-                proc.StartInfo.UseShellExecute = false;
-                proc.StartInfo.RedirectStandardOutput = true;
-                proc.StartInfo.RedirectStandardError = true;
-                proc.StartInfo.FileName = cmd;
-                proc.StartInfo.Arguments = param;
+                    proc.EnableRaisingEvents = false;
+                    proc.StartInfo.UseShellExecute = false;
+                    proc.StartInfo.RedirectStandardOutput = true;
+                    proc.StartInfo.RedirectStandardError = true;
+                    proc.StartInfo.FileName = cmd;
+                    proc.StartInfo.Arguments = param;
 
-                proc.Start();
+                    proc.Start();
 
-                while (!proc.HasExited)
-                {
+                    do
+                    {
+                        if (!proc.HasExited)
+                        {
+                            proc.Refresh();
+
+                            if (timeout > 0 && (DateTime.Now - proc.StartTime).TotalSeconds > timeout)
+                            {
+                                proc.Kill();
+                                bTimeout = true;
+                            }
+                        }
+                    }
+                    while (!proc.WaitForExit(100));
+
                     string line = proc.StandardOutput.ReadToEnd().Replace('\r', '\n');
 
                     if (logging && line.Length > 0)
@@ -271,7 +476,6 @@ namespace TeslaLogger
                     }
 
                     sb.AppendLine(line);
-
                     line = proc.StandardError.ReadToEnd().Replace('\r', '\n');
 
                     if (logging && line.Length > 0)
@@ -288,14 +492,13 @@ namespace TeslaLogger
 
                     sb.AppendLine(line);
                 }
-
-                return sb.ToString();
             }
             catch (Exception ex)
             {
                 Logfile.Log("Exception " + cmd + " " + ex.Message);
                 return "Exception";
             }
+            return bTimeout ? "Timeout! " + sb.ToString() : sb.ToString();
         }
 
         internal static bool UseScanMyTesla()
@@ -776,17 +979,20 @@ namespace TeslaLogger
             using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
             {
                 con.Open();
-                MySqlCommand cmd = new MySqlCommand("SELECT TABLE_NAME, ROUND(DATA_LENGTH / 1024 / 1024), ROUND(INDEX_LENGTH / 1024 / 1024), TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_SCHEMA = \"teslalogger\" AND TABLE_TYPE = \"BASE TABLE\"", con);
-                cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-90));
-                try
+                using (MySqlCommand cmd = new MySqlCommand("SELECT TABLE_NAME, ROUND(DATA_LENGTH / 1024 / 1024), ROUND(INDEX_LENGTH / 1024 / 1024), TABLE_ROWS FROM information_schema.TABLES WHERE TABLE_SCHEMA = \"teslalogger\" AND TABLE_TYPE = \"BASE TABLE\"", con))
                 {
-                    MySqlDataReader dr = cmd.ExecuteReader();
-                    while (dr.Read())
+                    cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-90));
+                    try
                     {
-                        Logfile.Log($"Table: {dr[0],20} data:{dr[1],5} MB index:{dr[2],5} MB rows:{dr[3],10}");
+                        MySqlDataReader dr = cmd.ExecuteReader();
+                        while (dr.Read())
+                        {
+                            Logfile.Log($"Table: {dr[0],20} data:{dr[1],5} MB index:{dr[2],5} MB rows:{dr[3],10}");
+                        }
                     }
+                    catch (Exception) { }
+
                 }
-                catch (Exception) { }
             }
         }
 
@@ -827,24 +1033,26 @@ namespace TeslaLogger
             using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
             {
                 con.Open();
-                MySqlCommand cmd = new MySqlCommand("SELECT COUNT(id), MAX(id), MIN(id) FROM mothership WHERE ts < @tsdate", con);
-                cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-90));
-                try
+                using (MySqlCommand cmd = new MySqlCommand("SELECT COUNT(id), MAX(id), MIN(id) FROM mothership WHERE ts < @tsdate", con))
                 {
-                    MySqlDataReader dr = cmd.ExecuteReader();
-                    if (dr.Read())
+                    cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-90));
+                    try
                     {
-                        _ = long.TryParse(dr[0].ToString(), out mothershipCount);
-                        _ = long.TryParse(dr[1].ToString(), out mothershipMaxId);
-                        _ = long.TryParse(dr[2].ToString(), out mothershipMinId);
-                        Logfile.Log($"Housekeeping: database.mothership older than 90 days count: {mothershipCount} minID:{mothershipMinId} maxID:{mothershipMaxId}");
+                        MySqlDataReader dr = cmd.ExecuteReader();
+                        if (dr.Read())
+                        {
+                            _ = long.TryParse(dr[0].ToString(), out mothershipCount);
+                            _ = long.TryParse(dr[1].ToString(), out mothershipMaxId);
+                            _ = long.TryParse(dr[2].ToString(), out mothershipMinId);
+                            Logfile.Log($"Housekeeping: database.mothership older than 90 days count: {mothershipCount} minID:{mothershipMinId} maxID:{mothershipMaxId}");
+                        }
                     }
+                    catch (Exception ex)
+                    {
+                        Logfile.Log(ex.ToString());
+                    }
+                    con.Close();
                 }
-                catch (Exception ex)
-                {
-                    Logfile.Log(ex.ToString());
-                }
-                con.Close();
             }
             if (mothershipCount >= 1000)
             {
@@ -856,17 +1064,19 @@ namespace TeslaLogger
                         Logfile.Log($"Housekeeping: delete database.mothership chunk {dbupdate}");
                         con.Open();
                         string SQLcmd = "DELETE FROM mothership where id < @maxid";
-                        MySqlCommand cmd = new MySqlCommand(SQLcmd, con);
-                        cmd.Parameters.AddWithValue("@maxid", dbupdate);
-                        try
+                        using (MySqlCommand cmd = new MySqlCommand(SQLcmd, con))
                         {
-                            cmd.ExecuteNonQuery();
+                            cmd.Parameters.AddWithValue("@maxid", dbupdate);
+                            try
+                            {
+                                cmd.ExecuteNonQuery();
+                            }
+                            catch (Exception ex)
+                            {
+                                Logfile.Log(ex.ToString());
+                            }
+                            con.Close();
                         }
-                        catch (Exception ex)
-                        {
-                            Logfile.Log(ex.ToString());
-                        }
-                        con.Close();
                     }
                     Thread.Sleep(5000);
                 }
@@ -874,22 +1084,24 @@ namespace TeslaLogger
                 using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
                 {
                     con.Open();
-                    MySqlCommand cmd = new MySqlCommand("SELECT COUNT(id) FROM mothership WHERE ts < @tsdate", con);
-                    cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-90));
-                    try
+                    using (MySqlCommand cmd = new MySqlCommand("SELECT COUNT(id) FROM mothership WHERE ts < @tsdate", con))
                     {
-                        MySqlDataReader dr = cmd.ExecuteReader();
-                        if (dr.Read())
+                        cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-90));
+                        try
                         {
-                            _ = long.TryParse(dr[0].ToString(), out mothershipCount);
-                            Logfile.Log("Housekeeping: database.mothership older than 90 days count: " + mothershipCount);
+                            MySqlDataReader dr = cmd.ExecuteReader();
+                            if (dr.Read())
+                            {
+                                _ = long.TryParse(dr[0].ToString(), out mothershipCount);
+                                Logfile.Log("Housekeeping: database.mothership older than 90 days count: " + mothershipCount);
+                            }
                         }
+                        catch (Exception ex)
+                        {
+                            Logfile.Log(ex.ToString());
+                        }
+                        con.Close();
                     }
-                    catch (Exception ex)
-                    {
-                        Logfile.Log(ex.ToString());
-                    }
-                    con.Close();
                 }
             }
         }
@@ -943,6 +1155,26 @@ namespace TeslaLogger
             {
                 _ = Exec_mono("/usr/bin/du", "-sk " + Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/nohup.out", true, true);
             }
+        }
+
+        public static string ObfuscateString(string input)
+        {
+            if (input == null)
+                return null;
+
+            string obfuscated = string.Empty;
+            for (int i = 0; i < input.Length; i++)
+            {
+                if (i % 3 == 0 || i % 5 == 0)
+                {
+                    obfuscated += "X";
+                }
+                else
+                {
+                    obfuscated += input[i];
+                }
+            }
+            return obfuscated;
         }
     }
 }

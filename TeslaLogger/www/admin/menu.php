@@ -20,7 +20,7 @@ function menu($title)
 {
     $car = "";
     $tasker_token = "";
-    $display_name = "";
+    global $display_name;
 
     $current_carid = $_SESSION["carid"];
     if (!isset($current_carid))
@@ -28,7 +28,7 @@ function menu($title)
 
     $alldashboards = file_get_contents("/etc/teslalogger/dashboardlinks.txt");
 
-    $allcars = file_get_contents(GetTeslaloggerURL("getallcars"));
+    $allcars = file_get_contents(GetTeslaloggerURL("getallcars"),0, stream_context_create(["http"=>["timeout"=>2]]));
     $jcars = json_decode($allcars);
 
     foreach ($jcars as $k => $v) {
@@ -100,6 +100,7 @@ function menu($title)
 							<li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="https://teslalogger.de/degradation.php<?PHP echo($ref); ?>">Fleet Degradation AVG</a></li>
 							<li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="https://teslalogger.de/charger.php<?PHP echo($ref); ?>">Fleet Charging AVG</a></li>
                             <li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="https://teslalogger.de/charger_fw.php<?PHP echo($ref); ?>">Fleet Charging MAX (Firmware)</a></li>
+                            <li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="https://teslalogger.de/charging_locations.php<?PHP echo($ref); ?>">Fleet Charging Locations</a></li>
                             <li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="https://teslalogger.de/map.php<?PHP echo($ref); ?>">Fleet Fast Charging Map</a></li>
                             <li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="https://teslalogger.de/firmware.php<?PHP echo($ref); ?>">Firmware Tracker</a></li>
 						</ul>
@@ -110,10 +111,10 @@ function menu($title)
 							<li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="backup.php">Backup</a></li>
                             <li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="restore.php">Restore</a></li>
 							<li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="geofencing.php">Geofence</a></li>
-							<li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="javascript:BackgroudRun('/wakeup.php', 'Wakeup!', true);">Wakeup Teslalogger!</a></li>
-                            <?PHP if (!file_exists("/etc/teslalogger/cmd_gosleep.txt"))
+							<li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="/wakeup.php?id=<?= $current_carid ?>">Wakeup Teslalogger!</a></li>
+                            <?PHP if (!file_exists("/etc/teslalogger/cmd_gosleep_$current_carid.txt"))
                             {?>
-							<li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="javascript:BackgroudRun('gosleep.php', 'Sleep!', true);">Suspend Teslalogger</a></li>
+							<li class="menu-item menu-item-type-custom menu-item-object-custom"><a href="gosleep.php?id=<?= $current_carid ?>">Suspend Teslalogger</a></li>
                             <?PHP 
                             } ?>
 						</ul>
