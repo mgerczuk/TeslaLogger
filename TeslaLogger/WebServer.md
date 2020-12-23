@@ -18,6 +18,14 @@ TODO
 
 TODO
 
+### /export/trip
+
+request: GET /export/trip?from=...&to=...&carID=
+
+response: GPX file
+
+from=... and to=... are pos.id's
+
 ### /admin/UpdateElevation
 
 TODO
@@ -73,6 +81,16 @@ Allowed commands:
 * sentry_mode_on
 * sentry_mode_off
 * sentry_mode_toggle
+* wake_up
+
+### /command/_CarID_/_name_?_parameter_
+
+request: GET /command/_CarID_/_name_?_parameter_
+
+response: JSON (forwarded from Tesla API)
+
+Allowed commands:
+* set_charge_limit
 
 ## debugging TeslaLogger
 

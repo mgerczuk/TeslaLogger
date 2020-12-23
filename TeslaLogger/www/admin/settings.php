@@ -2,6 +2,22 @@
 <?php
 require("language.php");
 require("tools.php");
+
+function CarsCombobox($cars, $selected)
+{
+	echo "\r\n<select id='defaultcar' style='width:100%'>";
+	foreach ($cars as $k => $v) {
+		$displayname = $v->{"display_name"};
+		$id = $v->{"id"};
+		$s = "";
+		if ($displayname == $selected)
+			$s = 'selected="selected"';
+
+		echo "\r\n   <option $s value='$id'>$displayname</option>";
+	}
+	echo "\r\n</select>\r\n";
+}
+
 ?>
 <html lang="<?php echo $json_data["Language"]; ?>">
   <head>
@@ -74,6 +90,7 @@ require("tools.php");
 			$URL_Admin = $j->{"URL_Admin"};
 			$URL_Grafana = $j->{"URL_Grafana"};
 			$ZoomLevel = $j->{"ZoomLevel"};
+			$defaultcar = $j->{"defaultcar"};
 			
 			$HTTPPort = 5000;
 			if (property_exists($j,"HTTPPort"))
@@ -122,6 +139,8 @@ require("tools.php");
 				echo ("$('#radio_nl').prop('checked', true);\r\n");
 			else if($Language =="no")
 				echo ("$('#radio_no').prop('checked', true);\r\n");
+			else if($Language =="pt")
+				echo ("$('#radio_pt').prop('checked', true);\r\n");
 			else
 				echo ("$('#radio_de').prop('checked', true);\r\n");
 				
@@ -172,6 +191,9 @@ require("tools.php");
 		ShareData: $('#checkboxSharedata').is(':checked'),
 		update: $("input:radio[name ='update']:checked").val(),
 		Range: $("input:radio[name ='Range']:checked").val(),
+		defaultcar: $("#defaultcar").find("option:selected").text(),
+		defaultcarid: $("#defaultcar").find("option:selected").val()
+
 		}).always(function() {
 		alert("Saved!");
 		location.reload();
@@ -193,7 +215,8 @@ echo(menu("Settings"));
 		<input id="radio_de" type="radio" value="de" name="Language" /> Deutsch<br>
 		<input id="radio_en" type="radio" value="en" name="Language" /> English<br>
 		<input id="radio_nl" type="radio" value="nl" name="Language" /> Nederlands<br>
-		<input id="radio_no" type="radio" value="no" name="Language" /> Norsk
+		<input id="radio_no" type="radio" value="no" name="Language" /> Norsk<br>
+		<input id="radio_pt" type="radio" value="pt" name="Language" /> Português<br>
 	</td></tr>
 	<tr><td valign="top"><b><?php t("Leistung"); ?>:</b></td><td><input id="radio_hp" type="radio" value="hp" name="power" /> PS<br><input id="radio_kw" type="radio" value="kw" name="power" /> kW</td></tr>
 	<tr><td valign="top"><b><?php t("Temperatur"); ?>:</b></td><td><input id="radio_celsius" type="radio" value="celsius" name="Temperature"> Celsius<br><input id="radio_fahrenheit" type="radio" value="fahrenheit" name="Temperature"> Fahrenheit </td></tr>
@@ -214,8 +237,7 @@ echo(menu("Settings"));
 	
 <?php
 
-$url = GetTeslaloggerURL("getallcars");
-
+	$url = GetTeslaloggerURL("getallcars");
 	$allcars = @file_get_contents($url);
 	if ($allcars === false)
     {
@@ -229,6 +251,9 @@ $url = GetTeslaloggerURL("getallcars");
 	$jcars = json_decode($allcars);
 
 	//var_dump($jcars);
+?>
+<tr><td><b>Main Car:</b></td><td><?PHP CarsCombobox($jcars, $defaultcar); ?></td></tr>
+<?php
 	
 	foreach ($jcars as $k => $v) {
 		$displayname = $v->{"display_name"};

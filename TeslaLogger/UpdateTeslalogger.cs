@@ -79,6 +79,8 @@ namespace TeslaLogger
                 shareDataOnStartup = Tools.IsShareData();
                 bool updateAllDrivestateData = false;
 
+                // start schema update
+
                 if (!DBHelper.ColumnExists("pos", "battery_level"))
                 {
                     Logfile.Log("ALTER TABLE pos ADD COLUMN battery_level DOUBLE NULL");
@@ -335,7 +337,9 @@ namespace TeslaLogger
                 }
 
                 if (updateAllDrivestateData)
+                {
                     DBHelper.UpdateAllDrivestateData();
+                }
 
                 if (!DBHelper.IndexExists("idx_pos_CarID_id", "pos"))
                 {
@@ -373,7 +377,38 @@ namespace TeslaLogger
                     Logfile.Log("ALTER TABLE OK");
                 }
 
+                if (!DBHelper.TableExists("superchargers"))
+                {
+                    string sql = @"
+CREATE TABLE superchargers(
+    id INT NOT NULL AUTO_INCREMENT,
+    name VARCHAR(250) NOT NULL,
+    lat DOUBLE NOT NULL,
+    lng DOUBLE NOT NULL,
+    PRIMARY KEY(id)
+)";
+                    Logfile.Log(sql);
+                    DBHelper.ExecuteSQLQuery(sql);
+                    Logfile.Log("CREATE TABLE OK");
+                }
 
+                if (!DBHelper.TableExists("superchargerstate"))
+                {
+                    string sql = @"
+CREATE TABLE superchargerstate(
+    id INT NOT NULL AUTO_INCREMENT,
+    nameid INT NOT NULL,
+    ts datetime NOT NULL,
+    available_stalls TINYINT NOT NULL,
+    total_stalls TINYINT NOT NULL,
+    PRIMARY KEY(id)
+)";
+                    Logfile.Log(sql);
+                    DBHelper.ExecuteSQLQuery(sql);
+                    Logfile.Log("CREATE TABLE OK");
+                }
+
+                // end of schema update
 
                 if (!DBHelper.TableExists("trip") || !DBHelper.ColumnExists("trip", "outside_temp_avg"))
                 {
@@ -744,7 +779,7 @@ namespace TeslaLogger
                 DBHelper.ExecuteSQLQuery("DROP VIEW IF EXISTS `trip`");
                 string s = DBViews.Trip;
 
-                Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out _);
+                Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out _, out _, out _);
                 if (Range == "RR")
                 {
                     s = s.Replace("`pos_start`.`ideal_battery_range_km` AS `StartRange`,", "`pos_start`.`battery_range_km` AS `StartRange`,");
@@ -831,22 +866,42 @@ namespace TeslaLogger
             {
                 if (Tools.IsMono())
                 {
-                    Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out string URL_Grafana);
+                    Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out string URL_Grafana, out string defaultcar, out string defaultcarid);
 
                     Dictionary<string, string> dictLanguage = GetLanguageDictionary(language);
 
                     Logfile.Log("Start Grafana update");
 
                     string GrafanaVersion = Tools.GetGrafanaVersion();
-                    if (GrafanaVersion == "5.5.0-d3b39f39pre1" || GrafanaVersion == "6.3.5")
+                    if (GrafanaVersion == "5.5.0-d3b39f39pre1" || GrafanaVersion == "6.3.5" || GrafanaVersion == "6.7.3")
                     {
                         Thread threadGrafanaUpdate = new Thread(() =>
                         {
+                            string GrafanaFilename = "grafana_7.2.0_armhf.deb";
+
                             Logfile.Log("upgrade Grafana to 7.2.0!");
 
-                            Tools.Exec_mono("wget", @"https://dl.grafana.com/oss/release/grafana_7.2.0_armhf.deb  --show-progress");
+                            if (File.Exists(GrafanaFilename))
+                                File.Delete(GrafanaFilename);
 
-                            Tools.Exec_mono("dpkg", "-i grafana_7.2.0_armhf.deb");
+                            // use internal downloader
+                            const string grafanaUrl = "https://dl.grafana.com/oss/release/grafana_7.2.0_armhf.deb";
+                            const string grafanaFile = "grafana_7.2.0_armhf.deb";
+                            if (!Tools.DownloadToFile(grafanaUrl, grafanaFile, 300, true).Result) {
+                                // fallback to wget
+                                Logfile.Log($"fallback o wget to download {grafanaUrl}");
+                                Tools.Exec_mono("wget", $"{grafanaUrl}  --show-progress");
+                            }
+
+                            if (File.Exists(GrafanaFilename))
+                            {
+                                Logfile.Log(GrafanaFilename + " Sucessfully Downloaded -  Size:" + new FileInfo(GrafanaFilename).Length);
+
+                                if (GrafanaVersion == "6.7.3") // first Raspberry PI4 install
+                                    Tools.Exec_mono("dpkg", "-r grafana-rpi");
+
+                                Tools.Exec_mono("dpkg", "-i --force-overwrite grafana_7.2.0_armhf.deb");
+                            }
 
                             Logfile.Log("upgrade Grafana DONE!");
 
@@ -961,8 +1016,9 @@ namespace TeslaLogger
                             {
                                 s = s.Replace(" speed_max,", "speed_max / 1.609 as speed_max,");
                                 s = s.Replace(" avg_consumption_kWh_100km,", " avg_consumption_kWh_100km * 1.609 as avg_consumption_kWh_100km,");
-                                s = s.Replace(" as avg_kmh,", " / 1.609 as avg_kmh");
+                                s = s.Replace(" as avg_kmh", " / 1.609 as avg_kmh");
                                 s = s.Replace(" km_diff,", " km_diff  / 1.609 as km_diff,");
+                                s = s.Replace("StartRange - EndRange as RangeDiff", "(StartRange - EndRange) / 1.609 as RangeDiff");
 
                                 s = s.Replace("\"max km/h\"", "\"max mph\"");
                                 s = s.Replace("\"Ø km/h\"", "\"Ø mph\"");
@@ -1134,6 +1190,8 @@ namespace TeslaLogger
                         
                         string title, uid, link;
                         GrafanaGetTitleAndLink(s, URL_Grafana, out title, out uid, out link);
+
+                        s = UpdateDefaultCar(s, defaultcar, defaultcarid);
                         
                         if (!title.Contains("ScanMyTesla") && !title.Contains("Zelltemperaturen") && !title.Contains("SOC ") && !title.Contains("Chargertype") && !title.Contains("Mothership"))
                         dashboardlinks.Add(title+"|"+link);
@@ -1170,6 +1228,25 @@ namespace TeslaLogger
             {
                 Logfile.Log("End Grafana update");
             }
+        }
+
+        internal static string UpdateDefaultCar(string s, string name, string id)
+        {
+            try
+            {
+                if (name == null || name.Length == 0)
+                    return s;
+
+                Regex regexAlias = new Regex("(templating.*\\\"text\\\":\\s\\\")(\\\".*?value\\\":\\s\\\")(.*?)(\\\")(.*?display_name)", RegexOptions.Singleline | RegexOptions.Multiline);
+                var m = regexAlias.Match(s);
+                string ret = regexAlias.Replace(s, "${1}" + name + "${2}" + id + "${4}$5");
+                return ret;
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+            return s;
         }
 
         internal static void GrafanaGetTitleAndLink(string json, string URL_Grafana, out string title, out string uid, out string link)

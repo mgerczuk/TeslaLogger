@@ -21,11 +21,9 @@ namespace TeslaLogger
 
         private static void Main(string[] args)
         {
-            InitDebugLogging();
-
             try
             {
-                InitTLStats();
+                InitDebugLogging();
 
                 InitStage1();
 
@@ -43,12 +41,15 @@ namespace TeslaLogger
 
                 MQTTClient.StartMQTTClient();
 
+                InitTLStats();
+
                 UpdateDbInBackground();
 
                 Logfile.Log("Init finished, now enter main loop");
 
                 GetAllCars();
 
+                InitNearbySuCService();
             }
             catch (Exception ex)
             {
@@ -56,6 +57,33 @@ namespace TeslaLogger
                 Logfile.ExceptionWriter(ex, "main loop");
                 Logfile.Log("Teslalogger Stopped!");
             }
+        }
+
+        private static void InitNearbySuCService()
+        {
+            try
+            {
+                if (Tools.UseNearbySuCService())
+                {
+                    Thread threadNearbySuCService = new Thread(() =>
+                    {
+                        NearbySuCService.GetSingleton().Run();
+                    })
+                    {
+                        Name = "NearbySuCServiceThread"
+                    };
+                    threadNearbySuCService.Start();
+                }
+                else
+                {
+                    Logfile.Log("NearbySuCService disabled (enable in settings)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+
         }
 
         private static void GetAllCars()

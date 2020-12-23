@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Linq;
 using System.Net;
 using System.Runtime.Caching;
 using System.Text;
@@ -20,6 +21,8 @@ namespace TeslaLogger
         private static bool mothershipEnabled = false;
         private Car car;
 
+        internal static string Database = "teslalogger";
+
         public static string DBConnectionstring => GetDBConnectionstring();
 
         private static string _DBConnectionstring = string.Empty;
@@ -32,16 +35,12 @@ namespace TeslaLogger
             string DBConnectionstring = string.IsNullOrEmpty(ApplicationSettings.Default.DBConnectionstring)
 ? "Server=127.0.0.1;Database=teslalogger;Uid=root;Password=teslalogger;CharSet=utf8mb4;"
 : ApplicationSettings.Default.DBConnectionstring;
-            Tools.DebugLog($"DBConnectionstring {DBConnectionstring}");
             if (DBConnectionstring.ToLower().Contains("charset="))
             {
                 Match m = Regex.Match(DBConnectionstring.ToLower(), "charset(=.+?);");
                 if (m.Success && m.Groups.Count == 2 && m.Groups[1].Captures.Count == 1)
                 {
-                    Tools.DebugLog("regex match: <" + m.Groups[1].Captures[0].ToString() + ">");
-                    Tools.DebugLog($"old DBConnectionstring {DBConnectionstring}");
                     DBConnectionstring = DBConnectionstring.Replace(m.Groups[1].Captures[0].ToString(), "=utf8mb4");
-                    Tools.DebugLog($"new DBConnectionstring {DBConnectionstring}");
                     _DBConnectionstring = DBConnectionstring;
                 }
                 else
@@ -49,10 +48,7 @@ namespace TeslaLogger
                     m = Regex.Match(DBConnectionstring.ToLower(), "charset(=.+)$");
                     if (m.Success && m.Groups.Count == 2 && m.Groups[1].Captures.Count == 1)
                     {
-                        Tools.DebugLog("regex match: <" + m.Groups[1].Captures[0].ToString() + ">");
-                        Tools.DebugLog($"old DBConnectionstring {DBConnectionstring}");
                         DBConnectionstring = DBConnectionstring.Replace(m.Groups[1].Captures[0].ToString(), "=utf8mb4");
-                        Tools.DebugLog($"new DBConnectionstring {DBConnectionstring}");
                         _DBConnectionstring = DBConnectionstring;
                     }
                 }
@@ -64,6 +60,14 @@ namespace TeslaLogger
                     DBConnectionstring += ";";
                 }
                 DBConnectionstring += "charset=utf8mb4";
+            }
+            if (DBConnectionstring.ToLower().Contains("database="))
+            {
+                Match m = Regex.Match(DBConnectionstring.ToLower(), "database=(.+?);");
+                if (m.Success && m.Groups.Count == 2 && m.Groups[1].Captures.Count == 1)
+                {
+                    Database = m.Groups[1].Captures[0].ToString();
+                }
             }
             _DBConnectionstring = DBConnectionstring;
             return _DBConnectionstring;
@@ -434,8 +438,8 @@ namespace TeslaLogger
 
         public void CloseChargingState()
         {
+            car.Log("CloseChargingState()");
             bool hasFreeSuc = car.HasFreeSuC();
-            Tools.DebugLog($"CloseChargingState() car.HasFreeSuC(): {hasFreeSuc}");
             if (hasFreeSuc)
             {
                 // get open SuC charging sessions and apply HasFreeSuC
@@ -456,7 +460,6 @@ WHERE
                         {
                             cmd.Parameters.AddWithValue("@carid", car.CarInDB);
                             cmd.Parameters.AddWithValue("@cost_total", 0.0);
-                            Tools.DebugLog(cmd);
                             int rowsUpdated = cmd.ExecuteNonQuery();
                             if (rowsUpdated > 0)
                             {
@@ -473,13 +476,14 @@ WHERE
                 }
             }
 
+            int chargeID = GetMaxChargeid(out DateTime chargeEnd);
             using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
             {
                 con.Open();
                 using (MySqlCommand cmd = new MySqlCommand("update chargingstate set EndDate = @EndDate, EndChargingID = @EndChargingID where EndDate is null and CarID=@CarID", con))
                 {
-                    cmd.Parameters.AddWithValue("@EndDate", DateTime.Now);
-                    cmd.Parameters.AddWithValue("@EndChargingID", GetMaxChargeid());
+                    cmd.Parameters.AddWithValue("@EndDate", chargeEnd);
+                    cmd.Parameters.AddWithValue("@EndChargingID", chargeID);
                     cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
                     cmd.ExecuteNonQuery();
                 }
@@ -639,7 +643,6 @@ WHERE
 
         internal static void UpdateAllChargingMaxPower()
         {
-            Tools.DebugLog("UpdateAllChargingMaxPower");
             try
             {
                 using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
@@ -765,26 +768,85 @@ WHERE
 
         public void StartChargingState(WebHelper wh)
         {
-            Tools.DebugLog($"DBHelper.StartChargingState()");
+            int chargeID = GetMaxChargeid(out DateTime chargeStart);
             using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
             {
                 con.Open();
                 using (MySqlCommand cmd = new MySqlCommand("insert chargingstate (CarID, StartDate, Pos, StartChargingID, fast_charger_brand, fast_charger_type, conn_charge_cable , fast_charger_present ) values (@CarID, @StartDate, @Pos, @StartChargingID, @fast_charger_brand, @fast_charger_type, @conn_charge_cable , @fast_charger_present)", con))
                 {
                     cmd.Parameters.AddWithValue("@CarID", wh.car.CarInDB);
-                    cmd.Parameters.AddWithValue("@StartDate", DateTime.Now);
+                    cmd.Parameters.AddWithValue("@StartDate", chargeStart);
                     cmd.Parameters.AddWithValue("@Pos", GetMaxPosid());
-                    cmd.Parameters.AddWithValue("@StartChargingID", GetMaxChargeid());
+                    cmd.Parameters.AddWithValue("@StartChargingID", chargeID);
                     cmd.Parameters.AddWithValue("@fast_charger_brand", wh.fast_charger_brand);
                     cmd.Parameters.AddWithValue("@fast_charger_type", wh.fast_charger_type);
                     cmd.Parameters.AddWithValue("@conn_charge_cable", wh.conn_charge_cable);
                     cmd.Parameters.AddWithValue("@fast_charger_present", wh.fast_charger_present);
+                    Tools.DebugLog(cmd);
                     cmd.ExecuteNonQuery();
                 }
             }
 
             wh.car.currentJSON.current_charging = true;
             wh.car.currentJSON.CreateCurrentJSON();
+
+            #pragma warning disable CA2008 // Keine Tasks ohne Übergabe eines TaskSchedulers erstellen
+            _ = Task.Factory.StartNew(() =>
+            {
+                // give TL some time to enter charge state
+                Thread.Sleep(30000);
+                // try to update chargingstate.pos
+                // are we still charging?
+                car.Log($"StartChargingState Task start");
+                int latestPos = GetMaxPosidLatLng(out double poslat, out double poslng);
+                car.Log($"StartChargingState Task latestPos: {latestPos}");
+                if (car.GetCurrentState() == Car.TeslaState.Charge)
+                {
+                    // now get a new entry in pos
+                    wh.IsDriving(true);
+                    // get lat, lng from max pos id
+                    int newPos = GetMaxPosidLatLng(out poslat, out poslng);
+                    car.Log($"StartChargingState Task newPos: {newPos}");
+                    if (!double.IsNaN(poslat) && !double.IsNaN(poslng))
+                    {
+                        int chargingstateId = GetMaxChargingstateId(out double chglat, out double chglng);
+                        if (!double.IsNaN(chglat) && !double.IsNaN(chglng))
+                        {
+                            car.Log($"StartChargingState Task (poslng, poslat, chglng, chglat) ({poslng}, {poslat}, {chglng}, {chglat})");
+                            double distance = Geofence.GetDistance(poslng, poslat, chglng, chglat);
+                            car.Log($"StartChargingState Task distance: {distance}");
+                            if (distance > 10)
+                            {
+                                using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+                                {
+                                    con.Open();
+                                    using (MySqlCommand cmd = new MySqlCommand("UPDATE chargingstate SET Pos = @latestPos WHERE chargingstate.id = @chargingstateId", con))
+                                    {
+                                        cmd.Parameters.AddWithValue("@latestPos", newPos);
+                                        cmd.Parameters.AddWithValue("@chargingstateId", chargingstateId);
+                                        Tools.DebugLog(cmd);
+                                        int updatedRows = cmd.ExecuteNonQuery();
+                                        car.Log($"updated chargingstate {chargingstateId} to pos.id {newPos}");
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            car.Log($"StartChargingState Task chglat: {chglat} chglng: {chglng}");
+                        }
+                    }
+                    else
+                    {
+                        car.Log($"StartChargingState Task poslat: {poslat} poslng: {poslng}");
+                    }
+                }
+                else
+                {
+                    car.Log($"StartChargingState Task GetCurrentState(): {car.GetCurrentState()}");
+                }
+            });
+            #pragma warning restore CA2008 // Keine Tasks ohne Übergabe eines TaskSchedulers erstellen
         }
 
         public void CloseDriveState(DateTime EndDate)
@@ -836,7 +898,7 @@ WHERE
 
         public static void UpdateTripElevation(int startPos, int maxPosId, string comment = "")
         {
-            if (WebHelper.geofence.RacingMode)
+            if (Geofence.GetInstance().RacingMode)
             {
                 return;
             }
@@ -1276,7 +1338,6 @@ WHERE
 
         public static bool UpdateIncompleteTrips()
         {
-            Tools.DebugLog("UpdateIncompleteTrips");
             try
             {
                 using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
@@ -1397,8 +1458,7 @@ WHERE
                     cmd.Parameters.AddWithValue("@lng", longitude.ToString());
                     cmd.Parameters.AddWithValue("@speed", (int)(speed * 1.60934M));
                     cmd.Parameters.AddWithValue("@power", (int)(power * 1.35962M));
-                    cmd.Parameters.AddWithValue("@odometer", odometer.ToString());
-
+                    cmd.Parameters.AddWithValue("@odometer", odometer);
 
                     if (ideal_battery_range_km == -1)
                     {
@@ -1516,7 +1576,34 @@ WHERE
             double kmBattery_Range = battery_range / (double)0.62137;
 
             double powerkW = Convert.ToDouble(charger_power);
+
+            // default waitbetween2pointsdb
             double waitbetween2pointsdb = 1000.0 / powerkW;
+            // if charging started less than 5 minutes ago, insert one charging data point every ~60 seconds
+            try
+            {
+                // get charging_state, must not be older than 5 minutes = 300 seconds = 300000 milliseconds
+                if (car.GetTeslaAPIState().GetState("charging_state", out Dictionary<TeslaAPIState.Key, object> charging_state, 300000)) {
+                    if (charging_state[TeslaAPIState.Key.Value].ToString().Equals("Charging"))
+                    {
+                        // check if charging_state value Charging is not older than 5 minutes
+                        long now = (long)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalMilliseconds;
+                        if (long.TryParse(charging_state[TeslaAPIState.Key.ValueLastUpdate].ToString(), out long valueLastUpdate))
+                        {
+                            if (now - valueLastUpdate < 300000)
+                            {
+                                // charging_state changed to Charging less than 5 minutes ago
+                                // set waitbetween2pointsdb to 60 seconds
+                                waitbetween2pointsdb = 60;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Tools.DebugLog("Exception waitbetween2pointsdb", ex);
+            }
 
             double deltaSeconds = (DateTime.Now - lastChargingInsert).TotalSeconds;
 
@@ -1655,22 +1742,73 @@ WHERE
             return 0;
         }
 
-        private int GetMaxChargeid()
+        public int GetMaxPosidLatLng(out double lat, out double lng)
         {
             using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
             {
                 con.Open();
-                using (MySqlCommand cmd = new MySqlCommand("Select max(id) from charging where CarID=@CarID", con))
+                using (MySqlCommand cmd = new MySqlCommand("select lat,lng from pos where id in (Select max(id) from pos where CarID=@CarID)", con))
                 {
                     cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
+                    Tools.DebugLog(cmd);
                     MySqlDataReader dr = cmd.ExecuteReader();
                     if (dr.Read() && dr[0] != DBNull.Value)
                     {
+                        double.TryParse(dr[1].ToString(), out lat);
+                        double.TryParse(dr[2].ToString(), out lng);
                         return Convert.ToInt32(dr[0]);
                     }
                 }
             }
+            lat = double.NaN;
+            lng = double.NaN;
+            return 0;
+        }
 
+        private int GetMaxChargeid(out DateTime chargeStart)
+        {
+            using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+            {
+                con.Open();
+                using (MySqlCommand cmd = new MySqlCommand("SELECT id, datum FROM charging WHERE CarID=@CarID ORDER BY datum DESC LIMIT 1", con))
+                {
+                    cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
+                    Tools.DebugLog(cmd);
+                    MySqlDataReader dr = cmd.ExecuteReader();
+                    if (dr.Read() && dr[0] != DBNull.Value && dr[1] != DBNull.Value)
+                    {
+                        if (!DateTime.TryParse(dr[1].ToString(), out chargeStart))
+                        {
+                            chargeStart = DateTime.Now;
+                        }
+                        return Convert.ToInt32(dr[0]);
+                    }
+                }
+            }
+            chargeStart = DateTime.Now;
+            return 0;
+        }
+
+        private int GetMaxChargingstateId(out double lat, out double lng)
+        {
+            using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+            {
+                con.Open();
+                using (MySqlCommand cmd = new MySqlCommand("select chargingstate.id, lat, lng from chargingstate join pos on chargingstate.pos = pos.id where chargingstate.id in (select max(id) from chargingstate where carid=@CarID)", con))
+                {
+                    cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
+                    Tools.DebugLog(cmd);
+                    MySqlDataReader dr = cmd.ExecuteReader();
+                    if (dr.Read() && dr[0] != DBNull.Value && dr[1] != DBNull.Value && dr[2] != DBNull.Value)
+                    {
+                        double.TryParse(dr[1].ToString(), out lat);
+                        double.TryParse(dr[2].ToString(), out lng);
+                        return Convert.ToInt32(dr[0]);
+                    }
+                }
+            }
+            lat = double.NaN;
+            lng = double.NaN;
             return 0;
         }
 
@@ -2185,7 +2323,6 @@ WHERE
         public static void Enable_utf8mb4()
         {
             // https://mathiasbynens.be/notes/mysql-utf8mb4
-            Tools.DebugLog("Enable utf8mb4");
             // check database
             Enable_utf8mb4_check_database("teslalogger");
             // check tables
@@ -2207,7 +2344,6 @@ WHERE
                         {
                             if (dr.HasRows && dr[0] != null && dr[1] != null)
                             {
-                                Tools.DebugLog($"Enable_utf8mb4_check_database {dbname} default_character_set_name {dr[0]} default_collation_name {dr[1]}");
                                 if (!dr[0].ToString().Equals("utf8mb4") || !dr[1].ToString().Equals("utf8mb4_unicode_ci"))
                                 {
                                     Enable_utf8mb4_alter_database(dbname);
@@ -2256,7 +2392,6 @@ WHERE
                         {
                             if (dr.HasRows && dr[0] != null && dr[1] != null)
                             {
-                                Tools.DebugLog($"Enable_utf8mb4_check_tables {dbname} table_name {dr[0]} table_collation {dr[1]}");
                                 if (!dr[1].ToString().Equals("utf8mb4_unicode_ci"))
                                 {
                                     Enable_utf8mb4_alter_table(dbname, dr[0].ToString());
@@ -2307,7 +2442,6 @@ WHERE
                         {
                             if (dr.HasRows && dr[0] != null && dr[1] != null && dr[2] != null)
                             {
-                                Tools.DebugLog($"Enable_utf8mb4_check_columns {dbname} table_name {tablename} COLUMN_NAME {dr[0]} CHARACTER_SET_NAME {dr[1]} COLLATION_NAME {dr[2]}");
                                 if (!dr[1].ToString().Equals("utf8mb4") || !dr[2].ToString().Equals("utf8mb4_unicode_ci"))
                                 {
                                     Enable_utf8mb4_alter_column(dbname, tablename, dr[0].ToString(), dr[3].ToString());

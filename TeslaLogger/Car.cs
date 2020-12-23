@@ -34,12 +34,17 @@ namespace TeslaLogger
         internal WebHelper GetWebHelper() { return webhelper; }
         private DateTime lastCarUsed = DateTime.Now;
         internal DateTime GetLastCarUsed() { return lastCarUsed; }
+        internal void SetLastCarUsed(DateTime dt)
+        {
+            lastCarUsed = dt;
+            Tools.DebugLog($"lastCarUsed: {lastCarUsed}");
+        }
         private DateTime lastOdometerChanged = DateTime.Now;
         internal DateTime GetLastOdometerChanged() { return lastOdometerChanged; }
         private DateTime lastTryTokenRefresh = DateTime.Now;
         internal DateTime GetLastTryTokenRefresh() { return lastTryTokenRefresh; }
         private string lastSetChargeLimitAddressName = string.Empty;
-        internal string GetLastSetChargeLimitAddressName() { return lastSetChargeLimitAddressName; }
+        
         private bool goSleepWithWakeup = false;
         internal bool GetGoSleepWithWakeup() { return goSleepWithWakeup; }
         private double odometerLastTrip;
@@ -96,12 +101,18 @@ namespace TeslaLogger
 
         private TeslaAPIState teslaAPIState;
 
+        public bool useTaskerToken = true;
+
         public double Wh_TR { get => _wh_TR;
             set { 
                 _wh_TR = value;
                 currentJSON.Wh_TR = value;
             } 
         }
+
+        public string LastSetChargeLimitAddressName { get => lastSetChargeLimitAddressName; set => lastSetChargeLimitAddressName = value; }
+
+        internal int LoginRetryCounter = 0;
 
         [MethodImpl(MethodImplOptions.Synchronized)]
         internal TeslaAPIState GetTeslaAPIState() { return teslaAPIState; }
@@ -202,7 +213,7 @@ namespace TeslaLogger
                     catch (Exception ex)
                     {
                         Logfile.ExceptionWriter(ex, "#" + CarInDB + ": main loop");
-                        System.Threading.Thread.Sleep(10000);
+                        Thread.Sleep(10000);
                     }
                 }
             }
@@ -264,6 +275,7 @@ namespace TeslaLogger
                 }
 
                 Log("Car: " + ModelName + " - " + Wh_TR + " Wh/km");
+                Log($"VIN decoder: {Tools.VINDecoder(vin, out _, out _, out _, out _, out _, out _)}");
                 dbHelper.GetLastTrip();
 
                 currentJSON.current_car_version = dbHelper.GetLastCarVersion();
@@ -282,6 +294,12 @@ namespace TeslaLogger
             run = false;
             thread.Abort();
             allcars.Remove(this);
+        }
+
+        public void ThreadJoin()
+        {
+            if (thread != null)
+                thread.Join();
         }
 
         private void HandleState_GoSleep()
@@ -386,9 +404,9 @@ namespace TeslaLogger
                     }
                 }
 
-                if (WebHelper.geofence.RacingMode)
+                if (Geofence.GetInstance().RacingMode)
                 {
-                    Address a = WebHelper.geofence.GetPOI(currentJSON.latitude, currentJSON.longitude);
+                    Address a = Geofence.GetInstance().GetPOI(currentJSON.latitude, currentJSON.longitude);
                     if (a != null)
                     {
                         if (lastRacingPoint == null)
@@ -411,7 +429,10 @@ namespace TeslaLogger
                 DriveFinished();
 
                 ShareData sd = new ShareData(this);
-                sd.SendAllChargingData();
+                _ = Task.Factory.StartNew(() =>
+                {
+                    sd.SendAllChargingData();
+                });
             }
 
             return lastRacingPoint;
@@ -550,7 +571,7 @@ namespace TeslaLogger
                             SetCurrentState(TeslaState.Start);
 
                             webhelper.IsDriving(true); // kurz bevor er schlafen geht, eine Positionsmeldung speichern und schauen ob standheizung / standklima / sentry läuft.
-                            Address addr = WebHelper.geofence.GetPOI(currentJSON.latitude, currentJSON.longitude, false);
+                            Address addr = Geofence.GetInstance().GetPOI(currentJSON.latitude, currentJSON.longitude, false);
                             if (!CanFallAsleep(out string reason))
                             {
                                 Log($"Reason:{reason} prevents car to get sleep");
@@ -638,7 +659,63 @@ namespace TeslaLogger
 
                     if (doSleep)
                     {
-                        Thread.Sleep(5000);
+                        int sleepduration = 5000;
+                        // if charging is starting just now, decrease sleepduration to 0.5 second
+                        try
+                        {
+                            // get charging_state, must not be older than 2 minutes = 120 seconds = 120000 milliseconds
+                            if (GetTeslaAPIState().GetState("charging_state", out Dictionary<TeslaAPIState.Key, object> charging_state, 120000))
+                            {
+                                // charging_state == Starting?
+                                if (charging_state[TeslaAPIState.Key.Value] != null
+                                    && (charging_state[TeslaAPIState.Key.Value].ToString().Equals("Starting")
+                                        || charging_state[TeslaAPIState.Key.Value].ToString().Equals("NoPower"))
+                                    )
+                                {
+                                    Tools.DebugLog($"charging_state: {charging_state[TeslaAPIState.Key.Value]}");
+                                    // check if charging_state value is not older than 1 minute
+                                    long now = (long)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalMilliseconds;
+                                    if (long.TryParse(charging_state[TeslaAPIState.Key.ValueLastUpdate].ToString(), out long valueLastUpdate))
+                                    {
+                                        Tools.DebugLog($"charging_state now {now} vlu {valueLastUpdate} diff {now - valueLastUpdate}");
+                                        if (now - valueLastUpdate < 60000)
+                                        {
+                                            // charging_state changed to Charging less than 1 minute ago
+                                            // reduce sleepduration to 0.5 second
+                                            sleepduration = 500;
+                                            Tools.DebugLog($"charging_state sleepduration: {sleepduration}");
+                                        }
+                                    }
+                                }
+                            }
+                            // get charge_port_door_open, must not be older than 2 minutes = 120 seconds = 1200000 milliseconds
+                            if (GetTeslaAPIState().GetState("charge_port_door_open", out Dictionary<TeslaAPIState.Key, object> charge_port_door_open, 120000))
+                            {
+                                // charge_port_door_open == true?
+                                if (GetTeslaAPIState().GetBool("charge_port_door_open", out bool bcharge_port_door_open) && bcharge_port_door_open)
+                                {
+                                    Tools.DebugLog($"charge_port_door_open: {charge_port_door_open[TeslaAPIState.Key.Value]}");
+                                    long now = (long)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalMilliseconds;
+                                    // check if charge_port_door_open value True is not older than 1 minute
+                                    if (long.TryParse(charge_port_door_open[TeslaAPIState.Key.ValueLastUpdate].ToString(), out long valueLastUpdate))
+                                    {
+                                        Tools.DebugLog($"charge_port_door_open now {now} vlu {valueLastUpdate} diff {now - valueLastUpdate}");
+                                        if (now - valueLastUpdate < 60000)
+                                        {
+                                            // charge_port_door_open changed to Charging less than 1 minute ago
+                                            // reduce sleepduration to 0.5 second
+                                            sleepduration = 500;
+                                            Tools.DebugLog($"charge_port_door_open sleepduration: {sleepduration}");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Tools.DebugLog("Exception sleepduration", ex);
+                        }
+                        Thread.Sleep(sleepduration);
                     }
                     else
                     {
@@ -712,6 +789,12 @@ namespace TeslaLogger
                         break;
                     }
                 }
+            }
+            else if (res == "INSERVICE")
+            {
+                SetCurrentState(TeslaState.Start);
+                Log("IS IN SERVICE");
+                Thread.Sleep(1000 * 60 * 30);
             }
             else
             {
@@ -822,7 +905,10 @@ namespace TeslaLogger
 
                         // Every 10 Days send degradataion Data
                         ShareData sd = new ShareData(this);
-                        sd.SendDegradationData();
+                        _ = Task.Factory.StartNew(() =>
+                        {
+                            sd.SendDegradationData();
+                        });
                     }
                     else
                     {
@@ -836,7 +922,7 @@ namespace TeslaLogger
         {
             Log("ShiftStateChange: " + _oldState + " -> " + _newState);
             lastCarUsed = DateTime.Now;
-            Address addr = WebHelper.geofence.GetPOI(currentJSON.latitude, currentJSON.longitude, false);
+            Address addr = Geofence.GetInstance().GetPOI(currentJSON.latitude, currentJSON.longitude, false);
             // process special flags for POI
             if (addr != null && addr.specialFlags != null && addr.specialFlags.Count > 0)
             {
@@ -970,14 +1056,14 @@ namespace TeslaLogger
             {
                 if (m.Groups[1].Captures[0] != null && int.TryParse(m.Groups[1].Captures[0].ToString(), out int chargelimit))
                 {
-                    if (!lastSetChargeLimitAddressName.Equals(_addr.name))
+                    if (!LastSetChargeLimitAddressName.Equals(_addr.name))
                     {
                         Task.Factory.StartNew(() =>
                         {
                             Log($"SetChargeLimit to {chargelimit} at '{_addr.name}' ...");
                             string result = webhelper.PostCommand("command/set_charge_limit", "{\"percent\":" + chargelimit + "}", true).Result;
                             Log("set_charge_limit(): " + result);
-                            lastSetChargeLimitAddressName = _addr.name;
+                            LastSetChargeLimitAddressName = _addr.name;
                         });
                     }
                 }
@@ -1020,16 +1106,25 @@ namespace TeslaLogger
             {
                 _ = webhelper.GetOdometerAsync();
             }
+            // any -> Driving
+            if (_oldState != TeslaState.Drive && _newState == TeslaState.Drive)
+            {
+                // reset lastSetChargeLimitAddressName
+                LastSetChargeLimitAddressName = string.Empty;
+            }
+
             // charging -> any
             if (_oldState == TeslaState.Charge && _newState != TeslaState.Charge)
             {
                 _ = Task.Factory.StartNew(() =>
                 {
-                    Address addr = WebHelper.geofence.GetPOI(currentJSON.latitude, currentJSON.longitude, false);
+                    Address addr = Geofence.GetInstance().GetPOI(currentJSON.latitude, currentJSON.longitude, false);
                     if (addr != null && addr.specialFlags != null && addr.specialFlags.Count > 0)
                     {
                         if (addr.specialFlags.ContainsKey(Address.SpecialFlags.CopyChargePrice))
                         {
+                            // allow some time to close charging session before updating price
+                            Thread.Sleep(30000);
                             HandleSpecialFlag_CopyChargePrice(addr);
                         }
                     }
@@ -1038,7 +1133,7 @@ namespace TeslaLogger
             // any -> charging
             if (_oldState != TeslaState.Charge && _newState == TeslaState.Charge)
             {
-                Address addr = WebHelper.geofence.GetPOI(currentJSON.latitude, currentJSON.longitude, false);
+                Address addr = Geofence.GetInstance().GetPOI(currentJSON.latitude, currentJSON.longitude, false);
                 if (addr != null && addr.specialFlags != null && addr.specialFlags.Count > 0)
                 {
                     foreach (KeyValuePair<Address.SpecialFlags, string> flag in addr.specialFlags)
@@ -1246,11 +1341,13 @@ AND chargingstate.endchargingid = charging.id
 AND pos.address = @addr
 AND chargingstate.cost_total IS NULL
 AND chargingstate.CarID = @CarID
+AND chargingstate.id > @referenceID
 ORDER BY id DESC
 LIMIT 1", con))
                     {
                         cmd.Parameters.Add("@addr", MySqlDbType.VarChar).Value = _addr.name;
                         cmd.Parameters.Add("@CarID", MySqlDbType.UByte).Value = CarInDB;
+                        cmd.Parameters.Add("@referenceID", MySqlDbType.Int32).Value = referenceID;
                         Tools.DebugLog(cmd);
                         MySqlDataReader dr = cmd.ExecuteReader();
                         if (dr.Read() && dr[0] != DBNull.Value)
@@ -1264,65 +1361,60 @@ LIMIT 1", con))
                                 )
                             {
                                 Logfile.Log($"CopyChargePrice: latest charging session at '{_addr.name}' has ID {chargeID} - charge_energy_added:{charge_energy_added} chargeStart:{chargeStart} chargeEnd:{chargeEnd} duration:{(chargeEnd - chargeStart).TotalMinutes} minutes");
-                            }
-                        }
-                    }
-                    con.Close();
-                }
-                if (chargeID != 0)
-                {
-                    // update charge session with id chargeID
-                    if (ref_cost_total == 0.0)
-                    {
-                        // free charging
-                        using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
-                        {
-                            con.Open();
-                            using (MySqlCommand cmd = new MySqlCommand(
-@"UPDATE
+                                if (chargeID != 0)
+                                {
+                                    // update charge session with id chargeID
+                                    if (ref_cost_total == 0.0)
+                                    {
+                                        // free charging
+                                        using (MySqlConnection con2 = new MySqlConnection(DBHelper.DBConnectionstring))
+                                        {
+                                            con2.Open();
+                                            using (MySqlCommand cmd2 = new MySqlCommand(
+                @"UPDATE
   chargingstate
 SET
   cost_total = @cost_total,
   cost_currency = @cost_currency
 WHERE
   id = @id
-  AND CarID = @CarID", con))
-                            {
-                                cmd.Parameters.AddWithValue("@cost_total", ref_cost_total);
-                                cmd.Parameters.AddWithValue("@cost_currency", DBHelper.DBNullIfEmpty(ref_cost_currency));
-                                cmd.Parameters.AddWithValue("@id", chargeID);
-                                cmd.Parameters.Add("@CarID", MySqlDbType.UByte).Value = CarInDB;
-                                Tools.DebugLog(cmd);
-                                _ = cmd.ExecuteNonQuery();
-                                Logfile.Log($"CopyChargePrice: update charging session at '{_addr.name}', ID {chargeID}: cost_total 0.0");
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // calculate costs
-                        double calculated_total_cost = 0.0;
-                        if ((chargeEnd - chargeStart).TotalMinutes != 0 && ref_cost_per_minute != 0.0)
-                        {
-                            calculated_total_cost += (chargeEnd - chargeStart).TotalMinutes * ref_cost_per_minute;
-                            Logfile.Log($"CopyChargePrice: cost_per_minute:{(chargeEnd - chargeStart).TotalMinutes * ref_cost_per_minute} - total:{calculated_total_cost}");
-                        }
-                        if (ref_cost_per_kwh != 0.0)
-                        {
-                            calculated_total_cost += charge_energy_added * ref_cost_per_kwh;
-                            Logfile.Log($"CopyChargePrice: cost_per_kwh:{charge_energy_added * ref_cost_per_kwh} - total:{calculated_total_cost}");
-                        }
-                        if (ref_cost_per_session != 0.0)
-                        {
-                            calculated_total_cost += ref_cost_per_session;
-                            Logfile.Log($"CopyChargePrice: cost_per_session:{ref_cost_per_session} - total:{calculated_total_cost}");
-                        }
-                        Logfile.Log($"CopyChargePrice: calculated_total_cost:{calculated_total_cost}");
-                        using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
-                        {
-                            con.Open();
-                            using (MySqlCommand cmd = new MySqlCommand(
-@"UPDATE
+  AND CarID = @CarID", con2))
+                                            {
+                                                cmd2.Parameters.AddWithValue("@cost_total", ref_cost_total);
+                                                cmd2.Parameters.AddWithValue("@cost_currency", DBHelper.DBNullIfEmpty(ref_cost_currency));
+                                                cmd2.Parameters.AddWithValue("@id", chargeID);
+                                                cmd2.Parameters.Add("@CarID", MySqlDbType.UByte).Value = CarInDB;
+                                                Tools.DebugLog(cmd2);
+                                                _ = cmd2.ExecuteNonQuery();
+                                                Logfile.Log($"CopyChargePrice: update charging session at '{_addr.name}', ID {chargeID}: cost_total 0.0");
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // calculate costs
+                                        double calculated_total_cost = 0.0;
+                                        if ((chargeEnd - chargeStart).TotalMinutes != 0 && ref_cost_per_minute != 0.0)
+                                        {
+                                            calculated_total_cost += (chargeEnd - chargeStart).TotalMinutes * ref_cost_per_minute;
+                                            Logfile.Log($"CopyChargePrice: cost_per_minute:{(chargeEnd - chargeStart).TotalMinutes * ref_cost_per_minute} - total:{calculated_total_cost}");
+                                        }
+                                        if (ref_cost_per_kwh != 0.0)
+                                        {
+                                            calculated_total_cost += charge_energy_added * ref_cost_per_kwh;
+                                            Logfile.Log($"CopyChargePrice: cost_per_kwh:{charge_energy_added * ref_cost_per_kwh} - total:{calculated_total_cost}");
+                                        }
+                                        if (ref_cost_per_session != 0.0)
+                                        {
+                                            calculated_total_cost += ref_cost_per_session;
+                                            Logfile.Log($"CopyChargePrice: cost_per_session:{ref_cost_per_session} - total:{calculated_total_cost}");
+                                        }
+                                        Logfile.Log($"CopyChargePrice: calculated_total_cost:{calculated_total_cost}");
+                                        using (MySqlConnection con2 = new MySqlConnection(DBHelper.DBConnectionstring))
+                                        {
+                                            con2.Open();
+                                            using (MySqlCommand cmd2 = new MySqlCommand(
+                @"UPDATE
   chargingstate
 SET
   cost_total = @cost_total,
@@ -1331,45 +1423,50 @@ SET
   cost_per_session = @cost_per_session,
   cost_per_minute = @cost_per_minute
 WHERE
-  id = @id", con))
-                            {
-                                cmd.Parameters.AddWithValue("@cost_total", calculated_total_cost);
-                                cmd.Parameters.AddWithValue("@cost_currency", DBHelper.DBNullIfEmpty(ref_cost_currency));
-                                if (ref_cost_per_kwh_found)
-                                {
-                                    cmd.Parameters.Add("@cost_per_kwh", MySqlDbType.Double).Value = ref_cost_per_kwh;
+  id = @id", con2))
+                                            {
+                                                cmd2.Parameters.AddWithValue("@cost_total", calculated_total_cost);
+                                                cmd2.Parameters.AddWithValue("@cost_currency", DBHelper.DBNullIfEmpty(ref_cost_currency));
+                                                if (ref_cost_per_kwh_found)
+                                                {
+                                                    cmd2.Parameters.Add("@cost_per_kwh", MySqlDbType.Double).Value = ref_cost_per_kwh;
+                                                }
+                                                else
+                                                {
+                                                    cmd2.Parameters.Add("@cost_per_kwh", MySqlDbType.Double).Value = DBNull.Value;
+                                                }
+                                                if (ref_cost_per_session_found)
+                                                {
+                                                    cmd2.Parameters.Add("@cost_per_session", MySqlDbType.Double).Value = ref_cost_per_session;
+                                                }
+                                                else
+                                                {
+                                                    cmd2.Parameters.Add("@cost_per_session", MySqlDbType.Double).Value = DBNull.Value;
+                                                }
+                                                if (ref_cost_per_minute_found)
+                                                {
+                                                    cmd2.Parameters.Add("@cost_per_minute", MySqlDbType.Double).Value = ref_cost_per_minute;
+                                                }
+                                                else
+                                                {
+                                                    cmd2.Parameters.Add("@cost_per_minute", MySqlDbType.Double).Value = DBNull.Value;
+                                                }
+                                                cmd2.Parameters.AddWithValue("@id", chargeID);
+                                                Tools.DebugLog(cmd2);
+                                                _ = cmd2.ExecuteNonQuery();
+                                                Logfile.Log($"CopyChargePrice: update charging session at '{_addr.name}', ID {chargeID}: cost_total {calculated_total_cost}");
+                                            }
+                                        }
+                                    }
                                 }
                                 else
                                 {
-                                    cmd.Parameters.Add("@cost_per_kwh", MySqlDbType.Double).Value = DBNull.Value;
+                                    Logfile.Log($"CopyChargePrice: no cost_total IS NULL charging session found for '{_addr.name}'");
                                 }
-                                if (ref_cost_per_session_found)
-                                {
-                                    cmd.Parameters.Add("@cost_per_session", MySqlDbType.Double).Value = ref_cost_per_session;
-                                }
-                                else
-                                {
-                                    cmd.Parameters.Add("@cost_per_session", MySqlDbType.Double).Value = DBNull.Value;
-                                }
-                                if (ref_cost_per_minute_found)
-                                {
-                                    cmd.Parameters.Add("@cost_per_minute", MySqlDbType.Double).Value = ref_cost_per_minute;
-                                }
-                                else
-                                {
-                                    cmd.Parameters.Add("@cost_per_minute", MySqlDbType.Double).Value = DBNull.Value;
-                                }
-                                cmd.Parameters.AddWithValue("@id", chargeID);
-                                Tools.DebugLog(cmd);
-                                _ = cmd.ExecuteNonQuery();
-                                Logfile.Log($"CopyChargePrice: update charging session at '{_addr.name}', ID {chargeID}: cost_total {calculated_total_cost}");
                             }
                         }
                     }
-                }
-                else
-                {
-                    Logfile.Log($"CopyChargePrice: no cost_total IS NULL charging session found for '{_addr.name}'");
+                    con.Close();
                 }
             }
             else
@@ -1463,13 +1560,9 @@ WHERE
 id = @carid", con))
                     {
                         cmd.Parameters.Add("@carid", MySqlDbType.UByte).Value = CarInDB;
-                        Tools.DebugLog(cmd);
                         MySqlDataReader dr = cmd.ExecuteReader();
                         if (dr.Read() && dr[0] != null && dr[0] != DBNull.Value && int.TryParse(dr[0].ToString(), out int freesuc))
                         {
-                            Tools.DebugLog($"HasFreeSuC() dr[0]:{dr[0]}");
-                            Tools.DebugLog($"HasFreeSuC() freesuc:{freesuc}");
-                            Tools.DebugLog($"HasFreeSuC() return:{freesuc == 1}");
                             return freesuc == 1;
                         }
                     }

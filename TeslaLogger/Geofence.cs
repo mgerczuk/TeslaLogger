@@ -107,6 +107,17 @@ namespace TeslaLogger
 
     public class Geofence
     {
+        private static Geofence _geofence = null;
+
+        public static Geofence GetInstance()
+        {
+            if (_geofence == null)
+            {
+                _geofence = new Geofence(ApplicationSettings.Default.RacingMode);
+            }
+            return _geofence;
+        }
+
         internal SortedSet<Address> geofenceList = new SortedSet<Address>(new AddressByLatLng());
         internal SortedSet<Address> geofencePrivateList = new SortedSet<Address>(new AddressByLatLng());
         private FileSystemWatcher fsw;
@@ -116,9 +127,10 @@ namespace TeslaLogger
 
         private static int FSWCounter = 0;
 
-        public Geofence(bool RacingMode)
+        internal Geofence(bool RacingMode)
         {
             _RacingMode = RacingMode;
+            Logfile.Log("Geofence initialized");
             Init();
             
             if (fsw == null)
@@ -232,7 +244,6 @@ namespace TeslaLogger
                             if (args.Length > 4 && args[4] != null)
                             {
                                 string flags = args[4];
-                                Tools.DebugLog(args[0].Trim() + ": special flags found: " + flags);
                                 ParseSpecialFlags(addr, flags);
                             }
                             if (filename.Equals(FileManager.GetFilePath(TLFilename.GeofencePrivateFilename)))
@@ -479,7 +490,7 @@ namespace TeslaLogger
             }
         }
 
-        public double GetDistance(double longitude, double latitude, double otherLongitude, double otherLatitude)
+        public static double GetDistance(double longitude, double latitude, double otherLongitude, double otherLatitude)
         {
             double d1 = latitude * (Math.PI / 180.0);
             double num1 = longitude * (Math.PI / 180.0);

@@ -30,7 +30,7 @@ namespace TeslaLogger
                 {
                     try
                     {
-                        DumpJSONSessionDir = Path.Combine(Logfile.GetExecutingPath(), $"JSON/{DateTime.Now.ToString("yyyyMMddHHmmssfff")}");
+                        DumpJSONSessionDir = Path.Combine(Logfile.GetExecutingPath(), $"JSON/{DateTime.UtcNow.ToString("yyyyMMddHHmmssfff")}");
                         if (!Directory.Exists(DumpJSONSessionDir))
                         {
                             Directory.CreateDirectory(DumpJSONSessionDir);
@@ -38,7 +38,7 @@ namespace TeslaLogger
                     }
                     catch (Exception ex)
                     {
-                        Tools.DebugLog(ex.ToString());
+                        Tools.DebugLog("DumpJSON", ex);
                     }
                 }
                 car.Log($"DumpJSON {value}");
@@ -61,8 +61,8 @@ namespace TeslaLogger
                     storage.Add(_name, new Dictionary<Key, object>() {
                     { Key.Type , "undef" },
                     { Key.Value , "undef" },
-                    { Key.ValueLastUpdate , long.MinValue },
-                    { Key.Timestamp , long.MinValue },
+                    { Key.ValueLastUpdate , _timestamp },
+                    { Key.Timestamp , _timestamp },
                     { Key.Source , "undef" }
                 });
                 }
@@ -74,7 +74,12 @@ namespace TeslaLogger
                             && dict.TryGetValue(Key.Value, out object oldvalue)
                             && dict.TryGetValue(Key.Timestamp, out object oldTS) && oldTS != null)
                         {
-                            if (oldvalue != null && _value != null && !oldvalue.ToString().Equals(_value.ToString()))
+                            if (
+                                // olvalue != null and value changed
+                                (oldvalue != null && _value != null && !oldvalue.ToString().Equals(_value.ToString()))
+                                // oldvalue was null and newvalue is not null
+                                || (oldvalue == null && _value != null)
+                                )
                             {
                                 storage[_name][Key.ValueLastUpdate] = _timestamp;
                                 HandleStateChange(_name, oldvalue, _value, long.Parse(oldTS.ToString()), _timestamp);
@@ -102,9 +107,6 @@ namespace TeslaLogger
 
         private void HandleStateChange(string name, object oldvalue, object newvalue, long oldTS, long newTS)
         {
-            string timestamp;
-            double latitude, longitude, odometerKM, ideal_battery_range_km, battery_range, outside_temp;
-            int speed, power, battery_level;
             switch (name)
             {
                 case "car_version":
@@ -113,11 +115,25 @@ namespace TeslaLogger
                     break;
                 case "locked":
                 case "charge_port_door_open":
+                case "is_user_present":
+                case "df":
+                case "pf":
+                case "dr":
+                case "pr":
+                case "ft":
+                case "rt":
+                    Tools.DebugLog($"#{car.CarInDB}: TeslaAPIHandleStateChange {name} {oldvalue} -> {newvalue}");
+                    // car was used, eg. door opened/closed
+                    if (oldvalue != null && newvalue != null && oldvalue != newvalue)
+                    {
+                        car.SetLastCarUsed(DateTime.Now);
+                    }
+                    break;
                 case "charging_state":
                     Tools.DebugLog($"#{car.CarInDB}: TeslaAPIHandleStateChange {name} {oldvalue} -> {newvalue}");
                     break;
                 case "battery_level":
-                    if (car.IsParked())
+                    if (car.IsParked() && !car.IsCharging())
                     {
                         Tools.DebugLog($"#{car.CarInDB}: TeslaAPIHandleStateChange {name} {oldvalue} -> {newvalue}");
                     }
@@ -303,7 +319,7 @@ namespace TeslaLogger
         {
             if (dumpJSON)
             {
-                string filename = $"{DateTime.Now.ToString("yyyyMMddHHmmssfff")}_{_source}_{car.CarInDB}.json";
+                string filename = $"{DateTime.UtcNow.ToString("yyyyMMddHHmmssfff")}_{_source}_{car.CarInDB}.json";
                 string filepath = Path.Combine(DumpJSONSessionDir, filename);
                 Task.Factory.StartNew(() =>
                 {
@@ -760,6 +776,8 @@ namespace TeslaLogger
                             case "trim_badging":
                             case "wheel_type":
                             case "perf_config":
+                            case "default_charge_to_max":
+                            case "exterior_trim":
                                 if (r2.TryGetValue(key, out value))
                                 {
                                     AddValue(key, "string", value, timestamp, "vehicle_config");
@@ -909,6 +927,10 @@ namespace TeslaLogger
                             case "pr":
                             case "rt":
                             case "sun_roof_percent_open":
+                            case "fd_window":
+                            case "fp_window":
+                            case "rd_window":
+                            case "rp_window":
                                 if (r2.TryGetValue(key, out value))
                                 {
                                     AddValue(key, "int", value, timestamp, "vehicle_state");
@@ -1121,10 +1143,12 @@ namespace TeslaLogger
             string str = string.Empty;
             foreach (string key in storage.Keys)
             {
-                if (compareTs && storage[key][Key.Timestamp] != null && long.TryParse(storage[key][Key.Timestamp].ToString(), out long ts) && ts != 0)
+                if (compareTs && storage[key][Key.Timestamp] != null
+                    && long.TryParse(storage[key][Key.Timestamp].ToString(), out long ts) && ts != 0
+                    && long.TryParse(storage[key][Key.ValueLastUpdate].ToString(), out long vlu) && vlu != 0)
                 {
                     long now = (long)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalMilliseconds;
-                    str += string.Concat($"{key} => v:[{storage[key][Key.Value]}] t:{storage[key][Key.Type]} s:{storage[key][Key.Source]} ts:{storage[key][Key.Timestamp]} now:{now} diff:{now - ts}ms", Environment.NewLine);
+                    str += string.Concat($"{key} => v:[{storage[key][Key.Value]}] t:{storage[key][Key.Type]} s:{storage[key][Key.Source]} ts:{storage[key][Key.Timestamp]} now:{now} diff:{now - ts}ms vlu:{storage[key][Key.ValueLastUpdate]} now:{now} diff:{now - vlu}ms", Environment.NewLine);
                 }
                 else
                 {

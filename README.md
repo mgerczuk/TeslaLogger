@@ -1,6 +1,6 @@
 # TeslaLogger
 
-TeslaLogger is a self hosted data logger for your Tesla Model S/X/3. Actually it supports RaspberryPi 3B and 3B+.
+TeslaLogger is a self hosted data logger for your Tesla Model S/3/X/Y. Actually it supports RaspberryPi 3B, 3B+, 4B, Docker and Synology NAS.
 
 If you want to purchase a ready to go Raspberry PI 3B+ with TeslaLogger installed follow this link:
 https://www.e-mobility-driving-solutions.com/produkt/raspi-teslalogger/?lang=en
@@ -78,6 +78,9 @@ Please contact us beforehand to allow a coordinated approach for translations.
 # TeslaFi Import
 You can import your TeslaFi data [here](TeslaFi-Import/README.md).
 
+# Teslamate Import
+You can import your Teslamate data [here](Teslamate-Import/README.md).
+
 # Donations:
 http://paypal.me/ChristianPogea
 
@@ -112,6 +115,8 @@ Grafana Dashboards: http://raspberry:3000
 ![Image](https://raw.githubusercontent.com/bassmaster187/TeslaLogger/master/TeslaLogger/screenshots/visited.PNG)
 
 ![Image](https://raw.githubusercontent.com/bassmaster187/TeslaLogger/master/TeslaLogger/screenshots/Trip-Monatsstatistik.PNG)
+
+![Image](https://raw.githubusercontent.com/bassmaster187/TeslaLogger/master/TeslaLogger/screenshots/geofence_edit.png)
 
 # Screenshots with ScanMyTesla integration #
 

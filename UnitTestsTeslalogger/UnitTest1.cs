@@ -81,7 +81,7 @@ namespace UnitTestsTeslalogger
             wh.UpdateEfficiency();
 
             Assert.AreEqual("M3 LR RWD", wh.car.ModelName);
-            Assert.AreEqual(0.152, wh.car.Wh_TR);
+            Assert.AreEqual(0.145, wh.car.Wh_TR);
 
 
             // wh = new WebHelper();
@@ -172,7 +172,42 @@ namespace UnitTestsTeslalogger
             wh.UpdateEfficiency();
 
             Assert.AreEqual("S Raven LR P", wh.car.ModelName);
-            Assert.AreEqual(0.178, wh.car.Wh_TR);   
+            Assert.AreEqual(0.178, wh.car.Wh_TR);
+
+            MemoryCache.Default.Remove("GetAvgMaxRage_0");
+            MemoryCache.Default.Add("GetAvgMaxRage_0", 520, DateTime.Now.AddMinutes(1));
+            wh.car.car_type = "modely";
+            wh.car.car_special_type = "base";
+            wh.car.DB_Wh_TR = 0.148;
+            wh.car.trim_badging = "74d";
+            wh.UpdateEfficiency();
+
+            Assert.AreEqual("Y LR AWD", wh.car.ModelName);
+            Assert.AreEqual(0.148, wh.car.Wh_TR);
+
+
+            MemoryCache.Default.Remove("GetAvgMaxRage_0");
+            MemoryCache.Default.Add("GetAvgMaxRage_0", 535, DateTime.Now.AddMinutes(1));
+            wh.car.car_type = "model3";
+            wh.car.car_special_type = "base";
+            wh.car.DB_Wh_TR = 0.139;
+            wh.car.trim_badging = "";
+            wh.UpdateEfficiency();
+
+            Assert.AreEqual("M3 LR FL", wh.car.ModelName);
+            Assert.AreEqual(0.139, wh.car.Wh_TR);
+
+            MemoryCache.Default.Remove("GetAvgMaxRage_0");
+            MemoryCache.Default.Add("GetAvgMaxRage_0", 407, DateTime.Now.AddMinutes(1));
+            wh.car.vin = "LRW3E7FA9LC123456";
+            wh.car.car_type = "model3";
+            wh.car.car_special_type = "base";
+            wh.car.DB_Wh_TR = 0.133;
+            wh.car.trim_badging = "";
+            wh.UpdateEfficiency();
+
+            Assert.AreEqual("M3 SR+ LFP", wh.car.ModelName);
+            Assert.AreEqual(0.133, wh.car.Wh_TR);
         }
 
         [TestMethod]
@@ -209,6 +244,20 @@ namespace UnitTestsTeslalogger
             Assert.AreEqual("Verbrauch", title);
             Assert.AreEqual("zm7wN6Zgz", uid);
             Assert.AreEqual("http://raspberry:3000/d/zm7wN6Zgz/Verbrauch", link);
+        }
+
+        [TestMethod]
+        public void UpdateDefaultCar()
+        {
+            string dashboard = System.IO.File.ReadAllText("../../../TeslaLogger/Grafana/Verbrauch.json");
+            dashboard = UpdateTeslalogger.UpdateDefaultCar(dashboard, "BATmobil", "2");
+
+            Assert.IsTrue(dashboard.Contains("\"text\": \"BATmobil\","));
+
+            dashboard = System.IO.File.ReadAllText("../../../TeslaLogger/Grafana/Trip.json");
+            dashboard = UpdateTeslalogger.UpdateDefaultCar(dashboard, "BATmobil", "2");
+
+            Assert.IsTrue(dashboard.Contains("\"text\": \"BATmobil\","));
         }
     }
 }

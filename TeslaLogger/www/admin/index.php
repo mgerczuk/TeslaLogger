@@ -22,7 +22,7 @@ else
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="apple-mobile-web-app-title" content="Teslalogger Config">
     <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
-    <title>Teslalogger Config V1.9</title>
+    <title>Teslalogger</title>
 	<link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/smoothness/jquery-ui.css">
 	<link rel="stylesheet" href="https://teslalogger.de/teslalogger_style.css">
 	<script src="https://code.jquery.com/jquery-1.12.4.js"></script>
@@ -125,7 +125,7 @@ else
 				$('#car_statusLabel').text("Wird geladen:");
 				$('#car_status').html(jsonData["charger_power"] + " kW / +" + jsonData["charge_energy_added"] + " kWh<br>" + 
 				jsonData["charger_voltage"]+"V / " + jsonData["charger_actual_current"]+"A / "+ 
-				jsonData["charger_phases"]+"P<br>Done: "+ hour +"h "+minute+"m <br>At: " + datetime);
+				jsonData["charger_phases"]+"P<br>Done: "+ hour +"h "+minute+"m <br>At: " + datetime +  " / " + jsonData["charge_limit_soc"] +"%");
 
 				updateSMT(jsonData);
 			}
@@ -291,11 +291,10 @@ else
 			$('#BMSMaxDischargeRow').hide();
 		}
 
-		if (jsonData["SMTCellMaxV"] && jsonData["SMTCellMinV"])
+		if (jsonData["SMTCellImbalance"])
 		{
-			var CellImbalance = Math.round((jsonData["SMTCellMaxV"] - jsonData["SMTCellMinV"]) * 1000);
 			$('#CellImbalanceRow').show();
-			$('#CellImbalance').text( CellImbalance +" mV");
+			$('#CellImbalance').text(Math.round(jsonData["SMTCellImbalance"]) +" mV");
 		}
 		else
 		{
@@ -330,6 +329,14 @@ function ShowInfo()
 		$(".HeaderT").show();
 		$("#PositiveButton").click(function(){window.location.href='settings_share.php?a=yes';});
 		$("#NegativeButton").click(function(){window.location.href='settings_share.php?a=no';});
+	<?php
+	}
+	else if(isDocker() && GrafanaVersion() != "7.2.0")
+	{?>
+		$("#InfoText").html("<h1>Please update to latest docker-compose.yml file. Check: <a href='https://github.com/bassmaster187/TeslaLogger/blob/master/docker_setup.md#docker-update--upgrade'>LINK</a></h1>");
+		$(".HeaderT").show();
+		$("#PositiveButton").click(function(){window.location.href='https://github.com/bassmaster187/TeslaLogger/blob/master/docker_setup.md#docker-update--upgrade';});
+		$("#NegativeButton").hide();
 	<?php
 	}
 	?>

@@ -30,7 +30,6 @@ namespace TeslaLogger
         public string fast_charger_type = "";
         public string conn_charge_cable = "";
         public bool fast_charger_present = false;
-        public static Geofence geofence;
         //private bool stopStreaming = false;
         private string elevation = "";
         private DateTime elevation_time = DateTime.Now;
@@ -52,13 +51,61 @@ namespace TeslaLogger
         {
             //Damit Mono keine Zertifikatfehler wirft :-(
             ServicePointManager.ServerCertificateValidationCallback += (p1, p2, p3, p4) => true;
-
-            geofence = new Geofence(ApplicationSettings.Default.RacingMode);
         }
 
         public WebHelper(Car car)
         {
             this.car = car;
+
+            CheckUseTaskerToken();
+        }
+
+        private void CheckUseTaskerToken()
+        {
+            string reply = "";
+
+            try
+            {
+                if (String.IsNullOrEmpty(car.TaskerHash))
+                    return;
+
+                Log("CheckUseTaskerToken");
+
+                using (WebClient client = new WebClient())
+                {
+                    DateTime start = DateTime.UtcNow;
+                    reply = client.DownloadString("https://teslalogger.de/tasker_date.php?t=" + car.TaskerHash);
+                    DBHelper.AddMothershipDataToDB("tasker_date.php", start, 200);
+
+                    if (reply.Contains("not found") || reply.Contains("never!"))
+                    {
+                        Log("LastTaskerToken not found - Stop using fast TaskerToken request! Reply: " + reply);
+                        car.useTaskerToken = false;
+                        return;
+                    }
+
+                    DateTime dt = DateTime.Parse(reply, Tools.ciEnUS);
+                    var ts = DateTime.Now - dt;
+                    if (ts.TotalDays > 2)
+                    {
+                        Log("LastTaskerToken: " + reply + " Stop using fast TaskerToken request!");
+                        car.useTaskerToken = false;
+                    }
+                    else
+                    {
+                        if (!car.useTaskerToken)
+                        {
+                            Log("LastTaskerToken: " + reply + " Start using fast TaskerToken request!");
+                            car.useTaskerToken = true;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                reply = reply ?? "NULL";
+                Log("Reply: " + reply + "\r\n" + ex.Message);
+            }
         }
 
         internal string GetLastShiftState()
@@ -132,8 +179,8 @@ namespace TeslaLogger
 
                 using (HttpClient client = new HttpClient())
                 {
-                client.DefaultRequestHeaders.Add("User-Agent", "TeslaLogger");
-                Dictionary<string, string> values = new Dictionary<string, string>
+                    client.DefaultRequestHeaders.Add("User-Agent", "TeslaLogger");
+                    Dictionary<string, string> values = new Dictionary<string, string>
                 {
                    { "grant_type", "password" },
                    { "client_id", "e4a9949fcfa04068f59abb5a658f2bac0a3428e4652315490b659d5ab3f35a9e" },
@@ -142,36 +189,38 @@ namespace TeslaLogger
                    { "password", car.TeslaPasswort }
                 };
 
-                string json = new JavaScriptSerializer().Serialize(values);
+                    string json = new JavaScriptSerializer().Serialize(values);
                     using (StringContent content = new StringContent(json.ToString(), Encoding.UTF8, "application/json"))
                     {
-                
-                DateTime start = DateTime.UtcNow;
-                HttpResponseMessage result = await client.PostAsync(apiaddress + "oauth/token", content);
-                resultContent = await result.Content.ReadAsStringAsync();
-                
-                DBHelper.AddMothershipDataToDB("GetTokenAsync()", start, (int)result.StatusCode);
 
-                if (resultContent.Contains("authorization_required"))
-                {
-                    Log("Wrong Credentials");
+                        DateTime start = DateTime.UtcNow;
+                        HttpResponseMessage result = await client.PostAsync(apiaddress + "oauth/token", content);
+                        resultContent = await result.Content.ReadAsStringAsync();
 
-                    if (Tools.IsDocker())
-                    {
-                        Thread.Sleep(5 * 60000);
+                        DBHelper.AddMothershipDataToDB("GetTokenAsync()", start, (int)result.StatusCode);
+
+                        if (resultContent.Contains("authorization_required"))
+                        {
+                            Log("Wrong Credentials");
+
+                            if (Tools.IsDocker())
+                            {
+                                Thread.Sleep(5 * 60000);
+                            }
+
+                            throw new Exception("Wrong Credentials");
+                        }
+
+                        Tools.SetThread_enUS();
+                        dynamic jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
+                        Tesla_token = jsonResult["access_token"];
+
+                        car.dbHelper.UpdateTeslaToken();
+
+                        car.LoginRetryCounter = 0;
+
+                        return Tesla_token;
                     }
-
-                    throw new Exception("Wrong Credentials");
-                }
-
-                Tools.SetThread_enUS();
-                dynamic jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
-                Tesla_token = jsonResult["access_token"];
-
-                car.dbHelper.UpdateTeslaToken();
-
-                return Tesla_token;
-            }
                 }
             }
             catch (Exception ex)
@@ -399,30 +448,23 @@ namespace TeslaLogger
                         client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
 
                         string adresse = apiaddress + "api/1/vehicles";
-                        DateTime start = DateTime.UtcNow;
-                        Task<HttpResponseMessage> resultTask = client.GetAsync(adresse);
-
-                        HttpResponseMessage result = resultTask.Result;
-                        resultContent = result.Content.ReadAsStringAsync().Result;
-                        DBHelper.AddMothershipDataToDB("GetVehicles()", start, (int) result.StatusCode);
-                        if (TeslaAPI_Commands.ContainsKey("vehicles"))
-                        {
-                            TeslaAPI_Commands.TryGetValue("vehicles", out string drive_state);
-                            TeslaAPI_Commands.TryUpdate("vehicles", resultContent, drive_state);
-                        }
-                        else
-                        {
-                            TeslaAPI_Commands.TryAdd("vehicles", resultContent);
-                        }
+                        Task<HttpResponseMessage> resultTask;
+                        HttpResponseMessage result;
+                        DoGetVehiclesRequest(out resultContent, client, adresse, out resultTask, out result);
 
                         if (result.StatusCode == HttpStatusCode.Unauthorized)
                         {
-                            Log("HttpStatusCode = Unauthorized. Password changed or still valid?");
+                            if (LoginRetry(result))
+                        {
+                                client.DefaultRequestHeaders.Remove("Authorization");
+                                client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
+                                DoGetVehiclesRequest(out resultContent, client, adresse, out resultTask, out result);
+                        }
                         }
 
                         object jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
-                        object r1 = ((Dictionary<string, object>) jsonResult)["response"];
-                        object[] r1temp = (object[]) r1;
+                        object r1 = ((Dictionary<string, object>)jsonResult)["response"];
+                        object[] r1temp = (object[])r1;
 
                         if (car.CarInAccount >= r1temp.Length)
                         {
@@ -430,7 +472,7 @@ namespace TeslaLogger
                             return "NULL";
                         }
 
-                        Dictionary<string, object> r2 = (Dictionary<string, object>) r1temp[car.CarInAccount];
+                        Dictionary<string, object> r2 = (Dictionary<string, object>)r1temp[car.CarInAccount];
 
                         string OnlineState = r2["state"].ToString();
                         System.Diagnostics.Debug.WriteLine(DateTime.Now.ToString() + " : " + OnlineState);
@@ -458,7 +500,7 @@ namespace TeslaLogger
                         */
 
                         string vin = r2["vin"].ToString();
-                        Log("vin: " + Tools.ObfuscateString(vin));
+                        Log("vin: " + Tools.ObfuscateVIN(vin));
 
                         if (car.vin != vin)
                         {
@@ -499,6 +541,8 @@ namespace TeslaLogger
                             {
                                 Log("WriteCarsettings -> TaskerToken");
                                 car.WriteSettings();
+
+                                CheckUseTaskerToken();
                             }
 
                             Log("Tasker Config:\r\n Server Port: https://teslalogger.de\r\n Path: wakeup.php\r\n Attribute: t=" + car.TaskerHash);
@@ -546,6 +590,26 @@ namespace TeslaLogger
             }
         }
 
+        private void DoGetVehiclesRequest(out string resultContent, HttpClient client, string adresse, out Task<HttpResponseMessage> resultTask, out HttpResponseMessage result)
+        {
+            DateTime start = DateTime.UtcNow;
+            resultTask = client.GetAsync(adresse);
+            result = resultTask.Result;
+            resultContent = result.Content.ReadAsStringAsync().Result;
+            _ = car.GetTeslaAPIState().ParseAPI(resultContent, "vehicles", car.CarInAccount);
+            DBHelper.AddMothershipDataToDB("GetVehicles()", start, (int)result.StatusCode);
+
+            if (TeslaAPI_Commands.ContainsKey("vehicles"))
+            {
+                TeslaAPI_Commands.TryGetValue("vehicles", out string drive_state);
+                TeslaAPI_Commands.TryUpdate("vehicles", resultContent, drive_state);
+            }
+            else
+            {
+                TeslaAPI_Commands.TryAdd("vehicles", resultContent);
+            }
+        }
+
         private int unknownStateCounter = 0;
 
         public async Task<string> IsOnline()
@@ -558,143 +622,146 @@ namespace TeslaLogger
                     Timeout = TimeSpan.FromSeconds(11)
                 })
                 {
-                client.DefaultRequestHeaders.Add("User-Agent", "C# App");
-                client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
+                    client.DefaultRequestHeaders.Add("User-Agent", "C# App");
+                    client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
 
-                string adresse = apiaddress + "api/1/vehicles";
-                
-                DateTime start = DateTime.UtcNow;
-                HttpResponseMessage result = await client.GetAsync(adresse);
-                resultContent = await result.Content.ReadAsStringAsync();
-                _ = car.GetTeslaAPIState().ParseAPI(resultContent, "vehicles", car.CarInAccount);
-                DBHelper.AddMothershipDataToDB("IsOnline()", start, (int)result.StatusCode);
-                if (TeslaAPI_Commands.ContainsKey("vehicles"))
-                {
-                    TeslaAPI_Commands.TryGetValue("vehicles", out string drive_state);
-                    TeslaAPI_Commands.TryUpdate("vehicles", resultContent, drive_state);
-                }
-                else
-                {
-                    TeslaAPI_Commands.TryAdd("vehicles", resultContent);
-                }
+                    string adresse = apiaddress + "api/1/vehicles";
 
+                    DateTime start = DateTime.UtcNow;
+                    HttpResponseMessage result = await client.GetAsync(adresse);
 
-                if (result.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    Log("HttpStatusCode = Unauthorized. Password changed or still valid?");
-                    Thread.Sleep(30000);
-                }
-
-                object jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
-
-                object r1 = ((Dictionary<string, object>)jsonResult)["response"];
-                object[] r2 = (object[])r1;
-                object r3 = r2[car.CarInAccount];
-                Dictionary<string, object> r4 = (Dictionary<string, object>)r3;
-                string state = r4["state"].ToString();
-                object[] tokens = (object[])r4["tokens"];
-                Tesla_Streamingtoken = tokens[0].ToString();
-
-                try
-                {
-                    /* 
-                    option_codes = r4["option_codes"].ToString();
-                    string[] oc = option_codes.Split(',');
-
-                    car.AWD = oc.Contains("DV4W");
-
-                    if (oc.Contains("MDLS") || oc.Contains("MS01") || oc.Contains("MS02") || oc.Contains("MS03"))
-                        car.Model = "MS";
-                    else if (oc.Contains("MDLX"))
-                        car.Model = "MX";
-                    else if (oc.Contains("MDL3"))
-                        car.Model = "M3";
-
-                    var battery = oc.Where(r => r.StartsWith("BT")).ToArray();
-                    if (battery != null && battery.Length > 0)
+                    if (result.StatusCode == HttpStatusCode.Unauthorized)
                     {
-                        if (car.Battery != battery[0])
-                        {
-                            Log("Battery: " + battery[0] + " / " + car.Model);
-                            car.Battery = battery[0];
-
-                            car.WriteSettings();
-                        }
+                        if (LoginRetry(result))
+                            return "NULL";
                     }
 
-                    car.Performance = oc.Contains("PBT85") || oc.Contains("PX01") || oc.Contains("P85D") || oc.Contains("PX6D") || oc.Contains("X024") | oc.Contains("PBT8") | oc.Contains("PF01");
-
-                    */
-
-                    if (state == "asleep")
+                    resultContent = await result.Content.ReadAsStringAsync();
+                    _ = car.GetTeslaAPIState().ParseAPI(resultContent, "vehicles", car.CarInAccount);
+                    DBHelper.AddMothershipDataToDB("IsOnline()", start, (int)result.StatusCode);
+                    if (TeslaAPI_Commands.ContainsKey("vehicles"))
                     {
-                        return state;
-                    }
-                    else if (state == "unknown")
-                    {
-                        Log("unknown state " + unknownStateCounter);
-
-                            ExceptionWriter(new Exception("unknown state"), resultContent);
-
-                        if (unknownStateCounter == 0)
-                        {
-                            string r = Wakeup().Result;
-                            Log("WakupResult: " + r);
-                        }
-                        else
-                        {
-                            Thread.Sleep(10000);
-                        }
-
-                        unknownStateCounter++;
-
-                        if (unknownStateCounter == 6)
-                        {
-                            unknownStateCounter = 0;
-                        }
+                        TeslaAPI_Commands.TryGetValue("vehicles", out string drive_state);
+                        TeslaAPI_Commands.TryUpdate("vehicles", resultContent, drive_state);
                     }
                     else
                     {
-                        unknownStateCounter = 0;
+                        TeslaAPI_Commands.TryAdd("vehicles", resultContent);
                     }
 
-                    TimeSpan ts = DateTime.Now - lastUpdateEfficiency;
+                    object jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
 
-                    if (ts.TotalMinutes > 60)
+                    object r1 = ((Dictionary<string, object>)jsonResult)["response"];
+                    object[] r2 = (object[])r1;
+                    object r3 = r2[car.CarInAccount];
+                    Dictionary<string, object> r4 = (Dictionary<string, object>)r3;
+                    string state = r4["state"].ToString();
+                    object[] tokens = (object[])r4["tokens"];
+                    Tesla_Streamingtoken = tokens[0].ToString();
+
+                    try
                     {
-                        string resultContent2 = GetCommand("vehicle_config").Result;
+                        /* 
+                        option_codes = r4["option_codes"].ToString();
+                        string[] oc = option_codes.Split(',');
 
-                        dynamic jBadge = new JavaScriptSerializer().DeserializeObject(resultContent2);
-                        dynamic jBadgeResult = jBadge["response"];
+                        car.AWD = oc.Contains("DV4W");
 
-                        if (jBadgeResult != null)
+                        if (oc.Contains("MDLS") || oc.Contains("MS01") || oc.Contains("MS02") || oc.Contains("MS03"))
+                            car.Model = "MS";
+                        else if (oc.Contains("MDLX"))
+                            car.Model = "MX";
+                        else if (oc.Contains("MDL3"))
+                            car.Model = "M3";
+
+                        var battery = oc.Where(r => r.StartsWith("BT")).ToArray();
+                        if (battery != null && battery.Length > 0)
                         {
-                            if (Tools.IsPropertyExist(jBadgeResult, "car_type"))
+                            if (car.Battery != battery[0])
                             {
-                                car.car_type = jBadgeResult["car_type"].ToString().ToLower().Trim();
+                                Log("Battery: " + battery[0] + " / " + car.Model);
+                                car.Battery = battery[0];
+
+                                car.WriteSettings();
+                            }
+                        }
+
+                        car.Performance = oc.Contains("PBT85") || oc.Contains("PX01") || oc.Contains("P85D") || oc.Contains("PX6D") || oc.Contains("X024") | oc.Contains("PBT8") | oc.Contains("PF01");
+
+                        */
+
+                        if (state == "asleep")
+                        {
+                            return state;
+                        }
+                        else if (state == "unknown")
+                        {
+                            Log("unknown state " + unknownStateCounter);
+
+                            ExceptionWriter(new Exception("unknown state"), resultContent);
+
+                            if (unknownStateCounter == 0)
+                            {
+                                string r = Wakeup().Result;
+                                Log("WakupResult: " + r);
+                            }
+                            else
+                            {
+                                Thread.Sleep(10000);
                             }
 
-                            if (Tools.IsPropertyExist(jBadgeResult, "car_special_type"))
+                            unknownStateCounter++;
+
+                            if (unknownStateCounter == 6)
                             {
-                                car.car_special_type = jBadgeResult["car_special_type"].ToString().ToLower().Trim();
+                                unknownStateCounter = 0;
                             }
+                        }
+                        else
+                        {
+                            unknownStateCounter = 0;
+                        }
 
-                            car.trim_badging = Tools.IsPropertyExist(jBadgeResult, "trim_badging")
-                                ? (string)jBadgeResult["trim_badging"].ToString().ToLower().Trim()
-                                : "";
+                        TimeSpan ts = DateTime.Now - lastUpdateEfficiency;
 
-                            UpdateEfficiency();
-                            lastUpdateEfficiency = DateTime.Now;
+                        if (ts.TotalMinutes > 60)
+                        {
+                            string resultContent2 = GetCommand("vehicle_config").Result;
+
+                            if (resultContent2 == "INSERVICE")
+                                return "INSERVICE";
+
+                            dynamic jBadge = new JavaScriptSerializer().DeserializeObject(resultContent2);
+                            dynamic jBadgeResult = jBadge["response"];
+
+                            if (jBadgeResult != null)
+                            {
+                                if (Tools.IsPropertyExist(jBadgeResult, "car_type"))
+                                {
+                                    car.car_type = jBadgeResult["car_type"].ToString().ToLower().Trim();
+                                }
+
+                                if (Tools.IsPropertyExist(jBadgeResult, "car_special_type"))
+                                {
+                                    car.car_special_type = jBadgeResult["car_special_type"].ToString().ToLower().Trim();
+                                }
+
+                                car.trim_badging = Tools.IsPropertyExist(jBadgeResult, "trim_badging")
+                                    ? (string)jBadgeResult["trim_badging"].ToString().ToLower().Trim()
+                                    : "";
+
+                                UpdateEfficiency();
+                                lastUpdateEfficiency = DateTime.Now;
+                            }
                         }
                     }
-                }
-                catch (Exception ex)
-                {
+                    catch (Exception ex)
+                    {
                         ExceptionWriter(ex, resultContent);
-                }
+                    }
 
-                return state;
-            }
+                    return state;
+                }
             }
             catch (Exception ex)
             {
@@ -711,13 +778,18 @@ namespace TeslaLogger
             if (car.car_type == "model3")
             {
                 int maxRange = car.dbHelper.GetAvgMaxRage();
-                if (maxRange > 400)
+                if (maxRange > 430)
                 {
                     try
                     {
                         if (car.DB_Wh_TR >= 0.143 && car.DB_Wh_TR <= 0.148)
                         {
-                            WriteCarSettings("0.152", "M3 LR RWD");
+                            WriteCarSettings("0.145", "M3 LR RWD");
+                            return;
+                        }
+                        else if (car.DB_Wh_TR >= 0.135 && car.DB_Wh_TR <= 0.142)
+                        {
+                            WriteCarSettings("0.139", "M3 LR FL");
                             return;
                         }
                     }
@@ -731,6 +803,11 @@ namespace TeslaLogger
                 }
                 else
                 {
+                    Tools.VINDecoder(car.vin, out _, out _, out _, out _, out string battery, out _);
+
+                    if (battery == "LFP")
+                        WriteCarSettings("0.133", "M3 SR+ LFP");
+                    else 
                     WriteCarSettings("0.137", "M3 SR+");
                     return;
                 }
@@ -906,6 +983,19 @@ namespace TeslaLogger
                 else
                 {
                     WriteCarSettings("0.204", "X"); // Raven
+                    return;
+                }
+            }
+            else if (car.car_type == "modely" && car.car_special_type == "base")
+            {
+                if (car.trim_badging == "74d")
+                {
+                    WriteCarSettings("0.148", "Y LR AWD");
+                    return;
+                }
+                else if (car.trim_badging == "p74d")
+                {
+                    WriteCarSettings("0.148", "Y P");
                     return;
                 }
             }
@@ -1169,7 +1259,7 @@ namespace TeslaLogger
                     double? outside_temp = null;
                     Task<double?> t_outside_temp = null;
 
-                    if (!geofence.RacingMode)
+                    if (!Geofence.GetInstance().RacingMode)
                     {
                         t_outside_temp = GetOutsideTempAsync();
                     }
@@ -1439,7 +1529,7 @@ namespace TeslaLogger
                 if (!forceGeocoding)
                 {
                     Address a = null;
-                    a = geofence.GetPOI(latitude, longitude);
+                    a = Geofence.GetInstance().GetPOI(latitude, longitude);
                     if (a != null)
                     {
                         Logfile.Log("Reverse geocoding by Geofence");
@@ -1449,7 +1539,7 @@ namespace TeslaLogger
                     string value = GeocodeCache.Instance.Search(latitude, longitude);
                     if (value != null)
                     {
-                        Logfile.Log("Reverse geocoding by Cache");
+                        Logfile.Log("Reverse geocoding by GeocodeCache");
                         return value;
                     }
                 }
@@ -1461,129 +1551,129 @@ namespace TeslaLogger
                 using (WebClient webClient = new WebClient())
                 {
 
-                webClient.Headers.Add("User-Agent: TL 1.1");
-                webClient.Encoding = Encoding.UTF8;
+                    webClient.Headers.Add("User-Agent: TL 1.1");
+                    webClient.Encoding = Encoding.UTF8;
 
-                url = !string.IsNullOrEmpty(ApplicationSettings.Default.MapQuestKey)
-                    ? "http://open.mapquestapi.com/nominatim/v1/reverse.php"
-                    : "http://nominatim.openstreetmap.org/reverse";
+                    url = !string.IsNullOrEmpty(ApplicationSettings.Default.MapQuestKey)
+                        ? "http://open.mapquestapi.com/nominatim/v1/reverse.php"
+                        : "http://nominatim.openstreetmap.org/reverse";
 
-                url += "?format=jsonv2&lat=";
-                url += latitude.ToString();
-                url += "&lon=";
-                url += longitude.ToString();
+                    url += "?format=jsonv2&lat=";
+                    url += latitude.ToString();
+                    url += "&lon=";
+                    url += longitude.ToString();
 
-                if (!string.IsNullOrEmpty(ApplicationSettings.Default.MapQuestKey))
-                {
-                    url += "&key=";
-                    url += ApplicationSettings.Default.MapQuestKey;
+                    if (!string.IsNullOrEmpty(ApplicationSettings.Default.MapQuestKey))
+                    {
+                        url += "&key=";
+                        url += ApplicationSettings.Default.MapQuestKey;
+                    }
+                    else
+                    {
+                        url += "&email=mail";
+                        url += "@";
+                        url += "teslalogger";
+                        url += ".de";
+                    }
+
+                    DateTime start = DateTime.UtcNow;
+                    resultContent = await webClient.DownloadStringTaskAsync(new Uri(url));
+                    DBHelper.AddMothershipDataToDB("ReverseGeocoding", start, 0);
+
+                    object jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
+                    object r1 = ((Dictionary<string, object>)jsonResult)["address"];
+                    Dictionary<string, object> r2 = (Dictionary<string, object>)r1;
+                    string postcode = "";
+                    if (r2.ContainsKey("postcode"))
+                    {
+                        postcode = r2["postcode"].ToString();
+                    }
+
+                    string country_code = r2["country_code"].ToString();
+
+                    if (country_code.Length > 0 && c != null)
+                    {
+                        c.currentJSON.current_country_code = country_code;
+                        c.currentJSON.current_state = r2.ContainsKey("state") ? r2["state"].ToString() : "";
+                    }
+
+                    string road = "";
+                    if (r2.ContainsKey("road"))
+                    {
+                        road = r2["road"].ToString();
+                    }
+
+                    string city = "";
+                    if (r2.ContainsKey("city"))
+                    {
+                        city = r2["city"].ToString();
+                    }
+                    else if (r2.ContainsKey("village"))
+                    {
+                        city = r2["village"].ToString();
+                    }
+                    else if (r2.ContainsKey("town"))
+                    {
+                        city = r2["town"].ToString();
+                    }
+
+                    string house_number = "";
+                    if (r2.ContainsKey("house_number"))
+                    {
+                        house_number = r2["house_number"].ToString();
+                    }
+
+                    string name = "";
+                    if (r2.ContainsKey("name") && r2["name"] != null)
+                    {
+                        name = r2["name"].ToString();
+                    }
+
+                    string address29 = "";
+                    if (r2.ContainsKey("address29") && r2["address29"] != null)
+                    {
+                        address29 = r2["address29"].ToString();
+                    }
+
+                    string adresse = "";
+
+                    if (address29.Length > 0)
+                    {
+                        adresse += address29 + ", ";
+                    }
+
+                    if (country_code != "de")
+                    {
+                        adresse += country_code + "-";
+                    }
+
+                    adresse += postcode + " " + city + ", " + road + " " + house_number;
+
+                    if (name.Length > 0)
+                    {
+                        adresse += " / " + name;
+                    }
+
+                    System.Diagnostics.Debug.WriteLine(url + "\r\n" + adresse);
+
+                    if (insertGeocodecache)
+                    {
+                        GeocodeCache.Instance.Insert(latitude, longitude, adresse);
+                    }
+
+                    if (!string.IsNullOrEmpty(ApplicationSettings.Default.MapQuestKey))
+                    {
+                        MapQuestCount++;
+                        Logfile.Log("Reverse geocoding by MapQuest: " + MapQuestCount);
+                    }
+                    else
+                    {
+                        NominatimCount++;
+                        Logfile.Log("Reverse geocoding by Nominatim" + NominatimCount);
+                    }
+
+                    return adresse;
                 }
-                else
-                {
-                    url += "&email=mail";
-                    url += "@";
-                    url += "teslalogger";
-                    url += ".de";
-                }
-
-                DateTime start = DateTime.UtcNow;
-                resultContent = await webClient.DownloadStringTaskAsync(new Uri(url));
-                DBHelper.AddMothershipDataToDB("ReverseGeocoding", start, 0);
-
-                object jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
-                object r1 = ((Dictionary<string, object>)jsonResult)["address"];
-                Dictionary<string, object> r2 = (Dictionary<string, object>)r1;
-                string postcode = "";
-                if (r2.ContainsKey("postcode"))
-                {
-                    postcode = r2["postcode"].ToString();
-                }
-
-                string country_code = r2["country_code"].ToString();
-
-                if (country_code.Length > 0 && c != null)
-                {
-                    c.currentJSON.current_country_code = country_code;
-                    c.currentJSON.current_state = r2.ContainsKey("state") ? r2["state"].ToString() : "";
-                }
-
-                string road = "";
-                if (r2.ContainsKey("road"))
-                {
-                    road = r2["road"].ToString();
-                }
-
-                string city = "";
-                if (r2.ContainsKey("city"))
-                {
-                    city = r2["city"].ToString();
-                }
-                else if (r2.ContainsKey("village"))
-                {
-                    city = r2["village"].ToString();
-                }
-                else if (r2.ContainsKey("town"))
-                {
-                    city = r2["town"].ToString();
-                }
-
-                string house_number = "";
-                if (r2.ContainsKey("house_number"))
-                {
-                    house_number = r2["house_number"].ToString();
-                }
-
-                string name = "";
-                if (r2.ContainsKey("name") && r2["name"] != null)
-                {
-                    name = r2["name"].ToString();
-                }
-
-                string address29 = "";
-                if (r2.ContainsKey("address29") && r2["address29"] != null)
-                {
-                    address29 = r2["address29"].ToString();
-                }
-
-                string adresse = "";
-
-                if (address29.Length > 0)
-                {
-                    adresse += address29 + ", ";
-                }
-
-                if (country_code != "de")
-                {
-                    adresse += country_code + "-";
-                }
-
-                adresse += postcode + " " + city + ", " + road + " " + house_number;
-
-                if (name.Length > 0)
-                {
-                    adresse += " / " + name;
-                }
-
-                System.Diagnostics.Debug.WriteLine(url + "\r\n" + adresse);
-
-                if (insertGeocodecache)
-                {
-                    GeocodeCache.Instance.Insert(latitude, longitude, adresse);
-                }
-
-                if (!string.IsNullOrEmpty(ApplicationSettings.Default.MapQuestKey))
-                {
-                    MapQuestCount++;
-                    Logfile.Log("Reverse geocoding by MapQuest: " + MapQuestCount);
-                }
-                else
-                {
-                    NominatimCount++;
-                    Logfile.Log("Reverse geocoding by Nominatim" + NominatimCount);
-                }
-
-                return adresse;
-            }
             }
             catch (Exception ex)
             {
@@ -1610,21 +1700,21 @@ namespace TeslaLogger
                 con.Open();
                 using (SqlCommand cmd = new SqlCommand("Select lat, lng, id from pos where address = ''", con))
                 {
-                SqlDataReader dr = cmd.ExecuteReader();
-                while (dr.Read())
-                {
-                    Thread.Sleep(10000); // Sleep to not get banned by Nominatim !
+                    SqlDataReader dr = cmd.ExecuteReader();
+                    while (dr.Read())
+                    {
+                        Thread.Sleep(10000); // Sleep to not get banned by Nominatim !
 
-                    double lat = (double)dr[0];
-                    double lng = (double)dr[1];
-                    int id = (int)dr[2];
-                    Task<string> adress = ReverseGecocodingAsync(car, lat, lng);
-                    //var altitude = AltitudeAsync(lat, lng);
-                    //UpdateAddressByPosId(id, adress.Result, altitude.Result);
-                    UpdateAddressByPosId(id, adress.Result, 0);
+                        double lat = (double)dr[0];
+                        double lng = (double)dr[1];
+                        int id = (int)dr[2];
+                        Task<string> adress = ReverseGecocodingAsync(car, lat, lng);
+                        //var altitude = AltitudeAsync(lat, lng);
+                        //UpdateAddressByPosId(id, adress.Result, altitude.Result);
+                        UpdateAddressByPosId(id, adress.Result, 0);
+                    }
                 }
             }
-        }
         }
 
         private static void UpdateAddressByPosId(int id, string address, double altitude)
@@ -1636,14 +1726,14 @@ namespace TeslaLogger
                     con2.Open();
                     using (MySqlCommand cmd2 = new MySqlCommand("update pos set address=@address, altitude=@altitude where id = @id", con2))
                     {
-                    cmd2.Parameters.AddWithValue("@id", id);
-                    cmd2.Parameters.AddWithValue("@address", address);
-                    cmd2.Parameters.AddWithValue("@altitude", altitude);
-                    cmd2.ExecuteNonQuery();
+                        cmd2.Parameters.AddWithValue("@id", id);
+                        cmd2.Parameters.AddWithValue("@address", address);
+                        cmd2.Parameters.AddWithValue("@altitude", altitude);
+                        cmd2.ExecuteNonQuery();
 
-                    System.Diagnostics.Debug.WriteLine("id updateed: " + id + " address: " + address);
+                        System.Diagnostics.Debug.WriteLine("id updateed: " + id + " address: " + address);
+                    }
                 }
-            }
             }
             catch (Exception ex)
             {
@@ -1657,62 +1747,62 @@ namespace TeslaLogger
             {
                 con.Open();
                 using (MySqlCommand cmd = new MySqlCommand(@"SELECT  
-        pos_start.address AS Start_address,
-        pos_end.address AS End_address,
-        pos_start.id AS PosStartId,
-        pos_start.lat AS PosStartLat,
-        pos_start.lng AS PosStartLng,
-        pos_end.id AS PosEndId,
-        pos_end.lat AS PosEndtLat,
-        pos_end.lng AS PosEndLng
-FROM
-        drivestate
-        JOIN pos pos_start ON drivestate.StartPos = pos_start.id
-        JOIN pos pos_end ON drivestate.EndPos = pos_end.id
-    WHERE
+                    pos_start.address AS Start_address,
+                    pos_end.address AS End_address,
+                    pos_start.id AS PosStartId,
+                    pos_start.lat AS PosStartLat,
+                    pos_start.lng AS PosStartLng,
+                    pos_end.id AS PosEndId,
+                    pos_end.lat AS PosEndtLat,
+                    pos_end.lng AS PosEndLng
+                FROM
+                    drivestate
+                    JOIN pos pos_start ON drivestate.StartPos = pos_start.id
+                    JOIN pos pos_end ON drivestate.EndPos = pos_end.id
+                WHERE
                     ((pos_end.odometer - pos_start.odometer) > 0.1) and (pos_start.address IS null or pos_end.address IS null or pos_start.address = '' or pos_end.address = '')", con))
                 {
 
-                MySqlDataReader dr = cmd.ExecuteReader();
-                while (dr.Read())
-                {
-                    Thread.Sleep(10000); // Sleep to not get banned by Nominatim !
-                    try
+                    MySqlDataReader dr = cmd.ExecuteReader();
+                    while (dr.Read())
                     {
-                        if (!(dr["Start_address"] != DBNull.Value && dr["Start_address"].ToString().Length > 0))
+                        Thread.Sleep(10000); // Sleep to not get banned by Nominatim !
+                        try
                         {
-                            int id = (int)dr["PosStartId"];
-                            double lat = (double)dr["PosStartLat"];
-                            double lng = (double)dr["PosStartLng"];
-                            Task<string> address = ReverseGecocodingAsync(car, lat, lng);
-                            //var altitude = AltitudeAsync(lat, lng);
-
-                            string addressResult = address.Result;
-                            if (!string.IsNullOrEmpty(addressResult))
+                            if (!(dr["Start_address"] != DBNull.Value && dr["Start_address"].ToString().Length > 0))
                             {
-                                //UpdateAddressByPosId(id, addressResult, altitude.Result);
-                                UpdateAddressByPosId(id, addressResult, 0);
+                                int id = (int)dr["PosStartId"];
+                                double lat = (double)dr["PosStartLat"];
+                                double lng = (double)dr["PosStartLng"];
+                                Task<string> address = ReverseGecocodingAsync(car, lat, lng);
+                                //var altitude = AltitudeAsync(lat, lng);
+
+                                string addressResult = address.Result;
+                                if (!string.IsNullOrEmpty(addressResult))
+                                {
+                                    //UpdateAddressByPosId(id, addressResult, altitude.Result);
+                                    UpdateAddressByPosId(id, addressResult, 0);
+                                }
+                            }
+
+                            if (!(dr["End_address"] != DBNull.Value && dr["End_address"].ToString().Length > 0))
+                            {
+                                int id = (int)dr["PosEndId"];
+                                double lat = (double)dr["PosEndtLat"];
+                                double lng = (double)dr["PosEndLng"];
+                                Task<string> address = ReverseGecocodingAsync(car, lat, lng);
+                                //var altitude = AltitudeAsync(lat, lng);
+
+                                string addressResult = address.Result;
+                                if (!string.IsNullOrEmpty(addressResult))
+                                {
+                                    //UpdateAddressByPosId(id, addressResult, altitude.Result);
+                                    UpdateAddressByPosId(id, addressResult, 0);
+                                }
                             }
                         }
-
-                        if (!(dr["End_address"] != DBNull.Value && dr["End_address"].ToString().Length > 0))
+                        catch (Exception ex)
                         {
-                            int id = (int)dr["PosEndId"];
-                            double lat = (double)dr["PosEndtLat"];
-                            double lng = (double)dr["PosEndLng"];
-                            Task<string> address = ReverseGecocodingAsync(car, lat, lng);
-                            //var altitude = AltitudeAsync(lat, lng);
-
-                            string addressResult = address.Result;
-                            if (!string.IsNullOrEmpty(addressResult))
-                            {
-                                //UpdateAddressByPosId(id, addressResult, altitude.Result);
-                                UpdateAddressByPosId(id, addressResult, 0);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
                             ExceptionWriter(ex, "");
                         }
                     }
@@ -1727,27 +1817,27 @@ FROM
                 using (MySqlCommand cmd = new MySqlCommand(@"SELECT pos.id, lat, lng FROM chargingstate join pos on chargingstate.Pos = pos.id where address IS null OR address = '' or pos.id = ''", con))
                 {
 
-                MySqlDataReader dr = cmd.ExecuteReader();
-                while (dr.Read())
-                {
-                    Thread.Sleep(10000); // Sleep to not get banned by Nominatim !
-                    try
+                    MySqlDataReader dr = cmd.ExecuteReader();
+                    while (dr.Read())
                     {
-                        int id = (int)dr[0];
-                        double lat = (double)dr[1];
-                        double lng = (double)dr[2];
-                        Task<string> address = ReverseGecocodingAsync(car, lat, lng);
-                        //var altitude = AltitudeAsync(lat, lng);
-
-                        string addressResult = address.Result;
-                        if (!string.IsNullOrEmpty(addressResult))
+                        Thread.Sleep(10000); // Sleep to not get banned by Nominatim !
+                        try
                         {
-                            //UpdateAddressByPosId(id, addressResult, altitude.Result);
-                            UpdateAddressByPosId(id, addressResult, 0);
+                            int id = (int)dr[0];
+                            double lat = (double)dr[1];
+                            double lng = (double)dr[2];
+                            Task<string> address = ReverseGecocodingAsync(car, lat, lng);
+                            //var altitude = AltitudeAsync(lat, lng);
+
+                            string addressResult = address.Result;
+                            if (!string.IsNullOrEmpty(addressResult))
+                            {
+                                //UpdateAddressByPosId(id, addressResult, altitude.Result);
+                                UpdateAddressByPosId(id, addressResult, 0);
+                            }
                         }
-                    }
-                    catch (Exception ex)
-                    {
+                        catch (Exception ex)
+                        {
                             ExceptionWriter(ex, "");
                         }
                     }
@@ -1761,7 +1851,7 @@ FROM
         {
             try
             {
-                if (geofence.RacingMode)
+                if (Geofence.GetInstance().RacingMode)
                 {
                     return;
                 }
@@ -1778,12 +1868,12 @@ FROM
                         left join chargingstate on pos.id = chargingstate.pos
                         where pos.id in (SELECT Pos FROM chargingstate) or pos.id in (SELECT StartPos FROM drivestate) or pos.id in (SELECT EndPos FROM drivestate)", con))
                     {
-                    MySqlDataReader dr = cmd.ExecuteReader();
-                    int t2 = Environment.TickCount - t;
-                    Logfile.Log($"UpdateAllPOIAddresses Select {t2}ms");
+                        MySqlDataReader dr = cmd.ExecuteReader();
+                        int t2 = Environment.TickCount - t;
+                        Logfile.Log($"UpdateAllPOIAddresses Select {t2}ms");
 
-                    while (dr.Read())
-                    {
+                        while (dr.Read())
+                        {
                             count = UpdatePOIAdress(count, dr);
                         }
                     }
@@ -1822,8 +1912,8 @@ FROM
 
         private static int UpdatePOIAdress(int count, MySqlDataReader dr)
         {
-                        try
-                        {
+            try
+            {
                 Thread.Sleep(1);
                 double lat = (double)dr["lat"];
                 double lng = (double)dr["lng"];
@@ -1831,36 +1921,36 @@ FROM
                 string brand = dr["fast_charger_brand"] as String ?? "";
                 int max_power = dr["max_charger_power"] as int? ?? 0;
 
-                Address a = geofence.GetPOI(lat, lng, false, brand, max_power);
-                            if (a == null)
-                            {
-                                if (dr[3] == DBNull.Value || dr[3].ToString().Length == 0)
-                                {
-                                    DBHelper.UpdateAddress(null, id);
-                                }
+                Address a = Geofence.GetInstance().GetPOI(lat, lng, false, brand, max_power);
+                if (a == null)
+                {
+                    if (dr[3] == DBNull.Value || dr[3].ToString().Length == 0)
+                    {
+                        DBHelper.UpdateAddress(null, id);
+                    }
                     return count;
-                            }
+                }
 
-                            if (dr[3] == DBNull.Value || a.name != dr[3].ToString())
-                            {
-                                using (MySqlConnection con2 = new MySqlConnection(DBHelper.DBConnectionstring))
-                                {
-                                    con2.Open();
+                if (dr[3] == DBNull.Value || a.name != dr[3].ToString())
+                {
+                    using (MySqlConnection con2 = new MySqlConnection(DBHelper.DBConnectionstring))
+                    {
+                        con2.Open();
                         using (MySqlCommand cmd2 = new MySqlCommand("update pos set address=@address where id = @id", con2))
                         {
-                                    cmd2.Parameters.AddWithValue("@id", id);
-                                    cmd2.Parameters.AddWithValue("@address", a.name);
-                                    cmd2.ExecuteNonQuery();
+                            cmd2.Parameters.AddWithValue("@id", id);
+                            cmd2.Parameters.AddWithValue("@address", a.name);
+                            cmd2.ExecuteNonQuery();
 
-                                    count++;
-                                }
-                            }
+                            count++;
                         }
+                    }
+                }
             }
-                        catch (Exception ex)
-                        {
-                            Logfile.Log(" Exception in UpdateAllPOIAddresses: " + ex.Message);
-                        }
+            catch (Exception ex)
+            {
+                Logfile.Log(" Exception in UpdateAllPOIAddresses: " + ex.Message);
+            }
 
             return count;
         }
@@ -2098,27 +2188,107 @@ FROM
                     Timeout = TimeSpan.FromSeconds(11)
                 })
                 {
-                client.DefaultRequestHeaders.Add("User-Agent", "C# App");
-                client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
+                    client.DefaultRequestHeaders.Add("User-Agent", "C# App");
+                    client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
 
-                string adresse = apiaddress + "api/1/vehicles/" + Tesla_id + "/data_request/" + cmd;
-                
-                DateTime start = DateTime.UtcNow;
-                HttpResponseMessage result = await client.GetAsync(adresse);
-                resultContent = await result.Content.ReadAsStringAsync();
-                DBHelper.AddMothershipDataToDB("GetCommand(" + cmd + ")", start, (int)result.StatusCode);
-                if (TeslaAPI_Commands.ContainsKey(cmd))
+                    string adresse = apiaddress + "api/1/vehicles/" + Tesla_id + "/data_request/" + cmd;
+
+                    DateTime start = DateTime.UtcNow;
+                    HttpResponseMessage result = await client.GetAsync(adresse);
+
+                    if (result.IsSuccessStatusCode)
+                    {
+
+                    resultContent = await result.Content.ReadAsStringAsync();
+                    DBHelper.AddMothershipDataToDB("GetCommand(" + cmd + ")", start, (int)result.StatusCode);
+                        _ = car.GetTeslaAPIState().ParseAPI(resultContent, cmd);
+                    if (TeslaAPI_Commands.ContainsKey(cmd))
+                    {
+                            TeslaAPI_Commands.TryGetValue(cmd, out string old_value);
+                            TeslaAPI_Commands.TryUpdate(cmd, resultContent, old_value);
+                    }
+                    else
+                    {
+                        TeslaAPI_Commands.TryAdd(cmd, resultContent);
+                    }
+
+
+                        return resultContent;
+                    }
+                    else if (result.StatusCode == HttpStatusCode.Unauthorized)
+                    {
+                        LoginRetry(result);
+                    }
+                    else if (result.StatusCode == HttpStatusCode.MethodNotAllowed)
+                    {
+                        if (car.IsInService())
+                            return "INSERVICE";
+                        else
+                            Log("Result.Statuscode: " + (int)result.StatusCode + " ("+ result.StatusCode.ToString() +") cmd: " + cmd);
+
+                    }
+                    else if (result.StatusCode == HttpStatusCode.RequestTimeout)
+                    {
+                        Log("Result.Statuscode: " + (int)result.StatusCode + " (" + result.StatusCode.ToString() + ") cmd: " + cmd);
+                        Thread.Sleep(30000);
+                    }
+                    else
+                    {
+                        Log("Result.Statuscode: " + (int)result.StatusCode + " (" + result.StatusCode.ToString() + ") cmd: " + cmd);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ExceptionWriter(ex, resultContent);
+            }
+
+            return "NULL";
+        }
+
+        public bool LoginRetry(HttpResponseMessage result)
+        {
+            if (result?.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                Log("HttpStatusCode = Unauthorized. Password changed or still valid? " + car.LoginRetryCounter);
+
+                if (car.LoginRetryCounter < 2)
                 {
-                    TeslaAPI_Commands.TryGetValue("drive_state", out string drive_state);
-                    TeslaAPI_Commands.TryUpdate(cmd, resultContent, drive_state);
+                    System.Threading.Thread.Sleep(60000);
+
+                    car.LoginRetryCounter++;
+                    Tesla_token = GetTokenAsync().Result;
+                    return true;
                 }
                 else
                 {
-                    TeslaAPI_Commands.TryAdd(cmd, resultContent);
+                    car.ExitTeslaLogger("Login retrys exeeded!");
                 }
-                _ = car.GetTeslaAPIState().ParseAPI(resultContent, cmd);
-                return resultContent;
             }
+            return false;
+        }
+
+        public async Task<string> GetNearbyChargingSites()
+        {
+            string resultContent = "";
+            try
+            {
+                using (HttpClient client = new HttpClient
+                {
+                    Timeout = TimeSpan.FromSeconds(11)
+                })
+                {
+                    client.DefaultRequestHeaders.Add("User-Agent", "C# App");
+                    client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
+
+                    string adresse = apiaddress + "api/1/vehicles/" + Tesla_id + "/nearby_charging_sites";
+
+                    DateTime start = DateTime.UtcNow;
+                    HttpResponseMessage result = await client.GetAsync(new Uri(adresse)).ConfigureAwait(false);
+                    resultContent = await result.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    DBHelper.AddMothershipDataToDB("GetCommand(nearby_charging_sites)", start, (int)result.StatusCode);
+                    return resultContent;
+                }
             }
             catch (Exception ex)
             {
@@ -2146,47 +2316,47 @@ FROM
             {
                 using (HttpClient client = new HttpClient())
                 {
-                client.DefaultRequestHeaders.Add("User-Agent", "C# App");
-                client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
-                //if (_json)
-                //{
-                //    client.DefaultRequestHeaders.TryAddWithoutValidation("contenttype", "application/json");
-                //}
+                    client.DefaultRequestHeaders.Add("User-Agent", "C# App");
+                    client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
+                    //if (_json)
+                    //{
+                    //    client.DefaultRequestHeaders.TryAddWithoutValidation("contenttype", "application/json");
+                    //}
 
-                string url = apiaddress + "api/1/vehicles/" + Tesla_id + "/" + cmd;
+                    string url = apiaddress + "api/1/vehicles/" + Tesla_id + "/" + cmd;
 
                     StringContent queryString = null;
                     try
                     {
                         queryString = data != null ? new StringContent(data) : null;
 
-                if (_json && data != null)
-                {
+                        if (_json && data != null)
+                        {
                             queryString?.Dispose();
-                    queryString = new StringContent(data, Encoding.UTF8, "application/json");
-                }
-                
-                DateTime start = DateTime.UtcNow;
-                HttpResponseMessage result = await client.PostAsync(url, data != null ? queryString : null);
-                resultContent = await result.Content.ReadAsStringAsync();
-                DBHelper.AddMothershipDataToDB("PostCommand(" + cmd + ")", start, (int)result.StatusCode);
-                int position = cmd.LastIndexOf('/');
-                if (position > -1)
-                {
-                    string command = cmd.Substring(position + 1);
-                    if (TeslaAPI_Commands.ContainsKey(command))
-                    {
-                        TeslaAPI_Commands.TryGetValue(command, out string drive_state);
-                        TeslaAPI_Commands.TryUpdate(command, resultContent, drive_state);
-                    }
-                    else
-                    {
-                        TeslaAPI_Commands.TryAdd(command, resultContent);
-                    }
-                }
+                            queryString = new StringContent(data, Encoding.UTF8, "application/json");
+                        }
 
-                return resultContent;
-            }
+                        DateTime start = DateTime.UtcNow;
+                        HttpResponseMessage result = await client.PostAsync(url, data != null ? queryString : null);
+                        resultContent = await result.Content.ReadAsStringAsync();
+                        DBHelper.AddMothershipDataToDB("PostCommand(" + cmd + ")", start, (int)result.StatusCode);
+                        int position = cmd.LastIndexOf('/');
+                        if (position > -1)
+                        {
+                            string command = cmd.Substring(position + 1);
+                            if (TeslaAPI_Commands.ContainsKey(command))
+                            {
+                                TeslaAPI_Commands.TryGetValue(command, out string drive_state);
+                                TeslaAPI_Commands.TryUpdate(command, resultContent, drive_state);
+                            }
+                            else
+                            {
+                                TeslaAPI_Commands.TryAdd(command, resultContent);
+                            }
+                        }
+
+                        return resultContent;
+                    }
                     finally
                     {
                         queryString?.Dispose();
@@ -2277,62 +2447,62 @@ FROM
 
             using (HttpClient client = new HttpClient())
             {
-            client.DefaultRequestHeaders.Add("User-Agent", "C# App");
+                client.DefaultRequestHeaders.Add("User-Agent", "C# App");
 
-            Task<HttpResponseMessage> resultTask = client.GetAsync("https://www.energy-charts.de/power/week_2018_46.json");
-            HttpResponseMessage result = resultTask.Result;
-            resultContent = result.Content.ReadAsStringAsync().Result;
+                Task<HttpResponseMessage> resultTask = client.GetAsync("https://www.energy-charts.de/power/week_2018_46.json");
+                HttpResponseMessage result = resultTask.Result;
+                resultContent = result.Content.ReadAsStringAsync().Result;
 
-            object jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
+                object jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
 
-            DataTable dt = new DataTable();
-            dt.Columns.Add("name");
-            dt.Columns.Add("kWh", typeof(decimal));
-            dt.Columns.Add("Datum", typeof(DateTime));
+                DataTable dt = new DataTable();
+                dt.Columns.Add("name");
+                dt.Columns.Add("kWh", typeof(decimal));
+                dt.Columns.Add("Datum", typeof(DateTime));
 
-            object[] o1 = (object[])jsonResult;
-            foreach (object o2 in o1)
-            {
-                Dictionary<string, object> o3 = o2 as Dictionary<string, object>;
-                object[] name = o3["key"] as object[];
-                Dictionary<string, object> n2 = name[0] as Dictionary<string, object>;
-                string realname = n2["de"].ToString();
-
-                if (realname.Contains("geplant") || realname.Contains("Prognose"))
+                object[] o1 = (object[])jsonResult;
+                foreach (object o2 in o1)
                 {
-                    continue;
-                }
+                    Dictionary<string, object> o3 = o2 as Dictionary<string, object>;
+                    object[] name = o3["key"] as object[];
+                    Dictionary<string, object> n2 = name[0] as Dictionary<string, object>;
+                    string realname = n2["de"].ToString();
 
-                object[] values = o3["values"] as object[];
-
-                decimal lastkWh = 0;
-                for (int x = values.Length - 1; x >= 0; x--)
-                {
-                    object[] v2 = values[x] as object[];
-
-                    if (v2[1] != null)
+                    if (realname.Contains("geplant") || realname.Contains("Prognose"))
                     {
-                        if (v2[1] is decimal)
-                        {
-                            lastkWh = (decimal)v2[1];
-                        }
-                        else if (v2[1] is int)
-                        {
-                            lastkWh = Convert.ToDecimal((int)v2[1]);
-                        }
+                        continue;
+                    }
 
-                        DataRow dr = dt.NewRow();
-                        dr["name"] = realname;
-                        dr["kWh"] = lastkWh;
-                        dr["Datum"] = DBHelper.UnixToDateTime((long)v2[0]);
-                        dt.Rows.Add(dr);
-                        break;
+                    object[] values = o3["values"] as object[];
+
+                    decimal lastkWh = 0;
+                    for (int x = values.Length - 1; x >= 0; x--)
+                    {
+                        object[] v2 = values[x] as object[];
+
+                        if (v2[1] != null)
+                        {
+                            if (v2[1] is decimal)
+                            {
+                                lastkWh = (decimal)v2[1];
+                            }
+                            else if (v2[1] is int)
+                            {
+                                lastkWh = Convert.ToDecimal((int)v2[1]);
+                            }
+
+                            DataRow dr = dt.NewRow();
+                            dr["name"] = realname;
+                            dr["kWh"] = lastkWh;
+                            dr["Datum"] = DBHelper.UnixToDateTime((long)v2[0]);
+                            dt.Rows.Add(dr);
+                            break;
+                        }
                     }
                 }
-            }
 
 
-            return dt;
+                return dt;
             }
 
         }
@@ -2351,11 +2521,15 @@ FROM
             {
                 Tools.SetThread_enUS();
 
-                Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out _);
+                Tools.GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out _, out _, out _);
 
                 TimeSpan ts = DateTime.Now - lastTaskerWakeupfile;
 
-                if (!force && ts.TotalSeconds < 20)
+                int secBetweenTaskerWakeupFile = 20;
+                if (!car.useTaskerToken)
+                    secBetweenTaskerWakeupFile = 120;
+
+                if (!force && ts.TotalSeconds < secBetweenTaskerWakeupFile)
                 {
                     return false;
                 }
@@ -2373,7 +2547,7 @@ FROM
                 using (HttpClient client = new HttpClient())
                 {
 
-                Dictionary<string, string> d = new Dictionary<string, string>
+                    Dictionary<string, string> d = new Dictionary<string, string>
                 {
                     { "t", car.TaskerHash },
                     { "v", System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString() },
@@ -2412,31 +2586,36 @@ FROM
 
                     using (FormUrlEncodedContent content = new FormUrlEncodedContent(d))
                     {
-                string query = content.ReadAsStringAsync().Result;
+                        string query = content.ReadAsStringAsync().Result;
 
-                DateTime start = DateTime.UtcNow;
-                Task<HttpResponseMessage> resultTask = client.PostAsync("http://teslalogger.de/wakefile.php", content);
+                        DateTime start = DateTime.UtcNow;
+                        Task<HttpResponseMessage> resultTask = client.PostAsync("http://teslalogger.de/wakefile.php", content);
 
-                HttpResponseMessage result = resultTask.Result;
-                string resultContent = result.Content.ReadAsStringAsync().Result;
+                        HttpResponseMessage result = resultTask.Result;
+                        string resultContent = result.Content.ReadAsStringAsync().Result;
 
-                DBHelper.AddMothershipDataToDB("teslalogger.de/wakefile.php", start, (int)result.StatusCode);
+                        DBHelper.AddMothershipDataToDB("teslalogger.de/wakefile.php", start, (int)result.StatusCode);
 
-                if (resultContent.Contains("wakeupfile"))
-                {
-                    try
-                    {
+                        if (resultContent.Contains("wakeupfile"))
+                        {
+                            try
+                            {
                                 string lasttaskerwakeupfilepaht = System.IO.Path.Combine(FileManager.GetExecutingPath(), "LASTTASKERWAKEUPFILE_" + car.CarInDB);
-                        string ltwf = resultContent.Replace("wakeupfile", "").Trim();
-                        System.IO.File.WriteAllText(lasttaskerwakeupfilepaht, ltwf);
-                    }
-                    catch (Exception)
-                    { }
+                                string ltwf = resultContent.Replace("wakeupfile", "").Trim();
+                                System.IO.File.WriteAllText(lasttaskerwakeupfilepaht, ltwf);
+                            }
+                            catch (Exception)
+                            { }
 
-                    Log("TaskerWakeupfile available! [Webservice]" + resultContent.Replace("wakeupfile", ""));
-                    return true;
-                }
-            }
+                            Log("TaskerWakeupfile available! [Webservice]" + resultContent.Replace("wakeupfile", ""));
+                            if (!car.useTaskerToken)
+                            {
+                                Log("Start using fast TaskerToken request!");
+                                car.useTaskerToken = true;
+                            }
+                            return true;
+                        }
+                    }
                 }
             }
             catch (Exception ex)
