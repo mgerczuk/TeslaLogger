@@ -26,6 +26,7 @@ namespace TeslaLogger
         public static bool Done { get => _done;}
 
         private static Thread ComfortingMessages = null;
+        public static bool DownloadUpdateAndInstallStarted = false;
 
         public static void StopComfortingMessagesThread()
         {
@@ -211,7 +212,7 @@ namespace TeslaLogger
                 }
 
                 /*
-                if (!DBHelper.IndexExists("can_ix","can"))
+                if (!DBHelper.IndexExists("can_ix", "can"))
                 {
                     Logfile.Log("alter table can add index can_ix (id,datum)");
                     DBHelper.ExecuteSQLQuery("alter table can add index can_ix (id,datum)", 600);
@@ -290,12 +291,12 @@ namespace TeslaLogger
                             con.Open();
                             using (MySqlCommand cmd = new MySqlCommand("INSERT INTO cars (id,tesla_name,tesla_password,tesla_carid, display_name) values (1, @tesla_name, @tesla_password, @tesla_carid, 'Tesla')", con))
                             {
-                            cmd.Parameters.AddWithValue("@tesla_name", ApplicationSettings.Default.TeslaName);
-                            cmd.Parameters.AddWithValue("@tesla_password", ApplicationSettings.Default.TeslaPasswort);
-                            cmd.Parameters.AddWithValue("@tesla_carid", ApplicationSettings.Default.Car);
-                            cmd.ExecuteNonQuery();
+                                cmd.Parameters.AddWithValue("@tesla_name", ApplicationSettings.Default.TeslaName);
+                                cmd.Parameters.AddWithValue("@tesla_password", ApplicationSettings.Default.TeslaPasswort);
+                                cmd.Parameters.AddWithValue("@tesla_carid", ApplicationSettings.Default.Car);
+                                cmd.ExecuteNonQuery();
+                            }
                         }
-                    }
                     }
                     catch (Exception ex)
                     {
@@ -408,6 +409,12 @@ CREATE TABLE superchargerstate(
                     Logfile.Log("CREATE TABLE OK");
                 }
 
+                if (!DBHelper.ColumnExists("cars", "refresh_token"))
+                {
+                    Logfile.Log("ALTER TABLE cars ADD Column refresh_token");
+                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `refresh_token` TEXT NULL DEFAULT NULL", 600);
+                }
+
                 // end of schema update
 
                 if (!DBHelper.TableExists("trip") || !DBHelper.ColumnExists("trip", "outside_temp_avg"))
@@ -432,6 +439,28 @@ CREATE TABLE superchargerstate(
                 UpdatePHPini();
                 CreateEmptyWeatherIniFile();
                 CheckBackupCrontab();
+
+                DownloadUpdateAndInstall();
+
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log("Error in update: " + ex.ToString());
+            }
+            finally
+            {
+                try
+                {
+                    _done = true;
+                    ComfortingMessages.Abort();
+                }
+                catch (Exception) { }
+            }
+        }
+
+        public static void DownloadUpdateAndInstall()
+        {
+            DownloadUpdateAndInstallStarted = true;
 
                 if (File.Exists("cmd_updated.txt"))
                 {
@@ -583,7 +612,6 @@ CREATE TABLE superchargerstate(
                     {
                         Logfile.Log(ex.ToString());
                     }
-                }
 
                 Logfile.Log("End update");
 
@@ -591,20 +619,8 @@ CREATE TABLE superchargerstate(
 
                 Tools.Exec_mono("reboot", "");
             }
-            catch (Exception ex)
-            {
-                Logfile.Log("Error in update: " + ex.ToString());
-            }
-            finally
-            {
-                try
-                {
-                    _done = true;
-                    ComfortingMessages.Abort();
-                }
-                catch (Exception) { }
-            }
         }
+
 
         private static void CheckBackupCrontab()
         {
@@ -670,16 +686,16 @@ CREATE TABLE superchargerstate(
                     con.Open();
                     using (MySqlCommand cmd = new MySqlCommand("SELECT default_character_set_name FROM information_schema.SCHEMATA WHERE schema_name = 'teslalogger'; ", con))
                     {
-                    MySqlDataReader dr = cmd.ExecuteReader();
-                    if (dr.Read())
-                    {
-                        string charset = dr[0].ToString();
-
-                        if (charset != "utf8mb4")
+                        MySqlDataReader dr = cmd.ExecuteReader();
+                        if (dr.Read())
                         {
-                            dr.Close();
+                            string charset = dr[0].ToString();
 
-                            Logfile.Log("Chage database charset to utf8mb4");
+                            if (charset != "utf8mb4")
+                            {
+                                dr.Close();
+
+                                Logfile.Log("Chage database charset to utf8mb4");
                                 using (var cmd2 = new MySqlCommand("ALTER DATABASE teslalogger CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci", con))
                                 {
                                     cmd2.ExecuteNonQuery();
@@ -906,7 +922,7 @@ CREATE TABLE superchargerstate(
 
                             Logfile.Log("upgrade Grafana DONE!");
 
-                        Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"), new DirectoryInfo("/var/lib/grafana/plugins"));
+                            Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"), new DirectoryInfo("/var/lib/grafana/plugins"));
                         })
                         {
                             Name = "GrafanaUpdate"
@@ -1226,7 +1242,7 @@ CREATE TABLE superchargerstate(
                         s = UpdateDefaultCar(s, defaultcar, defaultcarid, carLabel);
                         
                         if (!title.Contains("ScanMyTesla") && !title.Contains("Zelltemperaturen") && !title.Contains("SOC ") && !title.Contains("Chargertype") && !title.Contains("Mothership"))
-                        dashboardlinks.Add(title+"|"+link);
+                            dashboardlinks.Add(title+"|"+link);
 
                         File.WriteAllText(f, s);
                     }
@@ -1415,11 +1431,11 @@ CREATE TABLE superchargerstate(
                     EnableRaisingEvents = false
                 })
                 {
-                proc.StartInfo.FileName = "chmod";
-                proc.StartInfo.Arguments = chmod + " " + filename;
-                proc.Start();
-                proc.WaitForExit();
-            }
+                    proc.StartInfo.FileName = "chmod";
+                    proc.StartInfo.Arguments = chmod + " " + filename;
+                    proc.Start();
+                    proc.WaitForExit();
+                }
             }
             catch (Exception ex)
             {
@@ -1434,12 +1450,12 @@ CREATE TABLE superchargerstate(
                 for (int x = 0; x < Car.allcars.Count; x++)
                 {
                     Car c = Car.allcars[x];
-                    if (c.GetCurrentState() != Car.TeslaState.Sleep)
+                    if (c.GetCurrentState() == Car.TeslaState.Charge || c.GetCurrentState() == Car.TeslaState.Drive)
                         return;
                 }
 
                 TimeSpan ts = DateTime.UtcNow - lastVersionCheck;
-                if (ts.TotalMinutes > 120)
+                if (ts.TotalMinutes > 240)
                 {
                     string currentVersion = Assembly.GetExecutingAssembly().GetName().Version.ToString();
                     Logfile.Log($"Checking TeslaLogger online update (current version: {currentVersion}) ...");

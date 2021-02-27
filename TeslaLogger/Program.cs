@@ -37,6 +37,8 @@ namespace TeslaLogger
 
                 InitOpenTopoDataService();
 
+                InitStaticMapService();
+
                 UpdateTeslalogger.StopComfortingMessagesThread();
 
                 MQTTClient.StartMQTTClient();
@@ -56,6 +58,22 @@ namespace TeslaLogger
                 Logfile.Log(ex.Message);
                 Logfile.ExceptionWriter(ex, "main loop");
                 Logfile.Log("Teslalogger Stopped!");
+            }
+            finally
+            {
+                if (!UpdateTeslalogger.DownloadUpdateAndInstallStarted)
+                {
+                    try
+                    {
+                        Logfile.Log("Startup doesn't sucessfully run DownloadUpdateAndInstall() - retry now!");
+                        UpdateTeslalogger.DownloadUpdateAndInstall();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logfile.Log(ex.Message);
+                        Logfile.ExceptionWriter(ex, "Emergency DownloadUpdateAndInstall()");
+                    }
+                }
             }
         }
 
@@ -206,6 +224,14 @@ namespace TeslaLogger
             Logfile.Log("SuspendAPIMinutes: " + ApplicationSettings.Default.SuspendAPIMinutes);
             Logfile.Log("SleepPositions: " + ApplicationSettings.Default.SleepPosition);
             Logfile.Log("UseScanMyTesla: " + Tools.UseScanMyTesla());
+            try
+            {
+                Logfile.Log($"Free disk space: {Tools.FreeDiskSpaceMB()}mb");
+            }
+            catch (Exception ex)
+            {
+                Logfile.ExceptionWriter(ex, ex.ToString());
+            }
         }
 
         private static void InitStage1()
@@ -327,6 +353,10 @@ namespace TeslaLogger
 
                 DBHelper.UpdateCarIDNull();
 
+                MapQuest.createAllParkingMaps();
+                MapQuest.createAllChargigMaps();
+                MapQuest.createAllTripMaps();
+
                 Logfile.Log("UpdateDbInBackground finished, took " + (DateTime.Now - start).TotalMilliseconds + "ms");
                 RunHousekeepingInBackground();
             })
@@ -359,6 +389,26 @@ namespace TeslaLogger
         {
             Logfile.Log("Exit: " + _msg);
             Environment.Exit(_exitcode);
+        }
+
+        private static void InitStaticMapService()
+        {
+            try
+            {
+                Thread threadStaticMapService = new Thread(() =>
+                {
+                    StaticMapService.GetSingleton().Run();
+                })
+                {
+                    Name = "StaticMapServiceThread"
+                };
+                threadStaticMapService.Start();
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+
         }
     }
 }

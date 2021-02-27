@@ -1,4 +1,4 @@
-# TeslaFi Import Tool (Beta)
+# TeslaFi Import Tool
 
 With this importer your data from your TeslaFi account can be imported into TeslaLogger.
 
@@ -11,6 +11,32 @@ With this importer your data from your TeslaFi account can be imported into Tesl
 * Click on submit
 * Save the file on your local computer
 * Repeat the download for all months whose data you want to import into Teslalogger
+
+# Settings
+## More than one car to import
+* Go to Admin Panel / Settings / Credentials e.g. http://raspberry/admin/password.php
+* Check the ID of your car to import.
+* Edit TeslaFi-Import.exe.config - set value of CarId to the corresponding ID from Credentials pag
+
+e.g. if your Car to import is 2 it should look like:
+```
+...
+<setting name="CarId" serializeAs="String">
+    <value>2</value>
+</setting>
+...
+```
+## Import from a external device
+Sometimes the import will fail, if you have very large import files especially on Raspberries because of the lack of enough RAM. To connect the TeslaFi Import Tool to Teslalogger's database you have to change the DBConnectionstring in TeslaFi-Import.exe.config. 
+
+```
+...
+<setting name="DBConnectionstring" serializeAs="String">
+    <value>Server=raspberry;Database=teslalogger;Uid=root;Password=teslalogger;</value>
+</setting>
+...
+```
+
 
 # Importing TeslaFi data into the TeslaLogger
 ## Raspberry edition
@@ -33,6 +59,8 @@ sudo reboot now
 ```
 
 ## Docker edition
+Copy all CSV files into the subdirectory of your docker-compose.yml file : TeslaLogger\bin
+
 Get the container name of Teslalogger.
 ```
 Docker PS

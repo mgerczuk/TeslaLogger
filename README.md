@@ -8,6 +8,9 @@ https://www.e-mobility-driving-solutions.com/produkt/raspi-teslalogger/?lang=en
 Or a Teslalogger Image for a Raspberry PI 3B+: 
 https://e-mobility-driving-solutions.com/produkt/teslalogger-image/?lang=en
 
+Or a Teslalogger Image for a Raspberry PI 4B:
+https://e-mobility-driving-solutions.com/produkt/teslalogger-image-for-raspberrypi-4/?lang=en
+
 You can also run it for free in a Docker / Synology:
 [Docker Setup](docker_setup.md)
 
@@ -117,6 +120,8 @@ Grafana Dashboards: http://raspberry:3000
 ![Image](https://raw.githubusercontent.com/bassmaster187/TeslaLogger/master/TeslaLogger/screenshots/Trip-Monatsstatistik.PNG)
 
 ![Image](https://raw.githubusercontent.com/bassmaster187/TeslaLogger/master/TeslaLogger/screenshots/geofence_edit.png)
+
+![Image](https://raw.githubusercontent.com/bassmaster187/TeslaLogger/master/TeslaLogger/screenshots/timeline.png)
 
 # Screenshots with ScanMyTesla integration #
 

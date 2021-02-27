@@ -283,6 +283,27 @@ namespace TeslaLogger
             }
         }
 
+        internal string GetRefreshToken()
+        {
+            using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+            {
+                con.Open();
+                using (MySqlCommand cmd = new MySqlCommand("SELECT refresh_token FROM cars where id = @CarID", con))
+                {
+                    cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
+
+                    MySqlDataReader dr = cmd.ExecuteReader();
+                    if (dr.Read())
+                    {
+                        string refresh_token = dr[0].ToString();
+                        return refresh_token;
+                    }
+                }
+            }
+
+            return "";
+        }
+
         internal void UpdateTeslaToken()
         {
             try
@@ -408,6 +429,30 @@ namespace TeslaLogger
             }
         }
 
+        internal void UpdateRefreshToken(string refresh_token)
+        {
+            try
+            {
+                car.Log("UpdateRefreshToken");
+                using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+                {
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand("update cars set refresh_token = @refresh_token where id=@id", con))
+                    {
+                        cmd.Parameters.AddWithValue("@id", car.CarInDB);
+                        cmd.Parameters.AddWithValue("@refresh_token", refresh_token);
+                        int done = cmd.ExecuteNonQuery();
+
+                        car.Log("UpdateRefreshToken OK: " + done);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                car.Log(ex.ToString());
+            }
+        }
+
         internal string GetFirmwareFromDate(DateTime dateTime)
         {
             using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
@@ -439,6 +484,7 @@ namespace TeslaLogger
         public void CloseChargingState()
         {
             car.Log("CloseChargingState()");
+            MapQuest.CreateChargingMapOnChargingCompleted(car.CarInDB);
             bool hasFreeSuc = car.HasFreeSuC();
             if (hasFreeSuc)
             {
@@ -449,14 +495,14 @@ namespace TeslaLogger
                     {
                         con.Open();
                         using (MySqlCommand cmd = new MySqlCommand(
-@"UPDATE 
-  chargingstate 
-SET 
-  cost_total= @cost_total
-WHERE 
-  CarID = @carid 
-  AND EndDate is null 
-  AND fast_charger_brand = 'Tesla'", con))
+                            @"UPDATE 
+                              chargingstate 
+                            SET 
+                              cost_total= @cost_total
+                            WHERE 
+                              CarID = @carid 
+                              AND EndDate is null 
+                              AND fast_charger_brand = 'Tesla'", con))
                         {
                             cmd.Parameters.AddWithValue("@carid", car.CarInDB);
                             cmd.Parameters.AddWithValue("@cost_total", 0.0);
@@ -893,6 +939,10 @@ WHERE
             Task.Factory.StartNew(() =>
               {
                   UpdateTripElevation(StartPos, MaxPosId, " (Task)");
+
+                  MapQuest.CreateTripMap(StartPos, MaxPosId, car.CarInDB);
+                  MapQuest.CreateParkingMapFromPosid(StartPos);
+                  MapQuest.CreateParkingMapFromPosid(MaxPosId);
               });
         }
 
