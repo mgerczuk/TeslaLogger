@@ -65,28 +65,37 @@ namespace TeslaLogger
 
         private async Task<IList<Data>> GetTeslaCanData()
         {
-            var client = new HttpClient();
-
-            var start = DateTime.UtcNow;
-            var result = await client.GetAsync("http://teslacan-esp.fritz.box/getdata?limit=12");
-            var resultContent = await result.Content.ReadAsStringAsync();
-
-            DBHelper.AddMothershipDataToDB("teslacan-esp.fritz.box/getdata", start, (int) result.StatusCode);
-
-            dynamic j = new JavaScriptSerializer().DeserializeObject(resultContent);
-
-            var arr = new List<Data>();
-            foreach (var j1 in j)
+            using (var client = new HttpClient())
             {
-                var data = new Data
-                {
-                    Timestamp = DateTime.Parse(j1["d"]),
-                    Values = (Dictionary<string, object>) j1["dict"]
-                };
-                arr.Add(data);
-            }
+                var start = DateTime.UtcNow;
+                var result = await client.GetAsync("http://teslacan-esp.fritz.box/getdata?limit=12");
+                var resultContent = await result.Content.ReadAsStringAsync();
 
-            return arr;
+                DBHelper.AddMothershipDataToDB("teslacan-esp.fritz.box/getdata", start, (int) result.StatusCode);
+
+                try
+                {
+                    dynamic j = new JavaScriptSerializer().DeserializeObject(resultContent);
+
+                    var arr = new List<Data>();
+                    foreach (var j1 in j)
+                    {
+                        var data = new Data
+                        {
+                            Timestamp = DateTime.Parse(j1["d"]),
+                            Values = (Dictionary<string, object>) j1["dict"]
+                        };
+                        arr.Add(data);
+                    }
+
+                    return arr;
+                }
+                catch (Exception e)
+                {
+                    car.Log("Error parsing JSON:\n" + resultContent);
+                    throw;
+                }
+            }
         }
 
         private void SaveData(Data data)
