@@ -42,6 +42,8 @@ namespace TeslaLogger
         private static int MapQuestCount = 0;
         private static int NominatimCount = 0;
 
+        string authHost = "https://auth.tesla.com";
+
         private bool _drivingOrChargingByStream = false;
 
         const string TESLA_CLIENT_ID = "81527cff06843c8634fdc09e8ac0abefb46ac849f38fe1e431c2ef2106796384";
@@ -139,7 +141,7 @@ namespace TeslaLogger
                     return false;
                 }
 
-               
+
                 TimeSpan ts = DateTime.Now - car.Tesla_Token_Expire;
 
                 if (ts.TotalDays < 30)
@@ -154,13 +156,13 @@ namespace TeslaLogger
                 {
                     Log("Restore Token too old! " + car.Tesla_Token_Expire.ToString());
                 }
-                
+
             }
             catch (Exception ex)
             {
                 Log("Error in RestoreToken: " + ex.Message);
             }
-            
+
 
             return false;
         }
@@ -249,7 +251,8 @@ namespace TeslaLogger
 
                 using (HttpClientHandler handler = new HttpClientHandler()
                 {
-                    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+                    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+                    AllowAutoRedirect = false
                 })
                 {
 
@@ -268,13 +271,14 @@ namespace TeslaLogger
                            { "redirect_uri", "https://auth.tesla.com/void/callback" },
                            { "response_type", "code" },
                            { "scope", "openid email offline_access" },
-                           { "state", state }
+                           { "state", state },
+                           { "login_hint",  car.TeslaName }
                         };
 
                         string json = new JavaScriptSerializer().Serialize(values);
                         using (StringContent content = new StringContent(json.ToString(), Encoding.UTF8, "application/json"))
                         {
-                            UriBuilder b = new UriBuilder("https://auth.tesla.com/oauth2/v3/authorize");
+                            UriBuilder b = new UriBuilder(authHost + "/oauth2/v3/authorize");
                             b.Port = -1;
                             var q = HttpUtility.ParseQueryString(b.Query);
                             foreach (var v in values)
@@ -313,6 +317,16 @@ namespace TeslaLogger
 
                                 throw new Exception("Wrong Credentials");
                             }
+
+                            if (result.StatusCode == HttpStatusCode.RedirectMethod)
+                            {
+                                if (result.Headers.Location.Host == "auth.tesla.cn" && authHost != "https://auth.tesla.cn")
+                                {
+                                    authHost = "https://auth.tesla.cn";
+                                    Log("Use chinese auth server: auth.tesla.cn!");
+                                    return GetToken();
+                                }
+                            }
                         }
                     }
 
@@ -322,6 +336,10 @@ namespace TeslaLogger
             catch (Exception ex)
             {
                 car.passwortinfo.Append("Error in GetTokenAsync: " + ex.Message + "<br>");
+                
+                if (ex.InnerException != null)
+                    car.passwortinfo.Append("Error in GetTokenAsync: " + ex.InnerException.Message + "<br>");
+
                 Log("Error in GetTokenAsync: " + ex.Message);
                 ExceptionWriter(ex, resultContent);
             }
@@ -331,7 +349,10 @@ namespace TeslaLogger
 
         private string UpdateTeslaTokenFromRefreshToken()
         {
-            string refresh_token = car.dbHelper.GetRefreshToken();
+            string refresh_token = car.dbHelper.GetRefreshToken(out string tesla_token);
+
+            if (tesla_token.StartsWith("cn-"))
+                authHost = "https://auth.tesla.cn";
 
             if (String.IsNullOrEmpty(refresh_token))
             {
@@ -368,7 +389,7 @@ namespace TeslaLogger
 
                         using (var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"))
                         {
-                            HttpResponseMessage result = client.PostAsync("https://auth.tesla.com/oauth2/v3/token", content).Result;
+                            HttpResponseMessage result = client.PostAsync(authHost + "/oauth2/v3/token", content).Result;
                             string resultContent = result.Content.ReadAsStringAsync().Result;
 
                             DBHelper.AddMothershipDataToDB("UpdateTeslaTokenFromRefreshToken()", start, (int)result.StatusCode);
@@ -435,14 +456,14 @@ namespace TeslaLogger
                         client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
                         client.DefaultRequestHeaders.Connection.Add("keep-alive");
                         // client.Timeout = TimeSpan.FromSeconds(10);
-                        client.BaseAddress = new Uri("https://auth.tesla.com");
+                        client.BaseAddress = new Uri(authHost);
                         // client.DefaultRequestHeaders.Add("User-Agent", TeslaloggerUserAgent);
                         client.DefaultRequestHeaders.Add("Cookie", cookie);
                         DateTime start = DateTime.UtcNow;
 
                         using (FormUrlEncodedContent content = new FormUrlEncodedContent(d))
                         {
-                            UriBuilder b = new UriBuilder("https://auth.tesla.com/oauth2/v3/authorize");
+                            UriBuilder b = new UriBuilder(authHost +"/oauth2/v3/authorize");
                             b.Port = -1;
                             var q = HttpUtility.ParseQueryString(b.Query);
                             q["client_id"] = "ownerapi";
@@ -784,7 +805,7 @@ namespace TeslaLogger
 
                         using (var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"))
                         {
-                            HttpResponseMessage result = client.PostAsync("https://auth.tesla.com/oauth2/v3/token", content).Result;
+                            HttpResponseMessage result = client.PostAsync(authHost + "/oauth2/v3/token", content).Result;
                             string resultContent = result.Content.ReadAsStringAsync().Result;
 
                             DBHelper.AddMothershipDataToDB("GetTokenAsync3()", start, (int)result.StatusCode);
@@ -839,10 +860,16 @@ namespace TeslaLogger
 
                 DateTime start = DateTime.UtcNow;
 
-                using (HttpClient client = new HttpClient())
+                using (HttpClientHandler handler = new HttpClientHandler()
                 {
-                    client.Timeout = TimeSpan.FromSeconds(5);
-                    client.DefaultRequestHeaders.Add("User-Agent", TeslaloggerUserAgent);
+                    AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+                })
+                {
+                    using (HttpClient client = new HttpClient(handler))
+                    {
+                        client.Timeout = TimeSpan.FromSeconds(30);
+                        // client.DefaultRequestHeaders.Add("User-Agent", TeslaloggerUserAgent);
+                        client.DefaultRequestHeaders.Connection.Add("keep-alive");
                     client.DefaultRequestHeaders.Add("Authorization", "Bearer " + access_token);
 
                     using (var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"))
@@ -877,6 +904,7 @@ namespace TeslaLogger
                     }
                 }
             }
+            }
             catch (Exception ex)
             {
                 car.Log(ex.ToString());
@@ -906,7 +934,7 @@ namespace TeslaLogger
                 Dictionary<string, object> r2 = (Dictionary<string, object>)r1;
 
                 if (r2["charging_state"] == null || (resultContent != null && resultContent.Contains("vehicle unavailable")))
-                { 
+                {
                     if (justCheck)
                     {
                         return false;
@@ -1107,11 +1135,11 @@ namespace TeslaLogger
                         if (result.StatusCode == HttpStatusCode.Unauthorized)
                         {
                             if (LoginRetry(result))
-                        {
+                            {
                                 client.DefaultRequestHeaders.Remove("Authorization");
                                 client.DefaultRequestHeaders.Add("Authorization", "Bearer " + Tesla_token);
                                 DoGetVehiclesRequest(out resultContent, client, adresse, out resultTask, out result);
-                        }
+                            }
                         }
 
                         object jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
@@ -1159,6 +1187,7 @@ namespace TeslaLogger
                         if (car.vin != vin)
                         {
                             car.vin = vin;
+                            Tools.VINDecoder(vin, out car.year, out _, out car.AWD, out car.MIC, out _, out car.motor);
                             Log("WriteCarsettings -> VIN");
                             car.WriteSettings();
                         }
@@ -1400,7 +1429,7 @@ namespace TeslaLogger
 
                         if (ts.TotalMinutes > 60)
                         {
-                            if (state == "offline" || state == "asleep" || state == "online")
+                            if (state == "offline" || state == "asleep")
                                 return state;
 
                             string resultContent2 = GetCommand("vehicle_config").Result;
@@ -1413,6 +1442,11 @@ namespace TeslaLogger
 
                             if (jBadgeResult != null)
                             {
+                                string car_type = car.car_type;
+                                string car_special_type = car.car_special_type;
+                                string trim_badging = car.trim_badging;
+
+
                                 if (Tools.IsPropertyExist(jBadgeResult, "car_type"))
                                 {
                                     car.car_type = jBadgeResult["car_type"].ToString().ToLower().Trim();
@@ -1429,6 +1463,9 @@ namespace TeslaLogger
 
                                 UpdateEfficiency();
                                 lastUpdateEfficiency = DateTime.Now;
+
+                                if (car_type != car.car_type || car_special_type != car.car_special_type || trim_badging != car.trim_badging)
+                                    car.dbHelper.WriteCarSettings();
                             }
                         }
                     }
@@ -1451,10 +1488,13 @@ namespace TeslaLogger
         public void UpdateEfficiency()
         {
             //string eff = "0.190052356";
+            String vinCarType = "";
+            if (String.IsNullOrEmpty(car.car_type))
+                Tools.VINDecoder(car.vin, out _, out vinCarType, out bool AWD, out _, out string battery, out _);
 
-            if (car.car_type == "model3")
+            if (car.car_type == "model3" || vinCarType == "Model 3")
             {
-                Tools.VINDecoder(car.vin, out _, out _, out bool AWD, out _, out string battery, out _);
+                Tools.VINDecoder(car.vin, out int year, out _, out bool AWD, out _, out string battery, out _);
 
                 int maxRange = car.dbHelper.GetAvgMaxRage();
                 if (maxRange > 430)
@@ -1484,8 +1524,10 @@ namespace TeslaLogger
                 {
                     if (battery == "LFP")
                         WriteCarSettings("0.133", "M3 SR+ LFP");
+                    else if (year == 2021)
+                        WriteCarSettings("0.126", "M3 SR+ 2021");
                     else 
-                    WriteCarSettings("0.137", "M3 SR+");
+                        WriteCarSettings("0.137", "M3 SR+");
                     return;
                 }
             }
@@ -1538,16 +1580,17 @@ namespace TeslaLogger
                 }
                 else if (car.trim_badging.Length == 0)
                 {
+                    Tools.VINDecoder(car.vin, out _, out _, out bool AWD, out _, out _, out string motor);
                     int maxRange = car.dbHelper.GetAvgMaxRage();
                     if (maxRange > 500)
                     {
-                        if (car.DB_Wh_TR >= 0.174 && car.DB_Wh_TR <= 0.181)
+                        if (motor == "dual performance")
                         {
-                            WriteCarSettings("0.178", "S Raven LR P");
+                            WriteCarSettings("0.173", "S Raven LR P");
                             return;
                         }
 
-                        WriteCarSettings("0.169", "S Raven LR");
+                        WriteCarSettings("0.173", "S Raven LR");
                     }
                     else
                     {
@@ -1858,7 +1901,7 @@ namespace TeslaLogger
         }
 
         private void WriteCarSettings(string eff, string ModelName)
-        { 
+        {
             // TODO eff in double
             if (car.ModelName != ModelName || car.Wh_TR.ToString(Tools.ciEnUS) != eff)
             {
@@ -2060,6 +2103,7 @@ namespace TeslaLogger
             string line = "";
             while (!stopStreaming)
             {
+                System.Net.WebSockets.ClientWebSocket ws = null;
                 try
                 {
                     if (!car.currentJSON.current_falling_asleep)
@@ -2070,8 +2114,8 @@ namespace TeslaLogger
 
                     // string online = IsOnline().Result;
 
-                    using (System.Net.WebSockets.ClientWebSocket ws = new System.Net.WebSockets.ClientWebSocket())
-                    {
+                    ws = new System.Net.WebSockets.ClientWebSocket();
+
                         byte[] byteArray = Encoding.ASCII.GetBytes(string.Format("{0}:{1}", ApplicationSettings.Default.TeslaName, Tesla_Streamingtoken));
                         Uri serverUri = new Uri($"wss://streaming.vn.teslamotors.com/streaming/");
 
@@ -2175,7 +2219,7 @@ namespace TeslaLogger
                             //ws.SendAsync(bufferPing, System.Net.WebSockets.WebSocketMessageType.Text, true, CancellationToken.None);
                             // Logfile.ExceptionWriter(null, r);
                         }
-                    }
+
 
                     Log("StreamEnd");
                     System.Diagnostics.Debug.WriteLine("StreamEnd");
@@ -2232,6 +2276,14 @@ namespace TeslaLogger
                     }
                     
                     Thread.Sleep(10000);
+                }
+                finally
+                {
+                    if (ws != null)
+                    {
+                        ws.Abort();
+                        ws.Dispose();
+                    }
                 }
             }
 
@@ -3006,18 +3058,18 @@ namespace TeslaLogger
                     if (result.IsSuccessStatusCode)
                     {
 
-                    resultContent = await result.Content.ReadAsStringAsync();
-                    DBHelper.AddMothershipDataToDB("GetCommand(" + cmd + ")", start, (int)result.StatusCode);
+                        resultContent = await result.Content.ReadAsStringAsync();
+                        DBHelper.AddMothershipDataToDB("GetCommand(" + cmd + ")", start, (int)result.StatusCode);
                         _ = car.GetTeslaAPIState().ParseAPI(resultContent, cmd);
-                    if (TeslaAPI_Commands.ContainsKey(cmd))
-                    {
+                        if (TeslaAPI_Commands.ContainsKey(cmd))
+                        {
                             TeslaAPI_Commands.TryGetValue(cmd, out string old_value);
                             TeslaAPI_Commands.TryUpdate(cmd, resultContent, old_value);
-                    }
-                    else
-                    {
-                        TeslaAPI_Commands.TryAdd(cmd, resultContent);
-                    }
+                        }
+                        else
+                        {
+                            TeslaAPI_Commands.TryAdd(cmd, resultContent);
+                        }
 
 
                         return resultContent;
@@ -3394,7 +3446,13 @@ namespace TeslaLogger
                     { "avgkm", car.avgkm.ToString() },
                     { "kwh100km", car.kwh100km.ToString() },
                     { "avgsocdiff", car.avgsocdiff.ToString() },
-                    { "maxkm", car.maxkm.ToString() }
+                    { "maxkm", car.maxkm.ToString() },
+                    { "SOC50V", ((int)car.carVoltageAt50SOC).ToString()},
+                    { "AWD" , car.AWD ? "1" : "0" },
+                    { "MIC" , car.MIC ? "1" : "0" },
+                    { "year" , car.year.ToString() },
+                    { "motor" , car.motor }
+
                 };
 
                     using (FormUrlEncodedContent content = new FormUrlEncodedContent(d))
