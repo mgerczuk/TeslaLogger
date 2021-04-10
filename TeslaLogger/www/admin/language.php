@@ -1,9 +1,10 @@
-<?php
-
+<?php 
 $language = "en";
 $TemperatureUnit = "";
 $LengthUnit = "";
 $PowerUnit = "";
+
+$Display100pctEnable = "false";
 
 if (file_exists("/etc/teslalogger/settings.json"))
 {
@@ -13,7 +14,10 @@ if (file_exists("/etc/teslalogger/settings.json"))
 	$TemperatureUnit = $json_data["Temperature"];
 	$LengthUnit = $json_data["Length"];
 	$PowerUnit = $json_data["Power"];
+	$Display100pctEnable = $json_data["Display100pctEnable"];
+
 }
+
 
 $filename = "/etc/teslalogger/language-".$language.".txt";
 global $ln;
