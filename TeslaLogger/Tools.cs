@@ -37,6 +37,7 @@ namespace TeslaLogger
         private static string _defaultcarid = "";
         public static DateTime lastGrafanaSettings = DateTime.UtcNow.AddDays(-1);
         private static DateTime lastSleepingHourMinutsUpdated = DateTime.UtcNow.AddDays(-1);
+        public static bool? _StreamingPos = null;
 
         internal static bool UseNearbySuCService()
         {
@@ -48,7 +49,7 @@ namespace TeslaLogger
 
         public enum UpdateType { all, stable, none};
 
-        internal static SortedList<DateTime, string> debugBuffer = new SortedList<DateTime, string>();
+        internal static Queue<Tuple<DateTime, string>> debugBuffer = new Queue<Tuple<DateTime, string>>();
 
         public static void SetThread_enUS()
         {
@@ -159,17 +160,12 @@ namespace TeslaLogger
         private static void AddToBuffer(string msg)
         {
             DateTime dt = DateTime.Now;
-            if (debugBuffer.ContainsKey(dt))
-            {
-                dt = dt.AddMilliseconds(1);
-            }
             try
             {
-                debugBuffer.Add(DateTime.Now, msg);
-                if (debugBuffer.Count > 500)
+                debugBuffer.Enqueue(new Tuple<DateTime, string>(DateTime.Now, msg));
+                while (debugBuffer.Count > 500)
                 {
-                    DateTime firstKey = debugBuffer.Keys.First();
-                    debugBuffer.Remove(firstKey);
+                    _ = debugBuffer.Dequeue();
                 }
             }
             // ignore failed inserts
@@ -536,6 +532,40 @@ namespace TeslaLogger
             }
             return false;
             */
+        }
+
+        internal static bool StreamingPos()
+        {
+            try
+            {
+                if (_StreamingPos != null)
+                    return (bool)_StreamingPos;
+
+                string filePath = FileManager.GetFilePath(TLFilename.SettingsFilename);
+                if (!File.Exists(filePath))
+                {
+                    Logfile.Log("settings file not found at " + filePath);
+                    return false;
+                }
+                string json = File.ReadAllText(filePath);
+                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                if (IsPropertyExist(j, "StreamingPos"))
+                {
+                    if(bool.TryParse(j["StreamingPos"], out bool streamingPos)) {
+                        Logfile.Log("StreamingPos: " + streamingPos);
+                        _StreamingPos = streamingPos;
+                        return streamingPos;
+                    }
+                }
+
+                Logfile.Log("StreamingPos not found in settings.json");
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+            _StreamingPos = false;
+            return false;
         }
 
         internal static void StartSleeping(out int startSleepingHour, out int startSleepingMinutes)
