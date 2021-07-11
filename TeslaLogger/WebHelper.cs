@@ -70,6 +70,8 @@ namespace TeslaLogger
         HttpClient httpclientTeslaAPI = null;
         static object httpClientLock = new object();
 
+        bool useCaptcha = false;
+
         static WebHelper()
         {
             //Damit Mono keine Zertifikatfehler wirft :-(
@@ -251,6 +253,12 @@ namespace TeslaLogger
             return httpClientForAuthentification;
         }
 
+        void LogGetToken(string resultContent, string name)
+        {
+            if (System.IO.File.Exists("LOGGETTOKEN"))
+                System.IO.File.WriteAllText("Logfile_GetToken_" + name + ".txt", resultContent);
+        }
+
         public string GetToken()
         {
             string resultContent = "";
@@ -328,6 +336,11 @@ namespace TeslaLogger
                     HttpResponseMessage result = client.GetAsync(url).Result;
                     resultContent = result.Content.ReadAsStringAsync().Result;
 
+                    if (resultContent.Contains("name=\"captcha\""))
+                        useCaptcha = true;
+
+                    LogGetToken(resultContent, "GetToken");
+
                     if (getTokenDebugVerbose) Log("GetToken resultContent Length:" + resultContent.Length);
 
                     m = Regex.Matches(resultContent, "type=\\\"hidden\\\" name=\\\"(.*?)\\\" value=\\\"(.*?)\\\"");
@@ -360,6 +373,9 @@ namespace TeslaLogger
                         }
                     }
 
+                    if (useCaptcha)
+                        GetCaptcha();
+
                     return GetTokenAsync2(code_challenge, m, state, code_verifier);
                 }
             }
@@ -375,6 +391,17 @@ namespace TeslaLogger
             }
 
             return "NULL";
+        }
+
+        private void GetCaptcha()
+        {
+            car.Captcha_String = null;
+            HttpClient client = GetDefaultHttpClientForAuthentification();
+            string url = authHost + "/captcha";
+            HttpResponseMessage result = client.GetAsync(url).Result;
+            string resultContent = result.Content.ReadAsStringAsync().Result;
+            car.Captcha = resultContent;
+            System.IO.File.WriteAllText("captcha.svg", resultContent);
         }
 
         private string UpdateTeslaTokenFromRefreshToken()
@@ -449,6 +476,9 @@ namespace TeslaLogger
 
         private string GetTokenAsync2(string code_challenge, MatchCollection mc, string state, string code_verifier)
         {
+            if (useCaptcha)
+                WaitForCaptcha();
+
             Log("GetTokenAsync2");
 
             int length = 0;
@@ -473,6 +503,9 @@ namespace TeslaLogger
 
             d.Add("identity", car.TeslaName);
             d.Add("credential", car.TeslaPasswort);
+            d.Add("captcha", car.Captcha_String);
+
+            string resultContent = "";
 
             try
             {
@@ -506,7 +539,21 @@ namespace TeslaLogger
                     // car.Log("URL: " + url);
 
                     HttpResponseMessage result = client.PostAsync(url, content).Result;
-                    string resultContent = result.Content.ReadAsStringAsync().Result;
+                    resultContent = result.Content.ReadAsStringAsync().Result;
+
+                    LogGetToken(resultContent, "GetTokenAsync2");
+
+                    if (resultContent.Contains("Captcha does not match"))
+                    {
+                        car.passwortinfo.Append("Captcha does not match !!!<br>");
+                        car.Log("Captcha does not match");
+                    }
+
+                    if (resultContent.Contains("Your account has been locked"))
+                    {
+                        car.passwortinfo.Append("Your account has been locked!!!<br>");
+                        car.Log("Your account has been locked !!!");
+                    }
 
                     DBHelper.AddMothershipDataToDB("GetTokenAsync2()", start, (int)result.StatusCode);
 
@@ -530,6 +577,7 @@ namespace TeslaLogger
                         {
                             car.passwortinfo.Append("Error: GetTokenAsync2 Redirect Location = null!!! Wrong credentials?<br>");
                             car.Log("Error: GetTokenAsync2 HttpStatus: " + result.StatusCode.ToString() + " / Expecting: Redirect !!!");
+                            ExceptionWriter(null, resultContent);
                         }
                     }
 
@@ -564,9 +612,28 @@ namespace TeslaLogger
                     car.passwortinfo.Append("Exception in GetTokenAsync2 !!!: " + ex.InnerException.Message + "<br>");
 
                 car.Log(ex.ToString());
+                ExceptionWriter(ex, resultContent);
             }
 
             return "";            
+        }
+
+        private void WaitForCaptcha()
+        {
+            car.Log("Start waiting for captcha code !!!");
+            DateTime timeout = DateTime.UtcNow;
+
+            while (car.Captcha_String == null)
+            {
+                Thread.Sleep(10);
+
+                if (DateTime.UtcNow - timeout > TimeSpan.FromSeconds(10))
+                {
+                    timeout = DateTime.UtcNow;
+                    car.Log("Wait for captcha code !!!");
+                }
+            }
+            car.Log("Captcha Code: " + car.Captcha_String);
         }
 
         private string WaitForMFA_Code(string transaction_id, string code_challenge, string state)
@@ -621,6 +688,8 @@ namespace TeslaLogger
             HttpResponseMessage result = client.GetAsync(url).Result;
             resultContent = result.Content.ReadAsStringAsync().Result;
 
+            LogGetToken(resultContent, "MFA1");
+
             Log("MFA1 Result: " + resultContent);
 
             dynamic jsonResult = new JavaScriptSerializer().DeserializeObject(resultContent);
@@ -662,6 +731,7 @@ namespace TeslaLogger
                 car.passwortinfo.Append("Exception in MFA1 : "+ ex.Message + "<br>");
                 car.Log("MFA1 ResultContent: " + resultContent);
                 car.Log(ex.ToString());
+                ExceptionWriter(null, resultContent);
             }
 
             return "";
@@ -685,6 +755,8 @@ namespace TeslaLogger
                 HttpResponseMessage result = client.PostAsync("https://auth.tesla.com/oauth2/v3/authorize/mfa/verify", content).Result;
                 string resultContent = result.Content.ReadAsStringAsync().Result;
 
+                LogGetToken(resultContent, "MFA2");
+
                 DBHelper.AddMothershipDataToDB("MFA2()", start, (int)result.StatusCode);
 
                 try
@@ -699,6 +771,7 @@ namespace TeslaLogger
                 {
                     car.passwortinfo.Append("Error: MFA2! <br>");
                     car.Log("Error: MFA2 : " + resultContent);
+                    ExceptionWriter(null, resultContent);
                 }
             }
 
@@ -739,6 +812,8 @@ namespace TeslaLogger
                 HttpResponseMessage result = client.PostAsync(url, content).Result;
                 string resultContent = result.Content.ReadAsStringAsync().Result;
 
+                LogGetToken(resultContent, "MFA3");
+
                 DBHelper.AddMothershipDataToDB("MFA3()", start, (int)result.StatusCode);
 
                 Uri location = result.Headers.Location;
@@ -752,6 +827,7 @@ namespace TeslaLogger
                 else
                 {
                     car.Log("Error: MFA2 Fail!");
+                    ExceptionWriter(null, resultContent);
                     return "NULL";
                 }
             }
@@ -759,6 +835,7 @@ namespace TeslaLogger
 
         private string GetTokenAsync3(string code, string code_verifier)
         {
+            string resultContent = "";
             try
             {
                 string access_token = "";
@@ -779,7 +856,9 @@ namespace TeslaLogger
                 using (var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"))
                 {
                     HttpResponseMessage result = client.PostAsync(authHost + "/oauth2/v3/token", content).Result;
-                    string resultContent = result.Content.ReadAsStringAsync().Result;
+                    resultContent = result.Content.ReadAsStringAsync().Result;
+                    LogGetToken(resultContent, "GetTokenAsync3");
+
 
                     DBHelper.AddMothershipDataToDB("GetTokenAsync3()", start, (int)result.StatusCode);
 
@@ -812,13 +891,18 @@ namespace TeslaLogger
             {
                 car.passwortinfo.Append("Error: GetTokenAsync3! <br>");
                 car.Log(ex.ToString());
+
+                ExceptionWriter(ex, resultContent);
             }
 
             return "";
         }
 
+
         private string GetTokenAsync4(string access_token)
         {
+            string resultContent = "";
+
             try
             {
                 var d = new Dictionary<string, string>();
@@ -830,6 +914,8 @@ namespace TeslaLogger
 
                 DateTime start = DateTime.UtcNow;
 
+                httpClientForAuthentification?.Dispose();
+                httpClientForAuthentification = null;
                 HttpClient client = GetDefaultHttpClientForAuthentification();
                         
                 // client.DefaultRequestHeaders.Add("User-Agent", TeslaloggerUserAgent);
@@ -839,7 +925,8 @@ namespace TeslaLogger
                 using (var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"))
                 {
                     HttpResponseMessage result = client.PostAsync("https://owner-api.teslamotors.com/oauth/token", content).Result;
-                    string resultContent = result.Content.ReadAsStringAsync().Result;
+                    resultContent = result.Content.ReadAsStringAsync().Result;
+                    LogGetToken(resultContent, "GetTokenAsync4");
 
                     DBHelper.AddMothershipDataToDB("GetTokenAsync4()", start, (int)result.StatusCode);
 
@@ -870,6 +957,7 @@ namespace TeslaLogger
             catch (Exception ex)
             {
                 car.Log(ex.ToString());
+                ExceptionWriter(ex, resultContent);
             }
             return "";
         }
@@ -1713,6 +1801,11 @@ namespace TeslaLogger
                 else if (car.trim_badging == "p74d")
                 {
                     WriteCarSettings("0.148", "Y P");
+                    return;
+                }
+                else if (car.trim_badging == "50")
+                {
+                    WriteCarSettings("0.136", "Y SR+");
                     return;
                 }
             }

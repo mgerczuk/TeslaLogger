@@ -1,3 +1,21 @@
+# Version 1.48.8
+- Delete password from database after successful login.
+- Show if your account is locked during authentification process
+- Use Captach if asked by Tesla mothership
+
+# Version 1.48.7
+- New source of SRTM files as dds.cr.usgs.gov doesn't provide them anymore [Bug #596](https://github.com/bassmaster187/TeslaLogger/issues/596)
+- Offline is now also considered as sleeping in Dashboards: Vampir Drain, Vampir Dran Monthly Statistics and Timeline Plugin
+
+# Version 1.48.6
+- Detecting Model Y SR+
+
+# Version 1.48.5
+- Tesla turned off captcha, so we did it as well
+
+# Version 1.48.4
+- Supporting the new Tesla authentification proccess with captcha
+
 # Version 1.48.3
 - UI for geofence / "on charge complete" [LINK](https://github.com/bassmaster187/TeslaLogger/blob/master/TeslaLogger/Geofence.md#set-new-charge-limit-when-charging-is-complete)
 - UI for geofence / Don't combine charging sessions [LINK](https://github.com/bassmaster187/TeslaLogger/blob/master/TeslaLogger/Geofence.md#do-not-combine-chargin-sessions)
