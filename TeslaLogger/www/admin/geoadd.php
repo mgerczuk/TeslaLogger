@@ -51,14 +51,14 @@ if (isset($id))
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Teslalogger geofencing V1.1</title>
-	<link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/smoothness/jquery-ui.css">
-	<link rel="stylesheet" href="https://teslalogger.de/teslalogger_style.css">
-	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.4.0/dist/leaflet.css" integrity="sha512-puBpdR0798OZvTTbP4A8Ix/l+A4dHDD0DGqYW6RQ+9jxkRFclaxxQb/SJAWZfWAkuyeQUytO7+7N4QKrDh+drA==" crossorigin=""/>
+	<link rel="stylesheet" href="static/jquery/ui/1.12.1/themes/smoothness/jquery-ui.css">
+	<link rel="stylesheet" href="static/teslalogger_style.css">
+	<link rel="stylesheet" href="static/leaflet/1.4.0/leaflet.css" />
    <!-- Make sure you put this AFTER Leaflet's CSS -->
-	<script src="https://unpkg.com/leaflet@1.4.0/dist/leaflet.js" integrity="sha512-QVftwZFqvtRNi0ZyCtsznlKSWOStnDORoefr1enyq5mVL4tmKB3S/EnC3rRJcxCPavG10IcrVGSmPh6Qw5lwrg==" crossorigin=""></script>
+	<script src="static/leaflet/1.4.0/leaflet.js"></script>
 	
-	<script src="https://code.jquery.com/jquery-1.12.4.js"></script>
-	<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+	<script src="static/jquery/jquery-1.12.4.js"></script>
+	<script src="static/jquery/ui/1.12.1/jquery-ui.js"></script>
 	<script>	
 	var circle = null;
   $( function() {
@@ -161,6 +161,14 @@ if (isset($id))
 				$("#esm_gear").val("DR->P");
 			else
 				$("#esm_gear").val(e.substring(4));
+		}
+		else if (e.startsWith("dsm"))
+		{
+			$("#dsm").attr('checked', 'checked');
+			if (e.substring(4).length == 0)
+				$("#dsm_gear").val("DR->P");
+			else
+				$("#dsm_gear").val(e.substring(4));
 		}
 		else if (e.startsWith("cof"))
 		{
@@ -270,6 +278,11 @@ if (isset($id))
 		f += "+esm:"+$("#esm_gear").val();
 	}
 
+	if ($("#dsm").is(':checked'))
+	{
+		f += "+dsm:"+$("#dsm_gear").val();
+	}
+	  
 	if ($("#cof").is(':checked'))
 	{
 		f += "+cof:"+$("#cof_gear").val();
@@ -280,6 +293,36 @@ if (isset($id))
 	$("#flag").val(f);
   }
   
+	function del()
+  {
+		//alert("Radius: "+ circle.getRadius() + " lat: " + circle.getLatLng().lat + " lng: " + circle.getLatLng().lng);
+		// return;
+		if (confirm('Are you sure you want to delete this geofencing location?')) {
+		  // Save it!
+			if (!$("#text").val())
+				{
+					alert("Error");
+					return;
+				}
+
+			var jqxhr = $.post("geoadd_write.php",
+			{
+				delete: "yes",
+			<?PHP
+				if (isset($_REQUEST["id"]))
+					echo("id: $id");
+				?>
+			}).always(function() {
+			alert("Deleted!");
+			//location.reload();
+			location.href = document.referrer;
+			});
+		} else {
+		  // Do nothing!
+		  return;
+		}
+  }
+		
   function save()
   {
 	//alert("Radius: "+ circle.getRadius() + " lat: " + circle.getLatLng().lat + " lng: " + circle.getLatLng().lng);
@@ -359,9 +402,17 @@ if (isset($id))
 				<tr><td>High Frequency Logging</td><td> <input id="hfl" type="checkbox" value=""/></td><td>&nbsp;</td><td>Duration</td><td><input size="6" id="hfl_minutes"/>Minutes</td></tr>
 				<tr><td></td><td></td><td>&nbsp;</td><td>Count</td><td><input size="6" id="hfl_count" placeholder="100"/>Count</td></tr>
 				<tr><td><h4 style="margin-top: 20px;">Features</h4></td></tr>
-				<tr><td>Sentry Mode</td><td> <input id="esm" type="checkbox" value="" name="type" /></td><td></td><td>Gear</td>
+				<tr><td>Enable Sentry Mode</td><td> <input id="esm" type="checkbox" value="" name="type" /></td><td></td><td>Gear</td>
 					<td>
 						<select id="esm_gear">
+						  <option value="DR->P">D/R → P</option>
+						  <option value="D->P">D → P</option>
+						  <option value="R->P">R → P</option>
+						</select>
+					</td></tr>
+				<tr><td>Disable Sentry Mode</td><td> <input id="dsm" type="checkbox" value="" name="type" /></td><td></td><td>Gear</td>
+					<td>
+						<select id="dsm_gear">
 						  <option value="DR->P">D/R → P</option>
 						  <option value="D->P">D → P</option>
 						  <option value="R->P">R → P</option>
@@ -380,6 +431,8 @@ if (isset($id))
 			</table>
 		</div>
 		<button id="btn_save" onclick="save();">Save</button>
+		<button style="color:red;" id="btn_delete" onclick="del();">Delete</button>
+
 	</div>
 	<div id="map" style="height:700px; z-index:0;"></div>
 </div>

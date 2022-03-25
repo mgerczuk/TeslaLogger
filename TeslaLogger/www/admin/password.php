@@ -8,14 +8,14 @@ require_once("tools.php");
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title><?php t("Teslalogger Tesla Zugangsdaten"); ?></title>
-	<link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/smoothness/jquery-ui.css">
-	<link rel="stylesheet" href="https://teslalogger.de/teslalogger_style.css">
-	<script src="https://code.jquery.com/jquery-1.12.4.js"></script>
-	<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
-	<script src="https://code.jquery.com/jquery-migrate-1.4.1.min.js"></script>
-	<script src="https://cdn.datatables.net/1.10.22/js/jquery.dataTables.min.js"></script>
-	<link rel='stylesheet' id='genericons-css'  href='https://www.impala64.de/blog/tesla/wp-content/themes/twentyfourteen/genericons/genericons.css?ver=3.0.3' type='text/css' media='all' />
-	<link rel='stylesheet' href="https://cdn.datatables.net/1.10.22/css/jquery.dataTables.min.css">
+	<link rel="stylesheet" href="static/jquery/ui/1.12.1/themes/smoothness/jquery-ui.css">
+	<link rel="stylesheet" href="static/teslalogger_style.css">
+	<script src="static/jquery/jquery-1.12.4.js"></script>
+	<script src="static/jquery/ui/1.12.1/jquery-ui.js"></script>
+	<script src="static/jquery/jquery-migrate-1.4.1.min.js"></script>
+	<script src="static/jquery/datatables/1.10.22/js/jquery.dataTables.min.js"></script>
+	<link rel='stylesheet' id='genericons-css'  href='static/genericons.css?ver=3.0.3' type='text/css' media='all' />
+	<link rel='stylesheet' href="static/jquery/datatables/1.10.22/css/jquery.dataTables.min.css">
 
 	<script>
 	<?php
@@ -28,27 +28,83 @@ require_once("tools.php");
 		});
 
 		$("#cars").DataTable();
+
+		$("#TokenHelp").click(function() {
+			$("#dialog-TokenHelp").dialog({
+				resizable: false,
+				width: "auto",
+				modal: true,
+				buttons: {
+					"OK": function() {
+					$( this ).dialog( "close" );
+					}
+				}
+				});
+		});
 	});
 
+	function tokenAvailable() {
+		if ($("#access_token").val() == null || $("#access_token").val().length < 2)
+		{
+			alert("Please enter the access token!");
+			return false;
+		}
+
+		if ($("#refresh_token").val() == null || $("#refresh_token").val().length < 2)
+		{
+			alert("Please enter the refresh token!");
+			return false;
+		}
+
+		return true;
+	}
+
 	function save() {
-		if ($("#email").val() == null || $("#email").val() == "") {
+		if (tokenAvailable())
+		{
+			sendRequest();
+		}
+		/* email authentification not supported anymore
+		else if ($("#email").val() == null || $("#email").val() == "")  {
 			alert("Bitte Email eingeben!");
 		} else if ($("#password1").val() == null || $("#password1").val() == "") {
 			alert("Bitte Passwort eingeben!");
 		} else if ($("#password1").val() != $("#password2").val()) {
 			alert("Passwörter stimmen nicht überein!");
 		} else {			
-			var d = {
+			sendRequest();
+		}
+		*/
+	}
+
+	function sendRequest()
+	{
+		var teslacarid = $('#carid option:selected').attr('id');
+
+		if (teslacarid == undefined || teslacarid == "")
+		{
+			alert("Please select a car!");
+			return;
+		}
+
+		var d = {
 					email: $("#email").val(),
 					password: $("#password1").val(),
-					carid: $("#carid").val(),
+					carid: teslacarid,
 					id: dbid,
 					freesuc: $("#freesuc").is(':checked'),
+					access_token: $("#access_token").val(),
+					refresh_token: $("#refresh_token").val(),
 				};
 
 			var jqxhr = $.post("teslaloggerstream.php", {url: "setpassword", data: JSON.stringify(d)})
 			.always(function (data) {
-				if (data.includes("ID:"))
+				if (tokenAvailable())
+				{
+					alert("Check Logfile!");
+					window.location.href='logfile.php';
+				}
+				else if (data.includes("ID:"))
 				{
 					window.location.href='password_info.php?id='+data.substr(3);
 				}
@@ -57,7 +113,6 @@ require_once("tools.php");
 					window.location.href='password_info.php?id='+dbid;
 				}
 				});
-		}
 	}
 
 	function deleteCar()
@@ -86,6 +141,34 @@ require_once("tools.php");
 		var jqxhr = $.post("teslaloggerstream.php", {url: "setpassword", data: JSON.stringify(d)}).always(function () {
 				window.location.href='password_info.php?id='+dbid;
 			});
+	}
+
+	function CheckAccessToken()
+	{
+		if (!tokenAvailable())
+			return;
+
+		var d = {
+					access_token: $("#access_token").val()
+				};
+
+		var jqxhr = $.post("teslaloggerstream.php", {url: "getcarsfromaccount", data: JSON.stringify(d)}, function(data){
+			$("#carid").empty();
+
+			if (data == "Unauthorized")
+				alert("Unauthorized");
+			else if (data.startsWith("ERROR:"))
+				alert(data);
+			else
+			{
+				var obj = JSON.parse(data);
+				for (var i=0; i < obj.length; i++)
+				{
+					$("#carid").append("<option id='"+obj[i]['Key']+"'>"+obj[i]['Value']+"</option>");
+					$("#btnSave").css("visibility","");
+				}
+			}
+		});
 	}
 </script>
 </head>
@@ -148,19 +231,38 @@ if (isset($_REQUEST["id"]))
 ?>
 <div>
 <h1><?php t("Bitte Tesla Account Zugangsdaten eingeben"); ?>:</h1>
+<div id="dialog-TokenHelp" title="Info">
+<?php t("TeslaAuthApps"); ?>
+<ul>
+<li>Android: <a href="https://play.google.com/store/apps/details?id=net.leveugle.teslatokens">Tesla Tokens</a></li>
+<li>iOS: <a href="https://apps.apple.com/us/app/auth-app-for-tesla/id1552058613#?platform=iphone">Auth app for Tesla</a></li>
+</ul>
+</div>
 <table>
-<tr><td><b><?php t("Email"); ?>:</b></td><td><input id="email" type="text" autocomplete="new-password" value="<?php echo($email) ?>" <?php echo($disablecarid) ?>/></td></tr>
-<tr><td><?php t("Passwort"); ?>:</td><td><input id="password1" type="password" autocomplete="new-password" /></td></tr>
-<tr><td><?php t("Passwort wiederholen"); ?>:</td><td><input id="password2" type="password" autocomplete="new-password" /></td></tr>
-<tr><td><?php t("Car # in account"); ?>:</td><td><input id="carid" value="<?php echo($tesla_carid) ?>" <?php echo($disablecarid) ?>/></td><td>0 = first car!</td></tr>
+<tr><td><?php t("Access Token"); ?>:</td><td><input id="access_token" type="text" autocomplete="new-password"></td></tr>
+<tr><td><?php t("Refresh Token"); ?>:</td><td><input id="refresh_token" type="text" autocomplete="new-password"></td></tr>
+
+<tr><td colspan="2"><button onclick="CheckAccessToken();" style="float: right;"><?php t("OK"); ?></button></td></tr>
+
+<tr style='visibility:collapse'><td><b><?php t("Email"); ?>:</b></td><td><input id="email" type="text" autocomplete="new-password" value="<?php echo($email) ?>" <?php echo($disablecarid) ?>/></td></tr>
+<tr style='visibility:collapse'><td><?php t("Passwort"); ?>:</td><td><input id="password1" type="password" autocomplete="new-password" /></td></tr>
+<tr style='visibility:collapse'><td><?php t("Passwort wiederholen"); ?>:</td><td><input id="password2" type="password" autocomplete="new-password" /></td></tr>
+
+<tr><td><?php t("Car"); ?>:</td><td> <select id="carid"></select></td></tr>
 <tr height="35px"><td><?php t("Free Supercharging"); ?>:</td><td><input id="freesuc" type="checkbox" <?= $freesuc ?> /></td></tr>
+
+<tr><td>&nbsp;</td></tr>
+<!-- <tr><td colspan="2"><b>Or you can use Tesla Access Token &amp; Refresh Token to login:&nbsp;&nbsp;</b></td><td><img id="TokenHelp" src="img/icon-help-24.png" class="pointer"/></td></tr> -->
+<tr><td>&nbsp;</td></tr>
+
 <tr><td colspan="2">
-<?PHP if ($_REQUEST["id"] != -1)
+<?PHP 
+if ($_REQUEST["id"] != -1)
 	{ ?><button id="deletebutton" onclick="deleteCar();" class="redbutton"><?php t("Löschen"); ?></button>
-	&nbsp;<button onclick="reconnect();"><?php t("Reconnect"); ?></button>&nbsp;
+	<!-- &nbsp;<button onclick="reconnect();"><?php t("Reconnect"); ?></button>&nbsp; -->
 	<?PHP }
 ?>
-<button onclick="save();" style="float: right;"><?php t("Speichern"); ?></button></td></tr>
+<button id="btnSave" style='visibility:collapse' onclick="save();" style="float: right;"><?php t("Speichern"); ?></button></td></tr>
 </table>
 </div>
 <?php

@@ -1,8 +1,11 @@
 ﻿using System;
 using System.Data;
+using Exceptionless;
 
 namespace TeslaLogger
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1303:Literale nicht als lokalisierte Parameter übergeben", Justification = "<Pending>")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     internal class GeocodeCache
     {
         private DataTable dt = new DataTable("cache");
@@ -23,70 +26,99 @@ namespace TeslaLogger
 
         public GeocodeCache()
         {
-            DataColumn lat = dt.Columns.Add("lat", typeof(double));
-            DataColumn lng = dt.Columns.Add("lng", typeof(double));
-            dt.Columns.Add("Value");
-
-            dt.PrimaryKey = new DataColumn[] { lat, lng };
-
-            try
+            lock (this)
             {
-                if (System.IO.File.Exists(FileManager.GetFilePath(TLFilename.GeocodeCache)))
+                DataColumn lat = dt.Columns.Add("lat", typeof(double));
+                DataColumn lng = dt.Columns.Add("lng", typeof(double));
+                dt.Columns.Add("Value");
+
+                dt.PrimaryKey = new DataColumn[] { lat, lng };
+
+                try
                 {
-                    dt.ReadXml(FileManager.GetFilePath(TLFilename.GeocodeCache));
-                    Logfile.Log("GeocodeCache Items: " + dt.Rows.Count);
+                    if (System.IO.File.Exists(FileManager.GetFilePath(TLFilename.GeocodeCache)))
+                    {
+#pragma warning disable CA3075 // Unsichere DTD-Verarbeitung in XML
+                        _ = dt.ReadXml(FileManager.GetFilePath(TLFilename.GeocodeCache));
+#pragma warning restore CA3075 // Unsichere DTD-Verarbeitung in XML
+                        Logfile.Log("GeocodeCache Items: " + dt.Rows.Count);
+                    }
+                    else
+                    {
+                        Logfile.Log(FileManager.GetFilePath(TLFilename.GeocodeCache) + " Not found!");
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    Logfile.Log(FileManager.GetFilePath(TLFilename.GeocodeCache) + " Not found!");
+                    ex.ToExceptionless().FirstCarUserID().Submit();
+                    Logfile.ExceptionWriter(ex, "");
                 }
-            }
-            catch (Exception ex)
-            {
-                Logfile.ExceptionWriter(ex, "");
             }
         }
 
         public string Search(double lat, double lng)
         {
-            DataRow dr = dt.Rows.Find(new object[] {lat, lng });
-            return dr?["Value"].ToString();
+            lock (this)
+            {
+                DataRow dr = dt.Rows.Find(new object[] { lat, lng });
+                return dr?["Value"].ToString();
+            }
         }
 
 
         public void Insert(double lat, double lng, string value)
         {
-            try
+            lock (this)
             {
-                DataRow dr = dt.NewRow();
-                dr["lat"] = lat;
-                dr["lng"] = lng;
-                dr["value"] = value;
-                dt.Rows.Add(dr);
+                try
+                {
+                    DataRow dr = dt.NewRow();
+                    dr["lat"] = lat;
+                    dr["lng"] = lng;
+                    dr["value"] = value;
+                    dt.Rows.Add(dr);
 
-                Logfile.Log("GeocodeCache:Insert");
-            }
-            catch (Exception ex)
-            {
-                Logfile.Log(ex.Message);
+                    Logfile.Log("GeocodeCache:Insert");
+                }
+                catch (ConstraintException cex)
+                {
+                    if (cex.HResult != -2146232022)  // Column 'lat, lng' is constrained to be unique.  Value 'xx, xx' is already present.
+                    {
+                        cex.ToExceptionless().FirstCarUserID().Submit();
+                    }
+
+                    Logfile.Log(cex.Message);
+                }
+                catch (Exception ex)
+                {
+                    ex.ToExceptionless().FirstCarUserID().Submit();
+                    Logfile.Log(ex.Message);
+                }
             }
         }
 
         public void Write()
         {
-            try
+            lock (this)
             {
-                dt.WriteXml(FileManager.GetFilePath(TLFilename.GeocodeCache));
-            }
-            catch (Exception ex)
-            {
-                Logfile.Log(ex.Message);
+                try
+                {
+                    dt.WriteXml(FileManager.GetFilePath(TLFilename.GeocodeCache));
+                }
+                catch (Exception ex)
+                {
+                    ex.ToExceptionless().FirstCarUserID().Submit();
+                    Logfile.Log(ex.Message);
+                }
             }
         }
 
         internal void ClearCache()
         {
-            dt.Clear();
+            lock (this)
+            {
+                dt.Clear();
+            }
         }
     }
 }

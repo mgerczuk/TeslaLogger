@@ -5,16 +5,20 @@ using System.Data;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http;
 using System.Text;
+using Exceptionless;
+using Newtonsoft.Json;
 
 namespace TeslaLogger
 {
+    [SuppressMessage("Globalization", "CA1303:Literale nicht als lokalisierte Parameter übergeben", Justification = "<Pending>")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     internal class ShareData
     {
-        private string TaskerToken;
-        private string TeslaloggerVersion;
+        private readonly string TaskerToken;
+        private readonly string TeslaloggerVersion;
         private static bool logwritten = false;
-        private bool shareData = false;
-        Car car;
+        private readonly bool shareData = false;
+        readonly Car car;
 
         public ShareData(Car car)
         {
@@ -52,20 +56,22 @@ namespace TeslaLogger
         }
 
         [SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities")]
-        private void UpdateDataTable(string table)
+        static internal void UpdateDataTable(string table)
         {
-            using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+            if (!DBHelper.ColumnExists(table, "export"))
             {
-                con.Open();
-                using (MySqlCommand cmd = new MySqlCommand($"alter table {table} ADD column IF NOT EXISTS export TINYINT(1) NULL", con)
+                using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
                 {
-                    CommandTimeout = 6000
-                })
-                {
-                    cmd.ExecuteNonQuery();
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand($"alter table {table} ADD column export TINYINT(1) NULL", con)
+                    {
+                        CommandTimeout = 6000
+                    })
+                    {
+                        SQLTracer.TraceNQ(cmd);
+                    }
                 }
             }
-
         }
 
         [SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities")]
@@ -81,13 +87,43 @@ namespace TeslaLogger
                 car.Log("ShareData: SendAllChargingData start");
 
                 int ProtocolVersion = 5;
-                string sql = @"SELECT chargingstate.id as HostId, StartDate, EndDate, charging.charge_energy_added, conn_charge_cable, fast_charger_brand, fast_charger_type, fast_charger_present, address as pos_name, lat, lng, odometer, charging.outside_temp, StartChargingID, EndChargingID
-                FROM chargingstate
-                join pos on chargingstate.Pos = pos.id
-                join charging on charging.id = chargingstate.EndChargingID
-                where chargingstate.carid = " + car.CarInDB + " and (export is null or export < " + ProtocolVersion + @") and (fast_charger_present or address like 'Supercharger%' or address like 'Ionity%' or max_charger_power > 25)
-                order by StartDate
-                ";
+                string sql = $@"SELECT
+    chargingstate.id AS HostId,
+    StartDate,
+    EndDate,
+    charging.charge_energy_added,
+    conn_charge_cable,
+    fast_charger_brand,
+    fast_charger_type,
+    fast_charger_present,
+    address AS pos_name,
+    lat,
+    lng,
+    odometer,
+    charging.outside_temp,
+    StartChargingID,
+    EndChargingID
+FROM
+    chargingstate
+JOIN
+    pos
+ON
+    chargingstate.Pos = pos.id
+JOIN
+    charging
+ON
+    charging.id = chargingstate.EndChargingID
+WHERE
+    chargingstate.carid = {car.CarInDB} AND(
+        EXPORT IS NULL OR EXPORT < {ProtocolVersion}
+    ) AND(
+        fast_charger_present
+        OR address LIKE 'Supercharger%'
+        OR address LIKE 'Ionity%'
+        OR max_charger_power > 25
+    )
+ORDER BY
+    StartDate";
 
                 using (DataTable dt = new DataTable())
                 {
@@ -96,7 +132,7 @@ namespace TeslaLogger
                     using (MySqlDataAdapter da = new MySqlDataAdapter(sql, DBHelper.DBConnectionstring))
                     {
                         da.SelectCommand.CommandTimeout = 600;
-                        da.Fill(dt);
+                        SQLTracer.TraceDA(dt, da);
                         ms = Environment.TickCount - ms;
                         car.Log("ShareData: SELECT chargingstate ms: " + ms);
 
@@ -118,26 +154,26 @@ namespace TeslaLogger
                                 }
                             }
 
-                            int HostId = Convert.ToInt32(dr["HostId"]);
+                            int HostId = Convert.ToInt32(dr["HostId"], Tools.ciEnUS);
 
                             Dictionary<string, object> d = new Dictionary<string, object>
                     {
                         { "ProtocolVersion", ProtocolVersion }
                     };
-                            string Firmware = car.dbHelper.GetFirmwareFromDate((DateTime)dr["StartDate"]);
+                            string Firmware = car.DbHelper.GetFirmwareFromDate((DateTime)dr["StartDate"]);
                             d.Add("Firmware", Firmware);
 
                             d.Add("TaskerToken", TaskerToken); // TaskerToken and HostId is the primary key and is used to make sure data won't be imported twice
                             foreach (DataColumn col in dt.Columns)
                             {
-                                if (col.Caption.EndsWith("ChargingID"))
+                                if (col.Caption.EndsWith("ChargingID", StringComparison.Ordinal))
                                 {
                                     continue;
                                 }
 
-                                if (col.Caption.EndsWith("Date"))
+                                if (col.Caption.EndsWith("Date", StringComparison.Ordinal))
                                 {
-                                    d.Add(col.Caption, ((DateTime)dr[col.Caption]).ToString("s"));
+                                    d.Add(col.Caption, ((DateTime)dr[col.Caption]).ToString("s", Tools.ciEnUS));
                                 }
                                 else
                                 {
@@ -145,11 +181,11 @@ namespace TeslaLogger
                                 }
                             }
 
-                            List<object> l = GetChargingDT(Convert.ToInt32(dr["StartChargingID"]), Convert.ToInt32(dr["EndChargingID"]), out int count);
+                            List<object> l = GetChargingDT(Convert.ToInt32(dr["StartChargingID"], Tools.ciEnUS), Convert.ToInt32(dr["EndChargingID"], Tools.ciEnUS), out int count);
                             d.Add("teslalogger_version", TeslaloggerVersion);
                             d.Add("charging", l);
 
-                            string json = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(d);
+                            string json = JsonConvert.SerializeObject(d);
 
                             //string resultContent = "";
                             try
@@ -161,7 +197,7 @@ namespace TeslaLogger
                                     {
 
                                         DateTime start = DateTime.UtcNow;
-                                        HttpResponseMessage result = client.PostAsync("http://teslalogger.de/share_charging.php", content).Result;
+                                        HttpResponseMessage result = client.PostAsync(new Uri("http://teslalogger.de/share_charging.php"), content).Result;
                                         string r = result.Content.ReadAsStringAsync().Result;
                                         DBHelper.AddMothershipDataToDB("teslalogger.de/share_charging.php", start, (int)result.StatusCode);
 
@@ -181,6 +217,7 @@ namespace TeslaLogger
                             }
                             catch (Exception ex)
                             {
+                                car.SendException2Exceptionless(ex);
                                 car.Log("ShareData: " + ex.Message);
                             }
                         }
@@ -193,6 +230,8 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                car.SendException2Exceptionless(ex);
+
                 car.Log("Error in ShareData:SendAllChargingData " + ex.Message);
                 Logfile.WriteException(ex.ToString());
             }
@@ -201,12 +240,39 @@ namespace TeslaLogger
         private List<object> GetChargingDT(int startid, int endid, out int count)
         {
             count = 0;
-            string sql = @"SELECT avg(unix_timestamp(Datum)) as Datum, avg(battery_level), avg(charger_power), avg(ideal_battery_range_km), avg(charger_voltage), avg(charger_phases), avg(charger_actual_current), max(battery_heater),
-                (SELECT val FROM can WHERE can.carid = @CarID and can.datum < charging.Datum and can.datum > date_add(charging.Datum, INTERVAL -3 MINUTE) and id = 3 ORDER BY can.datum DESC limit 1) as cell_temp
-                FROM charging
-                where id between @startid and @endid and carid = @CarID 
-                group by battery_level
-                order by battery_level";
+            string sql = @"
+SELECT
+    AVG(UNIX_TIMESTAMP(Datum)) AS Datum,
+    AVG(battery_level),
+    AVG(charger_power),
+    AVG(ideal_battery_range_km),
+    AVG(charger_voltage),
+    AVG(charger_phases),
+    AVG(charger_actual_current),
+    MAX(battery_heater),
+    (
+    SELECT
+        val
+    FROM
+        can
+    WHERE
+        can.carid = @CarID
+        AND can.datum < charging.Datum
+        AND can.datum > DATE_ADD(charging.Datum, INTERVAL -3 MINUTE)
+        AND id = 3
+    ORDER BY
+        can.datum DESC
+LIMIT 1
+) AS cell_temp
+FROM
+    charging
+WHERE
+    id BETWEEN @startid AND @endid
+    AND carid = @CarID
+GROUP BY
+    battery_level
+ORDER BY
+    battery_level";
 
             using (DataTable dt = new DataTable())
             {
@@ -218,7 +284,7 @@ namespace TeslaLogger
                     da.SelectCommand.Parameters.AddWithValue("@startid", startid);
                     da.SelectCommand.Parameters.AddWithValue("@endid", endid);
                     da.SelectCommand.CommandTimeout = 300;
-                    da.Fill(dt);
+                    SQLTracer.TraceDA(dt, da);
 
                     foreach (DataRow dr in dt.Rows)
                     {
@@ -227,14 +293,14 @@ namespace TeslaLogger
                         foreach (DataColumn col in dt.Columns)
                         {
                             string name = col.Caption;
-                            name = name.Replace("avg(", "");
-                            name = name.Replace("max(", "");
+                            name = name.Replace("AVG(", "");
+                            name = name.Replace("MAX(", "");
                             name = name.Replace(")", "");
 
                             if (name == "Datum")
                             {
-                                long date = Convert.ToInt64(dr[col.Caption]) * 1000;
-                                d.Add(name, DBHelper.UnixToDateTime(date).ToString("s"));
+                                long date = Convert.ToInt64(dr[col.Caption], Tools.ciEnUS) * 1000;
+                                d.Add(name, DBHelper.UnixToDateTime(date).ToString("s", Tools.ciEnUS));
                             }
                             else
                             {
@@ -249,7 +315,6 @@ namespace TeslaLogger
 
                     return l;
                 }
-                dt.Clear();
             }
         }
 
@@ -266,37 +331,42 @@ namespace TeslaLogger
                 int ProtocolVersion = 1;
                 car.Log("ShareData: SendDegradationData start");
 
-                string sql = @"SELECT
-                    min(chargingstate.StartDate) as Date,
-                    (
-                        SELECT
-                            LEFT(version, LOCATE(' ', version) - 1)
-                        FROM
-                            car_version
-                        WHERE
-                            car_version.StartDate < min(chargingstate.StartDate) and carid = @carid
-                        order by
-                            id desc
-                        limit
-                            1
-                    ) as v,
-                    odometer DIV 500 * 500 as odo,
-                    round(
-                        AVG(
-                            charging_End.ideal_battery_range_km / charging_End.battery_level * 100
-                        ),
-                        0
-                    ) AS 'TR',
-                    round(avg(pos.outside_temp), 0) as temp
-                FROM
-                    charging
-                    INNER JOIN chargingstate ON charging.id = chargingstate.StartChargingID
-                    INNER JOIN pos ON chargingstate.pos = pos.id
-                    LEFT OUTER JOIN charging AS charging_End ON chargingstate.EndChargingID = charging_End.id
-                where
-                    odometer > 0 and  chargingstate.carid = @carid
-                group by odo
-                ";
+                string sql = @"
+SELECT
+    MIN(chargingstate.StartDate) AS Date,
+    (SELECT
+        LEFT(VERSION, LOCATE(' ', VERSION) - 1)
+    FROM
+        car_version
+    WHERE
+        car_version.StartDate < MIN(chargingstate.StartDate)
+        AND carid = @carid
+    ORDER BY
+        id DESC
+    LIMIT 1
+    ) AS v,
+    odometer DIV 500 * 500 AS odo,
+    ROUND(AVG(charging_End.ideal_battery_range_km / charging_End.battery_level * 100), 0) AS 'TR',
+    ROUND(AVG(pos.outside_temp), 0) AS temp
+FROM
+    charging
+INNER JOIN
+    chargingstate
+ON
+    charging.id = chargingstate.StartChargingID
+INNER JOIN
+    pos
+ON
+    chargingstate.pos = pos.id
+LEFT OUTER JOIN
+    charging AS charging_End
+ON
+    chargingstate.EndChargingID = charging_End.id
+WHERE
+    odometer > 0
+    AND chargingstate.carid = @carid
+GROUP BY
+    odo";
 
                 using (DataTable dt = new DataTable())
                 {
@@ -307,7 +377,7 @@ namespace TeslaLogger
                     {
                         da.SelectCommand.Parameters.AddWithValue("@carid", car.CarInDB);
                         da.SelectCommand.CommandTimeout = 600;
-                        da.Fill(dt);
+                        SQLTracer.TraceDA(dt, da);
                         ms = Environment.TickCount - ms;
                         car.Log("ShareData: SELECT degradation Data ms: " + ms);
 
@@ -325,9 +395,9 @@ namespace TeslaLogger
                             Dictionary<string, object> d = new Dictionary<string, object>();
                             foreach (DataColumn col in dt.Columns)
                             {
-                                if (col.Caption.EndsWith("Date"))
+                                if (col.Caption.EndsWith("Date", StringComparison.Ordinal))
                                 {
-                                    d.Add(col.Caption, ((DateTime)dr[col.Caption]).ToString("s"));
+                                    d.Add(col.Caption, ((DateTime)dr[col.Caption]).ToString("s", Tools.ciEnUS));
                                 }
                                 else
                                 {
@@ -337,7 +407,7 @@ namespace TeslaLogger
                             t.Add(d);
                         }
 
-                        string json = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(d1);
+                        string json = JsonConvert.SerializeObject(d1);
 
                         try
                         {
@@ -348,7 +418,7 @@ namespace TeslaLogger
                                 {
 
                                     DateTime start = DateTime.UtcNow;
-                                    HttpResponseMessage result = client.PostAsync("http://teslalogger.de/share_degradation.php", content).Result;
+                                    HttpResponseMessage result = client.PostAsync(new Uri("http://teslalogger.de/share_degradation.php"), content).Result;
                                     string r = result.Content.ReadAsStringAsync().Result;
                                     DBHelper.AddMothershipDataToDB("teslalogger.de/share_degradation.php", start, (int)result.StatusCode);
 
@@ -361,6 +431,8 @@ namespace TeslaLogger
                         }
                         catch (Exception ex)
                         {
+                            car.SendException2Exceptionless(ex);
+
                             car.Log("Error in ShareData:SendDegradationData " + ex.Message);
                         }
                     }
@@ -370,6 +442,8 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                car.SendException2Exceptionless(ex);
+
                 car.Log("Error in ShareData:SendDegradationData " + ex.Message);
                 Logfile.WriteException(ex.ToString());
             }

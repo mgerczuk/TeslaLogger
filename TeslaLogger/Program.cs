@@ -1,15 +1,24 @@
-﻿using System;
+﻿using Exceptionless;
+using System;
 using System.Data;
 using System.IO;
 using System.Net;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace TeslaLogger
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1303:Literale nicht als lokalisierte Parameter übergeben", Justification = "<Pending>")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     internal class Program
     {
         public static bool VERBOSE = false;
+        public static bool SQLTRACE = false;
+        public static bool SQLFULLTRACE = false;
+        public static int SQLTRACELIMIT = 250;
+        public static int KeepOnlineMinAfterUsage = 5;
+        public static int SuspendAPIMinutes = 30;
 
         public enum TLMemCacheKey
         {
@@ -23,6 +32,19 @@ namespace TeslaLogger
         {
             try
             {
+                try
+                {
+                    ExceptionlessClient.Default.Startup(ApplicationSettings.Default.ExceptionlessApiKey); 
+                    // ExceptionlessClient.Default.Configuration.UseFileLogger("exceptionless.log");
+                    ExceptionlessClient.Default.Configuration.ServerUrl = ApplicationSettings.Default.ExceptionlessServerUrl;
+                    ExceptionlessClient.Default.Configuration.SetVersion(Assembly.GetExecutingAssembly().GetName().Version);
+
+                    ExceptionlessClient.Default.CreateLog("Program","Start " + Assembly.GetExecutingAssembly().GetName().Version, Exceptionless.Logging.LogLevel.Info).FirstCarUserID().Submit();
+                } catch (Exception ex)
+                {
+                    Logfile.Log(ex.ToString());
+                }
+
                 InitDebugLogging();
 
                 InitStage1();
@@ -58,6 +80,10 @@ namespace TeslaLogger
                 Logfile.Log(ex.Message);
                 Logfile.ExceptionWriter(ex, "main loop");
                 Logfile.Log("Teslalogger Stopped!");
+                Tools.ExternalLog("Teslalogger Stopped! " + ex.ToString());
+
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                ExceptionlessClient.Default.ProcessQueue();
             }
             finally
             {
@@ -66,12 +92,16 @@ namespace TeslaLogger
                     try
                     {
                         Logfile.Log("Startup doesn't sucessfully run DownloadUpdateAndInstall() - retry now!");
+                        ExceptionlessClient.Default.SubmitLog("Program","Startup doesn't sucessfully run DownloadUpdateAndInstall() - retry now!");
+
                         UpdateTeslalogger.DownloadUpdateAndInstall();
                     }
                     catch (Exception ex)
                     {
                         Logfile.Log(ex.Message);
-                        Logfile.ExceptionWriter(ex, "Emergency DownloadUpdateAndInstall()");
+                        // Logfile.ExceptionWriter(ex, "Emergency DownloadUpdateAndInstall()");
+
+                        ExceptionlessClient.Default.SubmitLog("Program", "Emergency DownloadUpdateAndInstall()");
                     }
                 }
             }
@@ -99,6 +129,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 
@@ -110,32 +141,42 @@ namespace TeslaLogger
             {
                 foreach (DataRow r in dt.Rows)
                 {
-                    int id = 0;
-                    try
-                    {
-                        id = Convert.ToInt32(r["id"]);
-                        String Name = r["tesla_name"].ToString();
-                        String Password = r["tesla_password"].ToString();
-                        int carid = r["tesla_carid"] as Int32? ?? 0;
-                        String tesla_token = r["tesla_token"] as String ?? "";
-                        DateTime tesla_token_expire = r["tesla_token_expire"] as DateTime? ?? DateTime.MinValue;
-                        string Model_Name = r["Model_Name"] as String ?? "";
-                        string car_type = r["car_type"] as String ?? "";
-                        string car_special_type = r["car_special_type"] as String ?? "";
-                        string car_trim_badging = r["car_trim_badging"] as String ?? "";
-                        string display_name = r["display_name"] as String ?? "";
-                        string vin = r["vin"] as String ?? "";
-                        string tasker_hash = r["tasker_hash"] as String ?? "";
-                        double? wh_tr = r["wh_tr"] as double?;
-
-                        Car car = new Car(id, Name, Password, carid, tesla_token, tesla_token_expire, Model_Name, car_type, car_special_type, car_trim_badging, display_name, vin, tasker_hash, wh_tr);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logfile.Log(id + "# :" + ex.ToString());
-                    }
+                    StartCarThread(r);
                 }
                 dt.Clear();
+            }
+        }
+
+        internal static void StartCarThread(DataRow r)
+        {
+            int id = 0;
+            try
+            {
+                id = Convert.ToInt32(r["id"], Tools.ciDeDE);
+                String Name = r["tesla_name"].ToString();
+                String Password = r["tesla_password"].ToString();
+                int carid = r["tesla_carid"] as Int32? ?? 0;
+                String tesla_token = r["tesla_token"] as String ?? "";
+                if (tesla_token.StartsWith("OVMS:")) // OVMS Cars ar not handled by Teslalogger
+                    return;
+
+                DateTime tesla_token_expire = r["tesla_token_expire"] as DateTime? ?? DateTime.MinValue;
+                string Model_Name = r["Model_Name"] as String ?? "";
+                string car_type = r["car_type"] as String ?? "";
+                string car_special_type = r["car_special_type"] as String ?? "";
+                string car_trim_badging = r["car_trim_badging"] as String ?? "";
+                string display_name = r["display_name"] as String ?? "";
+                string vin = r["vin"] as String ?? "";
+                string tasker_hash = r["tasker_hash"] as String ?? "";
+                double? wh_tr = r["wh_tr"] as double?;
+
+#pragma warning disable CA2000 // Objekte verwerfen, bevor Bereich verloren geht
+                Car car = new Car(id, Name, Password, carid, tesla_token, tesla_token_expire, Model_Name, car_type, car_special_type, car_trim_badging, display_name, vin, tasker_hash, wh_tr);
+#pragma warning restore CA2000 // Objekte verwerfen, bevor Bereich verloren geht
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(id + "# :" + ex.ToString());
             }
         }
 
@@ -154,6 +195,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -173,6 +215,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -199,6 +242,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -208,22 +252,37 @@ namespace TeslaLogger
             if (ApplicationSettings.Default.VerboseMode)
             {
                 VERBOSE = true;
-                Logfile.Log("VerboseMode ON");
+                Logfile.Log("VerboseMode: ON");
+            }
+            if (ApplicationSettings.Default.SQLTrace)
+            {
+                SQLTRACE = true;
+                Logfile.Log("SQLTrace: ON");
             }
         }
 
         private static void InitStage2()
         {
+            KeepOnlineMinAfterUsage = Tools.GetSettingsInt("KeepOnlineMinAfterUsage", 5);
+            SuspendAPIMinutes = Tools.GetSettingsInt("SuspendAPIMinutes", 30);
+
             Logfile.Log("Current Culture: " + Thread.CurrentThread.CurrentCulture.ToString());
             Logfile.Log("Mono Runtime: " + Tools.GetMonoRuntimeVersion());
+            ExceptionlessClient.Default.Configuration.DefaultData.Add("Mono Runtime", Tools.GetMonoRuntimeVersion());
+
             Logfile.Log("Grafana Version: " + Tools.GetGrafanaVersion());
+            ExceptionlessClient.Default.Configuration.DefaultData.Add("Grafana Version", Tools.GetGrafanaVersion());
+
             Logfile.Log("OS Version: " + Tools.GetOsVersion());
+            ExceptionlessClient.Default.Configuration.DefaultData.Add("OS Version", Tools.GetOsVersion());
+
             Logfile.Log("Update Settings: " + Tools.GetOnlineUpdateSettings().ToString());
+            ExceptionlessClient.Default.Configuration.DefaultData.Add("Update Settings", Tools.GetOnlineUpdateSettings().ToString());
 
-            Logfile.Log("DBConnectionstring: " + DBHelper.DBConnectionstring);
+            Logfile.Log("DBConnectionstring: " + DBHelper.GetDBConnectionstring(true));
 
-            Logfile.Log("KeepOnlineMinAfterUsage: " + ApplicationSettings.Default.KeepOnlineMinAfterUsage);
-            Logfile.Log("SuspendAPIMinutes: " + ApplicationSettings.Default.SuspendAPIMinutes);
+            Logfile.Log("KeepOnlineMinAfterUsage: " + KeepOnlineMinAfterUsage);
+            Logfile.Log("SuspendAPIMinutes: " + SuspendAPIMinutes);
             Logfile.Log("SleepPositions: " + ApplicationSettings.Default.SleepPosition);
             Logfile.Log("UseScanMyTesla: " + Tools.UseScanMyTesla());
             Logfile.Log("StreamingPos: " + Tools.StreamingPos());
@@ -233,18 +292,21 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.ExceptionWriter(ex, ex.ToString());
             }
         }
 
         private static void InitStage1()
         {
-            Tools.SetThread_enUS();
+            Tools.SetThreadEnUS();
             UpdateTeslalogger.Chmod("nohup.out", 666, false);
             UpdateTeslalogger.Chmod("backup.sh", 777, false);
             UpdateTeslalogger.Chmod("TeslaLogger.exe", 755, false);
 
+#pragma warning disable CA5364 // Verwenden Sie keine veralteten Sicherheitsprotokolle.
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Ssl3 | SecurityProtocolType.Tls | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
+#pragma warning restore CA5364 // Verwenden Sie keine veralteten Sicherheitsprotokolle.
 
             Logfile.Log("TeslaLogger Version: " + Assembly.GetExecutingAssembly().GetName().Version + " (TeslaCAN)");
             Logfile.Log("Teslalogger Online Version: " + WebHelper.GetOnlineTeslaloggerVersion());
@@ -257,6 +319,22 @@ namespace TeslaLogger
             }
             catch (Exception)
             { }
+            try
+            {
+                if (File.Exists("BRANCH"))
+                {
+                    var branch = File.ReadAllText("BRANCH").Trim();
+                    Logfile.Log($"YOU ARE USING BRANCH: " + branch);
+
+                    ExceptionlessClient.Default.Configuration.DefaultData.Add("Branch", branch);
+                    ExceptionlessClient.Default.CreateLog("Program", "BRANCH: " + branch, Exceptionless.Logging.LogLevel.Warn).FirstCarUserID().Submit(); ;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+                ex.ToExceptionless().FirstCarUserID().Submit();
+            }
         }
 
         private static void InitConnectToDB()
@@ -271,12 +349,15 @@ namespace TeslaLogger
                 }
                 catch (Exception ex)
                 {
-                    if (ex.Message.Contains("Connection refused"))
+                    if (ex.Message.Contains("Connection refused") 
+                        || ex.Message.Contains("Unable to connect to any of the specified MySQL hosts") 
+                        || ex.Message.Contains("Reading from the stream has failed."))
                     {
                         Logfile.Log($"Wait for DB ({x}/30): Connection refused.");
                     }
                     else
                     {
+                        ex.ToExceptionless().FirstCarUserID().Submit();
                         Logfile.Log("DBCONNECTION " + ex.Message);
                     }
 
@@ -285,7 +366,7 @@ namespace TeslaLogger
             }
 
             UpdateTeslalogger.Start();
-            UpdateTeslalogger.UpdateGrafana();
+            _ = Task.Run(() => { UpdateTeslalogger.UpdateGrafana(); });
         }
 
         private static void InitCheckDocker()
@@ -296,10 +377,12 @@ namespace TeslaLogger
                 {
                     Logfile.Log("Docker: YES!");
 
+                    ExceptionlessClient.Default.Configuration.DefaultData.Add("Docker", true);
+
                     if (!File.Exists("/etc/teslalogger/settings.json"))
                     {
                         Logfile.Log("Creating empty settings.json");
-                        File.AppendAllText("/etc/teslalogger/settings.json", "{\"SleepTimeSpanStart\":\"\",\"SleepTimeSpanEnd\":\"\",\"SleepTimeSpanEnable\":\"false\",\"Power\":\"hp\",\"Temperature\":\"celsius\",\"Length\":\"km\",\"Language\":\"en\",\"URL_Admin\":\"\",\"ScanMyTesla\":\"false\"}");
+                        File.AppendAllText("/etc/teslalogger/settings.json", GetDefaultConfigFileContent());
                         UpdateTeslalogger.Chmod("/etc/teslalogger/settings.json", 666);
                     }
 
@@ -322,8 +405,14 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
+        }
+
+        public static string GetDefaultConfigFileContent()
+        {
+            return "{\"SleepTimeSpanStart\":\"\",\"SleepTimeSpanEnd\":\"\",\"SleepTimeSpanEnable\":\"false\",\"Power\":\"hp\",\"Temperature\":\"celsius\",\"Length\":\"km\",\"Language\":\"en\",\"URL_Admin\":\"\",\"ScanMyTesla\":\"false\"}";
         }
 
         internal static void RunHousekeepingInBackground()
@@ -366,6 +455,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -383,16 +473,21 @@ namespace TeslaLogger
                 Logfile.Log("UpdateDbInBackground started");
                 DBHelper.UpdateElevationForAllPoints();
                 WebHelper.UpdateAllPOIAddresses();
-                foreach (Car c in Car.allcars)
+                foreach (Car c in Car.Allcars)
                 {
-                    c.dbHelper.CombineChangingStates();
+                    c.DbHelper.CombineChangingStates();
                     c.webhelper.UpdateAllEmptyAddresses();
-                    c.dbHelper.UpdateEmptyChargeEnergy();
+                    c.DbHelper.UpdateEmptyChargeEnergy();
+                    c.DbHelper.UpdateEmptyUnplugDate();
+                    c.DbHelper.AnalyzeChargingStates();
+                    c.DbHelper.UpdateAllDriveHeightStatistics();
                 }
+
+                DBHelper.UpdateAllNullAmpereCharging();
                 DBHelper.UpdateIncompleteTrips();
                 DBHelper.UpdateAllChargingMaxPower();
 
-                foreach (Car c in Car.allcars)
+                foreach (Car c in Car.Allcars)
                 {
                     ShareData sd = new ShareData(c);
                     sd.SendAllChargingData();
@@ -404,6 +499,8 @@ namespace TeslaLogger
                 StaticMapService.CreateAllTripMaps();
                 StaticMapService.CreateAllChargingMaps();
                 StaticMapService.CreateAllParkingMaps();
+                
+                Car.LogActiveCars();
 
                 Logfile.Log("UpdateDbInBackground finished, took " + (DateTime.Now - start).TotalMilliseconds + "ms");
                 RunHousekeepingInBackground();

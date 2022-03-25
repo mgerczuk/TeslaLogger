@@ -6,9 +6,13 @@ using System.Text;
 using System.Threading;
 using MySql.Data.MySqlClient;
 using static TeslaLogger.StaticMapProvider;
+using Exceptionless;
+
 
 namespace TeslaLogger
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1303:Literale nicht als lokalisierte Parameter übergeben", Justification = "<Pending>")]
     public class StaticMapService
     {
         internal abstract class Request
@@ -112,6 +116,7 @@ namespace TeslaLogger
                         }
                         catch (Exception ex)
                         {
+                            ex.ToExceptionless().FirstCarUserID().Submit();
                             Tools.DebugLog("StaticMapService: Exception", ex);
                         }
 
@@ -124,13 +129,14 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Tools.DebugLog("StaticMapService: Exception", ex);
             }
         }
 
         private void Work()
         {
-            Tools.DebugLog("StaticMapService:Work() queue:" + queue.Count + " MapProvider:" + _StaticMapProvider);
+            //Tools.DebugLog("StaticMapService:Work() queue:" + queue.Count + " MapProvider:" + _StaticMapProvider);
             if (_StaticMapProvider != null)
             {
                 if (queue.TryDequeue(out Request request))
@@ -139,7 +145,7 @@ namespace TeslaLogger
                     int height = request.Height > 0 ? request.Height : 150;
                     if (request is TripRequest)
                     {
-                        Tools.DebugLog($"StaticMapService:Work() request:{request.Type} {((TripRequest)request).StartPosID}->{((TripRequest)request).EndPosID}");
+                        //Tools.DebugLog($"StaticMapService:Work() request:{request.Type} {((TripRequest)request).StartPosID}->{((TripRequest)request).EndPosID}");
                         string filename = System.IO.Path.Combine(GetMapDir(), GetMapFileName(((TripRequest)request).CarID, ((TripRequest)request).StartPosID, ((TripRequest)request).EndPosID));
                         if (MapFileExistsOrIsTooOld(filename))
                         {
@@ -164,7 +170,7 @@ namespace TeslaLogger
                     }
                     else if (request is POIRequest)
                     {
-                        Tools.DebugLog($"StaticMapService:Work() request:{request.Type} {((POIRequest)request).Lat},{((POIRequest)request).Lng}");
+                        //Tools.DebugLog($"StaticMapService:Work() request:{request.Type} {((POIRequest)request).Lat},{((POIRequest)request).Lng}");
                         string filename = System.IO.Path.Combine(GetMapDir(), GetMapFileName(request.Type, ((POIRequest)request).Lat, ((POIRequest)request).Lng));
                         if (MapFileExistsOrIsTooOld(filename))
                         {
@@ -215,7 +221,7 @@ WHERE
                     MySqlDataReader dr = cmd.ExecuteReader();
                     if (dr.Read())
                     {
-                        int.TryParse(dr[0].ToString(), out CarID);
+                        _ = int.TryParse(dr[0].ToString(), out CarID);
                     }
                 }
             }
@@ -278,33 +284,46 @@ JOIN pos ON
             {
                 using (MySqlDataAdapter da = new MySqlDataAdapter($@"
 SELECT DISTINCT
-  round(lat, 4) as lat,
-  round(lng, 4) as lng
+    ROUND(lat, 4) AS lat,
+    ROUND(lng, 4) AS lng
 FROM
-  pos    
-LEFT JOIN
-  chargingstate ON pos.id = chargingstate.pos
-WHERE
-  pos.id IN (
-  SELECT
     pos
-  FROM
+WHERE
+    pos.id IN(
+SELECT
+    pos
+FROM
     chargingstate
-  )
-  OR pos.id IN (
-  SELECT
-    StartPos
-  FROM
-    drivestate
-  )
-  OR pos.id IN (
-  SELECT
+)
+UNION ALL
+SELECT DISTINCT
+    ROUND(lat, 4) AS lat,
+    ROUND(lng, 4) AS lng
+FROM
+    pos
+WHERE
+    pos.id IN(
+    SELECT
+        StartPos
+    FROM
+        drivestate
+)
+UNION ALL
+SELECT DISTINCT
+    ROUND(lat, 4) AS lat,
+    ROUND(lng, 4) AS lng
+FROM
+    pos
+WHERE
+    pos.id IN(
+SELECT
     EndPos
-  FROM
+FROM
     drivestate
-  )", DBHelper.DBConnectionstring))
+)", DBHelper.DBConnectionstring))
                 {
-                    da.Fill(dt);
+                    da.SelectCommand.CommandTimeout = 600;
+                    SQLTracer.TraceDA(dt, da);
                 }
                 foreach (DataRow dr in dt.Rows)
                 {
@@ -336,11 +355,12 @@ ORDER BY
                     {
                         while (dr.Read())
                         {
-                            GetSingleton().Enqueue(Convert.ToInt32(dr["carid"]), Convert.ToInt32(dr["startposid"]), Convert.ToInt32(dr["endposid"]), 0, 0, mapMode, MapSpecial.None);
+                            GetSingleton().Enqueue(Convert.ToInt32(dr["carid"], Tools.ciEnUS), Convert.ToInt32(dr["startposid"], Tools.ciEnUS), Convert.ToInt32(dr["endposid"], Tools.ciEnUS), 0, 0, mapMode, MapSpecial.None);
                         }
                     }
                     catch (Exception ex)
                     {
+                        ex.ToExceptionless().FirstCarUserID().Submit();
                         System.Diagnostics.Debug.WriteLine(ex.ToString());
                         Logfile.Log(ex.ToString());
                     }
@@ -364,6 +384,7 @@ ORDER BY
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
             return mapdir;
@@ -426,11 +447,12 @@ WHERE
                         {
                             while (dr.Read())
                             {
-                                GetSingleton().Enqueue(MapType.Charge, (double)dr["lat"], (double)dr["lng"], MapMode.Dark);
+                                GetSingleton().Enqueue(MapType.Charge, Convert.ToDouble(dr["lat"], Tools.ciEnUS), Convert.ToDouble(dr["lng"], Tools.ciEnUS), MapMode.Dark);
                             }
                         }
                         catch (Exception ex)
                         {
+                            ex.ToExceptionless().FirstCarUserID().Submit();
                             Logfile.Log(ex.ToString());
                         }
                     }
@@ -438,6 +460,7 @@ WHERE
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -466,7 +489,7 @@ WHERE
                         {
                             while (dr.Read())
                             {
-                                GetSingleton().Enqueue(MapType.Park, Convert.ToDouble(dr["lat"]), Convert.ToDouble(dr["lng"]), MapMode.Dark);
+                                GetSingleton().Enqueue(MapType.Park, Convert.ToDouble(dr["lat"], Tools.ciEnUS), Convert.ToDouble(dr["lng"], Tools.ciEnUS), MapMode.Dark);
                             }
                         }
                         catch (Exception ex)
@@ -478,6 +501,7 @@ WHERE
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }

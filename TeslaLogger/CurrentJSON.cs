@@ -1,25 +1,28 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 
 namespace TeslaLogger
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1051:Sichtbare Instanzfelder nicht deklarieren", Justification = "<Pending>")]
     public class CurrentJSON
     {
-        public static Dictionary<int, string> jsonStringHolder = new Dictionary<int, string>();
-
+        public static readonly ConcurrentDictionary<int, string> jsonStringHolder = new ConcurrentDictionary<int, string>();
         public bool current_charging = false;
         public bool current_driving = false;
         public bool current_online = false;
         public bool current_sleeping = false;
         public bool current_falling_asleep = false;
+        private long timestamp = 0;
 
         public int current_speed = 0;
         public int current_power = 0;
         public double current_odometer = 0;
         public double current_ideal_battery_range_km = 0;
         public double current_battery_range_km = 0;
-        public double current_outside_temp = 0;
-        public double current_inside_temp = 0;
+        public double current_outside_temperature = 0;
         public int current_battery_level = 0;
 
         public int current_charger_voltage = 0;
@@ -45,9 +48,10 @@ namespace TeslaLogger
 
         public int current_trip_duration_sec = 0;
 
-        public double latitude = 0;
-        public double longitude = 0;
+        private double latitude = 0;
+        private double longitude = 0;
         public int charge_limit_soc = 0;
+        public int heading = 0;
         public double current_inside_temperature = 0;
         public bool current_battery_heater = false;
         public bool current_is_sentry_mode = false;
@@ -127,6 +131,8 @@ namespace TeslaLogger
                 }
                 catch (Exception ex)
                 {
+                    car.CreateExceptionlessClient(ex).Submit();
+
                     Logfile.Log(ex.ToString());
                     duration = 0;
                 }
@@ -136,6 +142,8 @@ namespace TeslaLogger
                 }
 
                 car.GetTeslaAPIState().GetBool("charge_port_door_open", out current_charge_port_door_open);
+                car.GetTeslaAPIState().GetString("software_update.status", out string software_update_status);
+                car.GetTeslaAPIState().GetString("software_update.version", out string software_update_version);
 
                 Dictionary<string, object> values = new Dictionary<string, object>
                 {
@@ -149,7 +157,7 @@ namespace TeslaLogger
                    { "odometer", current_odometer },
                    { "ideal_battery_range_km", current_ideal_battery_range_km},
                    { "battery_range_km", current_battery_range_km},
-                   { "outside_temp", current_outside_temp},
+                   { "outside_temp", current_outside_temperature},
                    { "battery_level", current_battery_level},
                    { "charger_voltage", current_charger_voltage},
                    { "charger_phases", current_charger_phases},
@@ -161,14 +169,14 @@ namespace TeslaLogger
                    { "time_to_full_charge", current_time_to_full_charge},
                    { "car_version", current_car_version },
                    { "trip_start", current_trip_start.ToString("t",Tools.ciDeDE) },
-                   { "trip_start_dt", current_trip_start.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") },
+                   { "trip_start_dt", current_trip_start.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", Tools.ciEnUS) },
                    { "trip_max_speed", current_trip_max_speed },
                    { "trip_max_power", current_trip_max_power },
                    { "trip_duration_sec", duration },
                    { "trip_kwh", trip_kwh },
                    { "trip_avg_kwh", trip_avg_wh },
                    { "trip_distance", distance },
-                   { "ts", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")},
+                   { "ts", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", Tools.ciEnUS)},
                    { "latitude", latitude },
                    { "longitude", longitude },
                    { "charge_limit_soc", charge_limit_soc},
@@ -178,7 +186,10 @@ namespace TeslaLogger
                    { "sentry_mode", current_is_sentry_mode },
                    { "country_code", current_country_code },
                    { "state", current_state },
-                   { "display_name", car.display_name}
+                   { "display_name", car.DisplayName},
+                   { "heading", heading},
+                   { "software_update_status", software_update_status },
+                   { "software_update_version" , software_update_version }
                 };
 
                 TimeSpan ts = DateTime.Now - lastScanMyTeslaReceived;
@@ -212,7 +223,7 @@ namespace TeslaLogger
                     values.Add("TLGeofenceIsWork", false);
                 }
 
-                current_json = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(values);
+                current_json = JsonConvert.SerializeObject(values);
 
                 jsonStringHolder[car.CarInDB] = current_json;
 
@@ -220,9 +231,41 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                car.CreateExceptionlessClient(ex).Submit();
+
                 Logfile.Log(ex.ToString());
                 current_json = "";
             }
+        }
+
+        public void SetPosition(double lat, double lng, long ts)
+        {
+            if (ts > timestamp)
+            {
+                latitude = lat;
+                longitude = lng;
+                timestamp = ts;
+            }
+        }
+
+        public double GetLatitude()
+        {
+            return latitude;
+        }
+
+        public double GetLongitude()
+        {
+            return longitude;
+        }
+
+        public void SetLatitude(double lat)
+        {
+            latitude = lat;
+        }
+
+        public void SetLongitude(double lng)
+        {
+            longitude = lng;
         }
     }
 }

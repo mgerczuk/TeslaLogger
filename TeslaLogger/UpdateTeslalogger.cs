@@ -5,18 +5,23 @@ using System.IO;
 using MySql.Data.MySqlClient;
 using System.Text.RegularExpressions;
 using System.Reflection;
-using System.Web.Script.Serialization;
+
 using System.Threading;
 using System.Net;
 using System.IO.Compression;
+using Exceptionless;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
 
 namespace TeslaLogger
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1303:Literale nicht als lokalisierte Parameter übergeben", Justification = "<Pending>")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     internal class UpdateTeslalogger
     {
-        private static readonly string cmd_restart_path = "/tmp/teslalogger-cmd-restart.txt";
+        private const string cmd_restart_path = "/tmp/teslalogger-cmd-restart.txt";
         private static bool shareDataOnStartup = false;
-        private static System.Threading.Timer timer;
+        private static Timer timer;
 
         private static DateTime lastVersionCheck = DateTime.UtcNow;
         internal static DateTime GetLastVersionCheck() { return lastVersionCheck; }
@@ -39,6 +44,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Tools.DebugLog("StopComfortingMessagesThread() exception", ex);
             }
         }
@@ -80,43 +86,289 @@ namespace TeslaLogger
             try
             {
                 shareDataOnStartup = Tools.IsShareData();
-                bool updateAllDrivestateData = false;
 
                 // start schema update
 
-                if (!DBHelper.ColumnExists("pos", "battery_level"))
+                DBHelper.EnableUTF8mb4();
+                CheckDBCharset();
+
+                CheckDBSchema_can();
+
+                CheckDBSchema_candata();
+
+                CheckDBSchema_cars();
+
+                CheckDBSchema_car_version();
+
+                CheckDBSchema_charging();
+
+                CheckDBSchema_chargingstate();
+
+                CheckDBSchema_drivestate();
+
+                CheckDBSchema_httpcodes();
+
+                Journeys.CheckSchema();
+
+                CheckDBSchema_mothership();
+
+                CheckDBSchema_mothershipcommands();
+
+                CheckDBSchema_pos();
+
+                CheckDBSchema_shiftstate();
+
+                CheckDBSchema_state();
+
+                CheckDBSchema_superchargers();
+
+                CheckDBSchema_superchargerstate();
+
+                Logfile.Log("DBSchema Update finished.");
+
+                // end of schema update
+
+                // start view update
+
+                _ = Task.Factory.StartNew(() =>
                 {
-                    Logfile.Log("ALTER TABLE pos ADD COLUMN battery_level DOUBLE NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN battery_level DOUBLE NULL");
+                    Logfile.Log("DBView Update (Task) started.");
+                    CheckDBViews();
+                    if (!DBHelper.TableExists("trip") || !DBHelper.ColumnExists("trip", "outside_temp_avg"))
+                    {
+                        UpdateDBViews();
+                }
+                    Logfile.Log("DBView Update (Task) finished.");
+                }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+
+                // end of view update
+
+                // start index update
+
+                _ = Task.Factory.StartNew(() =>
+                {
+                    if (!DBHelper.IndexExists("can_ix2", "can"))
+                    {
+                        Logfile.Log("alter table can add index can_ix2 (id,carid,datum)");
+                        DBHelper.ExecuteSQLQuery("alter table can add index can_ix2 (id,carid,datum)", 6000);
+                        Logfile.Log("ALTER TABLE OK");
                 }
 
-                if (!DBHelper.ColumnExists("drivestate", "outside_temp_avg"))
+                    if (!DBHelper.IndexExists("chargingsate_ix_pos", "chargingstate"))
                 {
-                    Logfile.Log("ALTER TABLE drivestate ADD COLUMN outside_temp_avg DOUBLE NULL, ADD COLUMN speed_max INT NULL, ADD COLUMN power_max INT NULL, ADD COLUMN power_min INT NULL, ADD COLUMN power_avg DOUBLE NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE drivestate ADD COLUMN outside_temp_avg DOUBLE NULL, ADD COLUMN speed_max INT NULL, ADD COLUMN power_max INT NULL, ADD COLUMN power_min INT NULL, ADD COLUMN power_avg DOUBLE NULL");
-                    updateAllDrivestateData = true;
-                }
-
-                if (!DBHelper.ColumnExists("charging", "charger_pilot_current"))
-                {
-                    Logfile.Log("ALTER TABLE charging ADD COLUMN charger_pilot_current INT NULL, ADD COLUMN charge_current_request INT NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE charging ADD COLUMN charger_pilot_current INT NULL, ADD COLUMN charge_current_request INT NULL");
+                        Logfile.Log("alter table chargingstate add index chargingsate_ix_pos (Pos)");
+                        DBHelper.ExecuteSQLQuery("alter table chargingstate add index chargingsate_ix_pos (Pos)", 6000);
                     Logfile.Log("ALTER TABLE OK");
                 }
 
-                if (!DBHelper.TableExists("car_version"))
+                    if (!DBHelper.IndexExists("ixAnalyzeChargingStates1", "chargingstate"))
                 {
-                    Logfile.Log("CREATE TABLE car_version (id int NOT NULL AUTO_INCREMENT, StartDate datetime NOT NULL, version varchar(50), PRIMARY KEY(id))");
-                    DBHelper.ExecuteSQLQuery("CREATE TABLE car_version (id int NOT NULL AUTO_INCREMENT, StartDate datetime NOT NULL, version varchar(50), PRIMARY KEY(id))");
+                        Logfile.Log("ALTER TABLE chargingstate ADD INDEX ixAnalyzeChargingStates1 ...");
+                        DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD INDEX ixAnalyzeChargingStates1 (id, CarID, StartChargingID, EndChargingID)", 6000);
                     Logfile.Log("ALTER TABLE OK");
                 }
 
-                if (!DBHelper.TableExists("can"))
+                    if (!DBHelper.IndexExists("idx_pos_CarID_id", "pos"))
                 {
-                    Logfile.Log("CREATE TABLE `can` (`datum` datetime NOT NULL, `id` mediumint NOT NULL, `val` double DEFAULT NULL, PRIMARY KEY(`datum`,`id`) ) ENGINE = InnoDB DEFAULT CHARSET = latin1;");
-                    DBHelper.ExecuteSQLQuery("CREATE TABLE `can` (`datum` datetime NOT NULL, `id` mediumint NOT NULL, `val` double DEFAULT NULL, PRIMARY KEY(`datum`,`id`) ) ENGINE = InnoDB DEFAULT CHARSET = latin1;");
+                        Logfile.Log("alter table pos add index idx_pos_CarID_id (CarID, id)");      // used for: select max(id) from pos where CarID=?
+                        DBHelper.ExecuteSQLQuery("alter table pos add index idx_pos_CarID_id (CarID, id)", 600);
+                        Logfile.Log("ALTER TABLE OK");
+                    }
+
+                    if (!DBHelper.IndexExists("idx_pos_CarID_datum", "pos"))
+                    {
+                        Logfile.Log("alter table pos add index idx_pos_CarID_datum (CarID, Datum)");
+                        DBHelper.ExecuteSQLQuery("alter table pos add index idx_pos_CarID_datum (CarID, Datum)", 600);
+                        Logfile.Log("ALTER TABLE OK");
+                    }
+
+                    if (DBHelper.IndexExists("idx_pos_datum", "pos"))
+                    {
+                        Logfile.Log("alter table pos drop index if exists idx_pos_datum");
+                        DBHelper.ExecuteSQLQuery("alter table pos drop index if exists idx_pos_datum", 600);
+                        Logfile.Log("ALTER TABLE OK");
+                    }
+
+                    if (DBHelper.IndexExists("can_ix", "can"))
+                    {
+                        Logfile.Log("alter table can drop index if exists can_ix");
+                        DBHelper.ExecuteSQLQuery("alter table can drop index if exists can_ix", 600);
+                        Logfile.Log("ALTER TABLE OK");
+                    }
+
+                    if (!DBHelper.IndexExists("IX_charging_carid_datum", "charging"))
+                    {
+                        Logfile.Log("alter table charging add index IX_charging_carid_datum (CarId, Datum)");
+                        DBHelper.ExecuteSQLQuery("alter table charging add index IX_charging_carid_datum (CarId, Datum)", 600);
+                        Logfile.Log("ALTER TABLE OK");
+                    }
+
+                    try
+                    {
+
+                        if (!DBHelper.IndexExists("ix_startpos", "drivestate"))
+                        {
+                            Logfile.Log("ALTER TABLE drivestate ADD UNIQUE ix_startpos (StartPos)");
+                            DBHelper.ExecuteSQLQuery("ALTER TABLE drivestate ADD UNIQUE ix_startpos (StartPos)", 600);
+                            Logfile.Log("ALTER TABLE OK");
+                        }
+
+                        if (DBHelper.IndexExists("ix_endpos", "drivestate"))
+                        {
+                            Logfile.Log("DROP INDEX ix_endpos");
+                            DBHelper.ExecuteSQLQuery("ALTER TABLE drivestate DROP INDEX ix_endpos", 600);
+                            Logfile.Log("DROP INDEX ix_endpos");
+                        }
+
+                        if (!DBHelper.IndexExists("ix_id_ts", "mothership"))
+                        {
+                            Logfile.Log("ALTER TABLE mothership ADD UNIQUE ix_id_ts (id, ts)");
+                            DBHelper.ExecuteSQLQuery("ALTER TABLE mothership ADD UNIQUE ix_id_ts (id, ts)", 1200);
                     Logfile.Log("ALTER TABLE OK");
                 }
+
+                        if (!DBHelper.IndexExists("ix_endpos2", "drivestate"))
+                        {
+                            Logfile.Log("ALTER TABLE drivestate ADD ix_endpos2(EndPos)");
+                            DBHelper.ExecuteSQLQuery("ALTER TABLE drivestate ADD INDEX ix_endpos2(EndPos)", 600);
+                            Logfile.Log("ALTER TABLE drivestate ADD ix_endpos2(EndPos)");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        ex.ToExceptionless().FirstCarUserID().Submit();
+                    }
+
+                    Logfile.Log("DBIndex Update (Task) finished.");
+                }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+                // end index update
+
+                DBHelper.EnableMothership();
+
+                timer = new System.Threading.Timer(FileChecker, null, 10000, 5000);
+
+                Chmod("/var/www/html/admin/wallpapers", 777);
+
+                UpdatePHPini();
+                UpdateApacheConfig();
+                CreateEmptyWeatherIniFile();
+                CheckBackupCrontab();
+
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                Logfile.Log("Error in update: " + ex.ToString());
+            }
+            finally
+            {
+                try
+                {
+                    _done = true;
+                    ComfortingMessages.Abort();
+                }
+                catch (Exception) { }
+            }
+
+            try
+            {
+                DownloadUpdateAndInstall();
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                Logfile.Log("Error in update: " + ex.ToString());
+            }
+        }
+
+        private static void CheckDBViews()
+        {
+            string viewtrip = string.Empty;
+            try
+            {
+                using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+                {
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand("SHOW FULL TABLES", con))
+                    {
+                        MySqlDataReader dr = SQLTracer.TraceDR(cmd);
+                        while (dr.Read())
+                        {
+                            if (dr[0] != null && dr[0].ToString().Equals("trip") && dr[1] != null)
+                            {
+                                viewtrip = dr[1].ToString();
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                Logfile.Log("CheckDBViews exception: " + ex.ToString());
+            }
+            Logfile.Log("CheckDBViews: trip " + (viewtrip.Equals("VIEW") ? "OK" : $"NOT OK: type {viewtrip}"));
+        }
+
+        private static void CheckDBSchema_superchargerstate()
+        {
+            if (!DBHelper.TableExists("superchargerstate"))
+            {
+                string sql = @"
+CREATE TABLE superchargerstate(
+    id INT NOT NULL AUTO_INCREMENT,
+    nameid INT NOT NULL,
+    ts datetime NOT NULL,
+    available_stalls TINYINT NOT NULL,
+    total_stalls TINYINT NOT NULL,
+    PRIMARY KEY(id)
+)";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql);
+                Logfile.Log("CREATE TABLE OK");
+            }
+        }
+
+        private static void CheckDBSchema_superchargers()
+        {
+            if (!DBHelper.TableExists("superchargers"))
+            {
+                string sql = @"
+CREATE TABLE superchargers(
+    id INT NOT NULL AUTO_INCREMENT,
+    name VARCHAR(250) NOT NULL,
+    lat DOUBLE NOT NULL,
+    lng DOUBLE NOT NULL,
+    PRIMARY KEY(id)
+)";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql);
+                Logfile.Log("CREATE TABLE OK");
+            }
+        }
+
+        private static void CheckDBSchema_candata()
+        {
+            // empty so far
+        }
+
+        private static void CheckDBSchema_state()
+        {
+            InsertCarID_Column("state");
+        }
+
+        private static void CheckDBSchema_shiftstate()
+        {
+            InsertCarID_Column("shiftstate");
+        }
+
+        private static void CheckDBSchema_pos()
+        {
+            if (!DBHelper.ColumnExists("pos", "battery_level"))
+            {
+                Logfile.Log("ALTER TABLE pos ADD COLUMN battery_level DOUBLE NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN battery_level DOUBLE NULL");
+            }
 
                 if (!DBHelper.ColumnExists("pos", "inside_temp"))
                 {
@@ -146,6 +398,155 @@ namespace TeslaLogger
                     Logfile.Log("ALTER TABLE OK");
                 }
 
+            if (!DBHelper.ColumnExists("pos", "battery_range_km"))
+            {
+                Logfile.Log("ALTER TABLE pos ADD COLUMN battery_range_km DOUBLE NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN battery_range_km DOUBLE NULL", 600);
+            }
+
+            InsertCarID_Column("pos");
+
+            // check datetime precision in pos
+            try
+            {
+                using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+                {
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand("SELECT datetime_precision FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'pos' AND COLUMN_NAME = 'datum' and TABLE_SCHEMA = 'teslalogger'", con))
+                    {
+                        MySqlDataReader dr = SQLTracer.TraceDR(cmd);
+                        if (dr.Read() && dr[0] != DBNull.Value)
+                        {
+                            if (int.TryParse(dr[0].ToString(), out int datetime_precision))
+                            {
+                                if (datetime_precision != 3)
+                                {
+                                    // update table
+                                    Logfile.Log("ALTER TABLE `pos` CHANGE `Datum` `Datum` DATETIME(3) NOT NULL;");
+                                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `pos` CHANGE `Datum` `Datum` DATETIME(3) NOT NULL;", 3000);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                Logfile.Log(ex.ToString());
+            }
+        }
+
+        private static void CheckDBSchema_mothershipcommands()
+        {
+            if (!DBHelper.TableExists("mothershipcommands"))
+            {
+                Logfile.Log("CREATE TABLE mothershipcommands (id int NOT NULL AUTO_INCREMENT, command varchar(50) NOT NULL, PRIMARY KEY(id))");
+                DBHelper.ExecuteSQLQuery("CREATE TABLE mothershipcommands (id int NOT NULL AUTO_INCREMENT, command varchar(50) NOT NULL, PRIMARY KEY(id))");
+                Logfile.Log("CREATE TABLE OK");
+            }
+        }
+
+        private static void CheckDBSchema_mothership()
+        {
+            if (!DBHelper.TableExists("mothership"))
+            {
+                Logfile.Log("CREATE TABLE mothership (id int NOT NULL AUTO_INCREMENT, ts datetime NOT NULL, commandid int NOT NULL, duration DOUBLE NULL, PRIMARY KEY(id))");
+                DBHelper.ExecuteSQLQuery("CREATE TABLE mothership (id int NOT NULL AUTO_INCREMENT, ts datetime NOT NULL, commandid int NOT NULL, duration DOUBLE NULL, PRIMARY KEY(id))");
+                Logfile.Log("CREATE TABLE OK");
+            }
+            if (!DBHelper.ColumnExists("mothership", "httpcode"))
+            {
+                Logfile.Log("ALTER TABLE mothership ADD COLUMN httpcode int NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE mothership ADD COLUMN httpcode int NULL", 600);
+                Logfile.Log("ALTER TABLE OK");
+            }
+        }
+
+        private static void CheckDBSchema_httpcodes()
+        {
+            if (!DBHelper.TableExists("httpcodes"))
+            {
+                Logfile.Log("CREATE TABLE httpcodes (id int NOT NULL, text varchar(50) NOT NULL, PRIMARY KEY(id))");
+                DBHelper.ExecuteSQLQuery("CREATE TABLE httpcodes (id int NOT NULL, text varchar(50) NOT NULL, PRIMARY KEY(id))");
+                Logfile.Log("CREATE TABLE OK");
+                _ = Task.Factory.StartNew(() =>
+                {
+                    DBHelper.UpdateHTTPStatusCodes();
+                    Logfile.Log("CheckDBSchema_httpcodes (Task) finished.");
+                }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+            }
+        }
+
+        private static void CheckDBSchema_drivestate()
+        {
+            if (!DBHelper.ColumnExists("drivestate", "outside_temp_avg"))
+            {
+                Logfile.Log("ALTER TABLE drivestate ADD COLUMN outside_temp_avg DOUBLE NULL, ADD COLUMN speed_max INT NULL, ADD COLUMN power_max INT NULL, ADD COLUMN power_min INT NULL, ADD COLUMN power_avg DOUBLE NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE drivestate ADD COLUMN outside_temp_avg DOUBLE NULL, ADD COLUMN speed_max INT NULL, ADD COLUMN power_max INT NULL, ADD COLUMN power_min INT NULL, ADD COLUMN power_avg DOUBLE NULL");
+                Logfile.Log("ALTER TABLE OK");
+                _ = Task.Factory.StartNew(() =>
+                {
+                    DBHelper.UpdateAllDrivestateData();
+                    Logfile.Log("CheckDBSchema_drivestate (Task) finished.");
+                }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+            }
+
+            if (!DBHelper.ColumnExists("drivestate", "meters_up"))
+            {
+                string sql = "ALTER TABLE drivestate ADD meters_up DOUBLE NULL DEFAULT NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
+            if (!DBHelper.ColumnExists("drivestate", "meters_down"))
+            {
+                string sql = "ALTER TABLE drivestate ADD meters_down DOUBLE NULL DEFAULT NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
+            if (!DBHelper.ColumnExists("drivestate", "distance_up_km"))
+            {
+                string sql = "ALTER TABLE drivestate ADD distance_up_km DOUBLE NULL DEFAULT NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
+            if (!DBHelper.ColumnExists("drivestate", "distance_down_km"))
+            {
+                string sql = "ALTER TABLE drivestate ADD distance_down_km DOUBLE NULL DEFAULT NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
+            if (!DBHelper.ColumnExists("drivestate", "distance_flat_km"))
+            {
+                string sql = "ALTER TABLE drivestate ADD distance_flat_km DOUBLE NULL DEFAULT NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
+            if (!DBHelper.ColumnExists("drivestate", "height_max"))
+            {
+                string sql = "ALTER TABLE drivestate ADD height_max DOUBLE NULL DEFAULT NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
+            if (!DBHelper.ColumnExists("drivestate", "height_min"))
+            {
+                string sql = "ALTER TABLE drivestate ADD height_min DOUBLE NULL DEFAULT NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
+
+            InsertCarID_Column("drivestate");
+        }
+
+        private static void CheckDBSchema_chargingstate()
+        {
                 if (!DBHelper.ColumnExists("chargingstate", "conn_charge_cable"))
                 {
                     Logfile.Log("ALTER TABLE chargingstate ADD COLUMN conn_charge_cable varchar(50)");
@@ -174,13 +575,6 @@ namespace TeslaLogger
                     Logfile.Log("ALTER TABLE OK");
                 }
 
-                if (!DBHelper.ColumnExists("charging", "battery_heater"))
-                {
-                    Logfile.Log("ALTER TABLE charging ADD COLUMN battery_heater TINYINT(1) NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE charging ADD COLUMN battery_heater TINYINT(1) NULL", 600);
-                    Logfile.Log("ALTER TABLE OK");
-                }
-
                 if (!DBHelper.ColumnExists("chargingstate", "max_charger_power"))
                 {
                     Logfile.Log("ALTER TABLE chargingstate ADD COLUMN max_charger_power int NULL");
@@ -188,55 +582,10 @@ namespace TeslaLogger
                     Logfile.Log("ALTER TABLE OK");
                 }
 
-                if (!DBHelper.TableExists("mothership"))
+            if (!DBHelper.ColumnExists("chargingstate", "cost_total"))
                 {
-                    Logfile.Log("CREATE TABLE mothership (id int NOT NULL AUTO_INCREMENT, ts datetime NOT NULL, commandid int NOT NULL, duration DOUBLE NULL, PRIMARY KEY(id))");
-                    DBHelper.ExecuteSQLQuery("CREATE TABLE mothership (id int NOT NULL AUTO_INCREMENT, ts datetime NOT NULL, commandid int NOT NULL, duration DOUBLE NULL, PRIMARY KEY(id))");
-                    Logfile.Log("CREATE TABLE OK");
-                }
-                if (!DBHelper.TableExists("mothershipcommands"))
-                {
-                    Logfile.Log("CREATE TABLE mothershipcommands (id int NOT NULL AUTO_INCREMENT, command varchar(50) NOT NULL, PRIMARY KEY(id))");
-                    DBHelper.ExecuteSQLQuery("CREATE TABLE mothershipcommands (id int NOT NULL AUTO_INCREMENT, command varchar(50) NOT NULL, PRIMARY KEY(id))");
-                    Logfile.Log("CREATE TABLE OK");
-                }
-                if (!DBHelper.ColumnExists("mothership", "httpcode"))
-                {
-                    Logfile.Log("ALTER TABLE mothership ADD COLUMN httpcode int NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE mothership ADD COLUMN httpcode int NULL", 600);
-                    Logfile.Log("ALTER TABLE OK");
-                }
-                if (!DBHelper.TableExists("httpcodes"))
-                {
-                    Logfile.Log("CREATE TABLE httpcodes (id int NOT NULL, text varchar(50) NOT NULL, PRIMARY KEY(id))");
-                    DBHelper.ExecuteSQLQuery("CREATE TABLE httpcodes (id int NOT NULL, text varchar(50) NOT NULL, PRIMARY KEY(id))");
-                    Logfile.Log("CREATE TABLE OK");
-                }
-
-                /*
-                if (!DBHelper.IndexExists("can_ix", "can"))
-                {
-                    Logfile.Log("alter table can add index can_ix (id,datum)");
-                    DBHelper.ExecuteSQLQuery("alter table can add index can_ix (id,datum)", 600);
-                    Logfile.Log("ALTER TABLE OK");
-                }*/
-
-                if (!DBHelper.ColumnExists("pos", "battery_range_km"))
-                {
-                    Logfile.Log("ALTER TABLE pos ADD COLUMN battery_range_km DOUBLE NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN battery_range_km DOUBLE NULL", 600);
-                }
-
-                if (!DBHelper.ColumnExists("charging", "battery_range_km"))
-                {
-                    Logfile.Log("ALTER TABLE charging ADD COLUMN battery_range_km DOUBLE NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE charging ADD COLUMN battery_range_km DOUBLE NULL", 600);
-                }
-
-                if (!DBHelper.ColumnExists("chargingstate", "cost_total"))
-                {
-                    Logfile.Log("ALTER TABLE chargingstate ADD Column cost_total");
-                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `chargingstate` 
+                Logfile.Log("ALTER TABLE chargingstate ADD Column cost_total");
+                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `chargingstate` 
                         ADD COLUMN `cost_total` DOUBLE NULL DEFAULT NULL,
                         ADD COLUMN `cost_currency` VARCHAR(3) NULL DEFAULT NULL,
                         ADD COLUMN `cost_per_kwh` DOUBLE NULL DEFAULT NULL,
@@ -245,22 +594,91 @@ namespace TeslaLogger
                         ADD COLUMN `cost_idle_fee_total` DOUBLE NULL DEFAULT NULL", 600);
                 }
 
-                if (!DBHelper.ColumnExists("chargingstate", "cost_kwh_meter_invoice"))
+            if (!DBHelper.ColumnExists("chargingstate", "cost_kwh_meter_invoice"))
                 {
-                    Logfile.Log("ALTER TABLE chargingstate ADD Column cost_kwh_meter_invoice");
-                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `chargingstate` 
+                Logfile.Log("ALTER TABLE chargingstate ADD Column cost_kwh_meter_invoice");
+                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `chargingstate` 
                         ADD COLUMN `cost_kwh_meter_invoice` DOUBLE NULL DEFAULT NULL", 600);
                 }
 
-                InsertCarID_Column("can");
-                InsertCarID_Column("car_version");
-                InsertCarID_Column("charging");
-                InsertCarID_Column("chargingstate");
-                InsertCarID_Column("drivestate");
-                InsertCarID_Column("pos");
-                InsertCarID_Column("shiftstate");
-                InsertCarID_Column("state");
+            if (!DBHelper.ColumnExists("chargingstate", "meter_vehicle_kwh_start"))
+                {
+                string sql = "ALTER TABLE chargingstate ADD COLUMN meter_vehicle_kwh_start double NULL,  ADD COLUMN meter_vehicle_kwh_end double NULL, ADD COLUMN meter_utility_kwh_start double NULL, ADD COLUMN meter_utility_kwh_end double NULL, ADD COLUMN meter_utility_kwh_sum double NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                    Logfile.Log("ALTER TABLE OK");
+                }
 
+            if (!DBHelper.ColumnExists("chargingstate", "hidden"))
+                {
+                string sql = "ALTER TABLE chargingstate ADD hidden BOOLEAN NOT NULL DEFAULT FALSE ";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
+            if (!DBHelper.ColumnExists("chargingstate", "combined_into"))
+            {
+                string sql = "ALTER TABLE chargingstate ADD combined_into INT NULL DEFAULT NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                Logfile.Log("ALTER TABLE OK");
+                }
+
+            if (!DBHelper.ColumnExists("chargingstate", "meter_vehicle_kwh_sum"))
+                {
+                string sql = "ALTER TABLE chargingstate ADD meter_vehicle_kwh_sum DOUBLE NULL DEFAULT NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                    Logfile.Log("ALTER TABLE OK");
+
+                DBHelper.ExecuteSQLQuery("update chargingstate set meter_vehicle_kwh_sum = meter_vehicle_kwh_end - meter_vehicle_kwh_start where meter_vehicle_kwh_sum is null and meter_vehicle_kwh_start is not null and meter_vehicle_kwh_end is not null", 300);
+                DBHelper.ExecuteSQLQuery("update chargingstate set cost_kwh_meter_invoice = meter_vehicle_kwh_end - meter_vehicle_kwh_start where cost_kwh_meter_invoice is null and meter_vehicle_kwh_start is not null and meter_vehicle_kwh_end is not null and charge_energy_added < (meter_vehicle_kwh_end - meter_vehicle_kwh_start)", 300);
+
+                DBHelper.ExecuteSQLQuery("update chargingstate set meter_utility_kwh_sum = meter_utility_kwh_end - meter_utility_kwh_start where meter_utility_kwh_sum is null and meter_utility_kwh_start is not null and meter_utility_kwh_end is not null", 300);
+            }
+
+            InsertCarID_Column("chargingstate");
+        }
+
+        private static void CheckDBSchema_charging()
+                {
+            if (!DBHelper.ColumnExists("charging", "charger_pilot_current"))
+            {
+                Logfile.Log("ALTER TABLE charging ADD COLUMN charger_pilot_current INT NULL, ADD COLUMN charge_current_request INT NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE charging ADD COLUMN charger_pilot_current INT NULL, ADD COLUMN charge_current_request INT NULL");
+                Logfile.Log("ALTER TABLE OK");
+            }
+
+            if (!DBHelper.ColumnExists("charging", "battery_heater"))
+            {
+                Logfile.Log("ALTER TABLE charging ADD COLUMN battery_heater TINYINT(1) NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE charging ADD COLUMN battery_heater TINYINT(1) NULL", 600);
+                Logfile.Log("ALTER TABLE OK");
+                }
+
+                if (!DBHelper.ColumnExists("charging", "battery_range_km"))
+                {
+                    Logfile.Log("ALTER TABLE charging ADD COLUMN battery_range_km DOUBLE NULL");
+                    DBHelper.ExecuteSQLQuery("ALTER TABLE charging ADD COLUMN battery_range_km DOUBLE NULL", 600);
+                }
+
+            InsertCarID_Column("charging");
+                }
+
+        private static void CheckDBSchema_car_version()
+                {
+            if (!DBHelper.TableExists("car_version"))
+            {
+                Logfile.Log("CREATE TABLE car_version (id int NOT NULL AUTO_INCREMENT, StartDate datetime NOT NULL, version varchar(50), PRIMARY KEY(id))");
+                DBHelper.ExecuteSQLQuery("CREATE TABLE car_version (id int NOT NULL AUTO_INCREMENT, StartDate datetime NOT NULL, version varchar(50), PRIMARY KEY(id))");
+                Logfile.Log("ALTER TABLE OK");
+                }
+
+                InsertCarID_Column("car_version");
+        }
+
+        private static void CheckDBSchema_cars()
+        {
                 if (!DBHelper.TableExists("cars"))
                 {
                     Logfile.Log("create table cars");
@@ -296,12 +714,13 @@ namespace TeslaLogger
                                 cmd.Parameters.AddWithValue("@tesla_name", ApplicationSettings.Default.TeslaName);
                                 cmd.Parameters.AddWithValue("@tesla_password", ApplicationSettings.Default.TeslaPasswort);
                                 cmd.Parameters.AddWithValue("@tesla_carid", ApplicationSettings.Default.Car);
-                                cmd.ExecuteNonQuery();
+                            SQLTracer.TraceNQ(cmd);
                             }
                         }
                     }
                     catch (Exception ex)
                     {
+                    ex.ToExceptionless().FirstCarUserID().Submit();
                         Logfile.Log(ex.ToString());
                     }
                 }
@@ -319,95 +738,10 @@ namespace TeslaLogger
                     DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD `freesuc` TINYINT UNSIGNED NOT NULL DEFAULT '0'", 600);
                 }
 
-                if (!DBHelper.IndexExists("can_ix2", "can"))
-                {
-                    Logfile.Log("alter table can add index can_ix2 (id,carid,datum)");
-                    DBHelper.ExecuteSQLQuery("alter table can add index can_ix2 (id,carid,datum)", 6000);
-                    Logfile.Log("ALTER TABLE OK");
-                }
-
-                if (!DBHelper.IndexExists("chargingsate_ix_pos", "chargingstate"))
-                {
-                    Logfile.Log("alter table chargingstate add index chargingsate_ix_pos (Pos)");
-                    DBHelper.ExecuteSQLQuery("alter table chargingstate add index chargingsate_ix_pos (Pos)", 6000);
-                    Logfile.Log("ALTER TABLE OK");
-                }
-
                 if (!DBHelper.ColumnExists("cars", "lastscanmytesla"))
                 {
                     Logfile.Log("ALTER TABLE cars ADD Column lastscanmytesla");
                     DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `lastscanmytesla` datetime NULL DEFAULT NULL", 600);
-                }
-
-                if (updateAllDrivestateData)
-                {
-                    DBHelper.UpdateAllDrivestateData();
-                }
-
-                if (!DBHelper.IndexExists("idx_pos_CarID_id", "pos"))
-                {
-                    Logfile.Log("alter table pos add index idx_pos_CarID_id (CarID, id)");      // used for: select max(id) from pos where CarID=?
-                    DBHelper.ExecuteSQLQuery("alter table pos add index idx_pos_CarID_id (CarID, id)", 600);
-                    Logfile.Log("ALTER TABLE OK");
-                }
-
-                if (!DBHelper.IndexExists("idx_pos_CarID_datum", "pos"))
-                {
-                    Logfile.Log("alter table pos add index idx_pos_CarID_datum (CarID, Datum)");
-                    DBHelper.ExecuteSQLQuery("alter table pos add index idx_pos_CarID_datum (CarID, Datum)", 600);
-                    Logfile.Log("ALTER TABLE OK");
-                }
-
-                if (DBHelper.IndexExists("idx_pos_datum", "pos"))
-                {
-                    Logfile.Log("alter table pos drop index if exists idx_pos_datum");
-                    DBHelper.ExecuteSQLQuery("alter table pos drop index if exists idx_pos_datum", 600);
-                    Logfile.Log("ALTER TABLE OK");
-                }
-
-                if (DBHelper.IndexExists("can_ix", "can"))
-                {
-                    Logfile.Log("alter table can drop index if exists can_ix");
-                    DBHelper.ExecuteSQLQuery("alter table can drop index if exists can_ix", 600);
-                    Logfile.Log("ALTER TABLE OK");
-                }
-
-                if (!DBHelper.IndexExists("IX_charging_carid_datum", "charging"))
-                {
-                    Logfile.Log("alter table charging add index IX_charging_carid_datum (CarId, Datum)");
-                    DBHelper.ExecuteSQLQuery("alter table charging add index IX_charging_carid_datum (CarId, Datum)", 600);
-                    Logfile.Log("ALTER TABLE OK");
-                }
-
-                if (!DBHelper.TableExists("superchargers"))
-                {
-                    string sql = @"
-CREATE TABLE superchargers(
-    id INT NOT NULL AUTO_INCREMENT,
-    name VARCHAR(250) NOT NULL,
-    lat DOUBLE NOT NULL,
-    lng DOUBLE NOT NULL,
-    PRIMARY KEY(id)
-)";
-                    Logfile.Log(sql);
-                    DBHelper.ExecuteSQLQuery(sql);
-                    Logfile.Log("CREATE TABLE OK");
-                }
-
-                if (!DBHelper.TableExists("superchargerstate"))
-                {
-                    string sql = @"
-CREATE TABLE superchargerstate(
-    id INT NOT NULL AUTO_INCREMENT,
-    nameid INT NOT NULL,
-    ts datetime NOT NULL,
-    available_stalls TINYINT NOT NULL,
-    total_stalls TINYINT NOT NULL,
-    PRIMARY KEY(id)
-)";
-                    Logfile.Log(sql);
-                    DBHelper.ExecuteSQLQuery(sql);
-                    Logfile.Log("CREATE TABLE OK");
                 }
 
                 if (!DBHelper.ColumnExists("cars", "refresh_token"))
@@ -428,44 +762,6 @@ CREATE TABLE superchargerstate(
                     DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `ABRP_mode` TINYINT(1) NULL DEFAULT 0", 600);
                 }
 
-                // check datetime precision in pos
-                try
-                {
-                    using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
-                    {
-                        con.Open();
-                        using (MySqlCommand cmd = new MySqlCommand("SELECT datetime_precision FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'pos' AND COLUMN_NAME = 'datum' and TABLE_SCHEMA = 'teslalogger'", con))
-                        {
-                            Tools.DebugLog(cmd);
-                            MySqlDataReader dr = cmd.ExecuteReader();
-                            if (dr.Read() && dr[0] != DBNull.Value)
-                            {
-                                if (int.TryParse(dr[0].ToString(), out int datetime_precision))
-                                {
-                                    if (datetime_precision != 3)
-                                    {
-                                        // update table
-                                        Logfile.Log("ALTER TABLE `pos` CHANGE `Datum` `Datum` DATETIME(3) NOT NULL;");
-                                        DBHelper.ExecuteSQLQuery(@"ALTER TABLE `pos` CHANGE `Datum` `Datum` DATETIME(3) NOT NULL;", 3000);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logfile.Log(ex.ToString());
-                }
-
-                if (!DBHelper.ColumnExists("chargingstate", "meter_vehicle_kwh_start"))
-                {
-                    string sql = "ALTER TABLE chargingstate ADD COLUMN meter_vehicle_kwh_start double NULL,  ADD COLUMN meter_vehicle_kwh_end double NULL, ADD COLUMN meter_utility_kwh_start double NULL, ADD COLUMN meter_utility_kwh_end double NULL, ADD COLUMN meter_utility_kwh_sum double NULL";
-                    Logfile.Log(sql); 
-                    DBHelper.ExecuteSQLQuery(sql, 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
-
                 if (!DBHelper.ColumnExists("cars", "meter_type"))
                 {
                     string sql = "ALTER TABLE cars ADD COLUMN meter_type varchar(20) NULL, ADD COLUMN meter_host varchar(50) NULL, ADD COLUMN meter_parameter varchar(200) NULL";
@@ -474,48 +770,22 @@ CREATE TABLE superchargerstate(
                     Logfile.Log("ALTER TABLE OK");
                 }
 
-                // end of schema update
-
-                if (!DBHelper.TableExists("trip") || !DBHelper.ColumnExists("trip", "outside_temp_avg"))
+            if (DBHelper.GetColumnType("cars", "tesla_token").Contains("varchar"))
                 {
-                    UpdateDBView();
-                }
-
-                DBHelper.Enable_utf8mb4();
-
-                DBHelper.EnableMothership();
-
-                CheckDBCharset();
-
-                DBHelper.UpdateHTTPStatusCodes();
-
-                Logfile.Log("DBUpdate finished.");
-
-                timer = new System.Threading.Timer(FileChecker, null, 10000, 5000);
-
-                Chmod("/var/www/html/admin/wallpapers", 777);
-
-                UpdatePHPini();
-                UpdateApacheConfig();
-                CreateEmptyWeatherIniFile();
-                CheckBackupCrontab();
-
-                DownloadUpdateAndInstall();
-
+                DBHelper.ExecuteSQLQuery("alter table cars modify tesla_token TEXT NULL", 120);
             }
-            catch (Exception ex)
-            {
-                Logfile.Log("Error in update: " + ex.ToString());
             }
-            finally
+
+        private static void CheckDBSchema_can()
             {
-                try
+            if (!DBHelper.TableExists("can"))
                 {
-                    _done = true;
-                    ComfortingMessages.Abort();
-                }
-                catch (Exception) { }
+                Logfile.Log("CREATE TABLE `can` (`datum` datetime NOT NULL, `id` mediumint NOT NULL, `val` double DEFAULT NULL, PRIMARY KEY(`datum`,`id`) ) ENGINE = InnoDB DEFAULT CHARSET = latin1;");
+                DBHelper.ExecuteSQLQuery("CREATE TABLE `can` (`datum` datetime NOT NULL, `id` mediumint NOT NULL, `val` double DEFAULT NULL, PRIMARY KEY(`datum`,`id`) ) ENGINE = InnoDB DEFAULT CHARSET = latin1;");
+                Logfile.Log("ALTER TABLE OK");
             }
+
+            InsertCarID_Column("can");
         }
 
         public static string UpdateApacheConfig(string path = "/etc/apache2/apache2.conf", bool write = true)
@@ -569,6 +839,7 @@ CREATE TABLE superchargerstate(
 
             File.AppendAllText("cmd_updated.txt", DateTime.Now.ToLongTimeString());
             Logfile.Log("Start update");
+            ExceptionlessClient.Default.CreateLog("Install", "Start update from " + Assembly.GetExecutingAssembly().GetName().Version).Submit();
 
             if (Tools.IsMono())
             {
@@ -577,34 +848,64 @@ CREATE TABLE superchargerstate(
                 Chmod("cmd_updated.txt", 666);
                 Chmod("MQTTClient.exe.config", 666);
 
-                if (!Tools.Exec_mono("git", "--version", false).Contains("git version"))
+                if (!File.Exists("NOBACKUPONUPDATE"))
                 {
-                    Tools.Exec_mono("apt-get", "-y install git");
-                    Tools.Exec_mono("git", "--version");
+                    Logfile.Log("Create backup");
+                    Tools.ExecMono("/bin/bash", "/etc/teslalogger/backup.sh");
                 }
 
-                if (!Tools.Exec_mono("optipng", "-version", false).Contains("OptiPNG version"))
+                if (!Tools.ExecMono("git", "--version", false).Contains("git version"))
                 {
-                    if (Tools.Exec_mono("apt-get", "-y install optipng", false).Contains("apt --fix-broken"))
+                    Tools.ExecMono("apt-get", "-y install git");
+                    Tools.ExecMono("git", "--version");
+                }
+
+                if (!File.Exists("/usr/bin/optipng") || !Tools.ExecMono("optipng", "-version", false).Contains("OptiPNG version"))
+                {
+                    Logfile.Log("Try to install optipng");
+                    ExceptionlessClient.Default.CreateLog("Install", "Try to install optipng", Exceptionless.Logging.LogLevel.Warn).Submit();
+
+                    if (Tools.ExecMono("apt-get", "-y install optipng", false).Contains("apt --fix-broken"))
                     {
                         Logfile.Log("Info: apt-get cannot install optipng");
                     }
                     else
                     {
-                        Tools.Exec_mono("optipng", "-version");
+                        string ret = Tools.ExecMono("optipng", "-version");
+                        if (ret == null)
+                            ret = "NULL";
+
+                        ExceptionlessClient.Default.CreateLog("Install", "optipng: "+ ret  , Exceptionless.Logging.LogLevel.Warn).Submit();
                     }
                 }
 
-                Tools.Exec_mono("rm", "-rf /etc/teslalogger/git/*");
+                Tools.ExecMono("rm", "-rf /etc/teslalogger/git/*");
 
-                Tools.Exec_mono("rm", "-rf /etc/teslalogger/git");
-                Tools.Exec_mono("mkdir", "/etc/teslalogger/git");
-                Tools.Exec_mono("cert-sync", "/etc/ssl/certs/ca-certificates.crt");
+                Tools.ExecMono("rm", "-rf /etc/teslalogger/git");
+                Tools.ExecMono("mkdir", "/etc/teslalogger/git");
+                Tools.ExecMono("cert-sync", "/etc/ssl/certs/ca-certificates.crt");
 
+                // run housekeeping to make sure there is enough free disk space
+
+                Tools.Housekeeping();
+
+                // download update package from github
                 // download update package from github
                 bool httpDownloadSuccessful = false;
                 bool zipExtractSuccessful = false;
-                    string GitHubURL = "https://gitlab.fritz.box/root/teslalogger/-/archive/master2/teslalogger-master2.zip";
+                string GitHubURL = "https://gitlab.fritz.box/root/teslalogger/-/archive/master2/teslalogger-master2.zip";
+                string master = "master";
+
+                if (File.Exists("BRANCH"))
+                {
+                    var branch = File.ReadAllText("BRANCH").Trim();
+                    Logfile.Log($"YOU ARE USING BRANCH: " + branch);
+
+                    GitHubURL = "https://gitlab.fritz.box/root/teslalogger/-/archive/" + branch + "/teslalogger-" + branch + ".zip";
+                    master = branch;
+                }
+
+
                 string updatepackage = "/etc/teslalogger/tmp/master.zip";
                 try
                 {
@@ -622,10 +923,13 @@ CREATE TABLE superchargerstate(
                         wc.DownloadFile(GitHubURL, updatepackage);
                         Logfile.Log($"update package downloaded to {updatepackage}");
                         httpDownloadSuccessful = true;
+
+                        ExceptionlessClient.Default.CreateLog("Install","Update Download successful").Submit();
                     }
                 }
                 catch (Exception ex)
                 {
+                    ex.ToExceptionless().FirstCarUserID().Submit();
                     Logfile.Log("Exception during download from github: " + ex.ToString());
                     Logfile.ExceptionWriter(ex, "Exception during download from github");
                 }
@@ -648,20 +952,23 @@ CREATE TABLE superchargerstate(
                             Logfile.Log($"unzip update package {updatepackage} to /etc/teslalogger/tmp/zip");
                             ZipFile.ExtractToDirectory(updatepackage, "/etc/teslalogger/tmp/zip");
                             // GitHub zip contains folder "TeslaLogger-master" so we have to move files around
-                            if (Directory.Exists("/etc/teslalogger/tmp/zip/TeslaLogger-master"))
+                            if (Directory.Exists("/etc/teslalogger/tmp/zip/TeslaLogger-" + master))
                             {
-                                Logfile.Log($"move update files from /etc/teslalogger/tmp/zip/TeslaLogger-master to /etc/teslalogger/git");
-                                Tools.Exec_mono("mv", "/etc/teslalogger/tmp/zip/TeslaLogger-master /etc/teslalogger/git");
+                                Logfile.Log($"move update files from /etc/teslalogger/tmp/zip/TeslaLogger-" + master + " to /etc/teslalogger/git");
+                                Tools.ExecMono("mv", "/etc/teslalogger/tmp/zip/TeslaLogger-" + master + " /etc/teslalogger/git");
                                 if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
                                 {
                                     Logfile.Log("update package: download and unzip successful");
                                     zipExtractSuccessful = true;
+
+                                    ExceptionlessClient.Default.CreateLog("Install", "Update Zip Extract Successful").FirstCarUserID().Submit();
                                 }
                             }
                         }
                     }
                     catch (Exception ex)
                     {
+                        ex.ToExceptionless().FirstCarUserID().Submit();
                         Logfile.Log("Exception during unzip of downloaded update package: " + ex.ToString());
                         Logfile.ExceptionWriter(ex, "Exception during unzip of downloaded update package");
                     }
@@ -673,7 +980,7 @@ CREATE TABLE superchargerstate(
                     for (int x = 1; x < 10; x++)
                     {
                         Logfile.Log("git clone: try " + x);
-                            Tools.Exec_mono("git", "clone --progress -b master2 https://gitlab.fritz.box/root/teslalogger.git /etc/teslalogger/git/", true, true);
+                            Tools.ExecMono("git", "clone --progress -b master2 https://gitlab.fritz.box/root/teslalogger.git /etc/teslalogger/git/", true, true);
 
                         if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
                         {
@@ -705,6 +1012,7 @@ CREATE TABLE superchargerstate(
                 }
                 catch (Exception ex)
                 {
+                    ex.ToExceptionless().FirstCarUserID().Submit();
                     Logfile.Log(ex.ToString());
                 }
 
@@ -716,14 +1024,18 @@ CREATE TABLE superchargerstate(
                 }
                 catch (Exception ex)
                 {
+                    ex.ToExceptionless().FirstCarUserID().Submit();
                     Logfile.Log(ex.ToString());
                 }
+
+                ExceptionlessClient.Default.CreateLog("Install", "Update finished!").FirstCarUserID().Submit();
+                ExceptionlessClient.Default.ProcessQueue();
 
                 Logfile.Log("End update");
 
                 Logfile.Log("Rebooting");
 
-                Tools.Exec_mono("reboot", "");
+                Tools.ExecMono("reboot", "");
             }
         }
 
@@ -747,6 +1059,7 @@ CREATE TABLE superchargerstate(
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -776,7 +1089,7 @@ CREATE TABLE superchargerstate(
                 DBHelper.ExecuteSQLQuery($"ALTER TABLE `{table}` ADD COLUMN `CarID` TINYINT NULL DEFAULT NULL", 6000);
                 DBHelper.ExecuteSQLQuery($"update {table} set CarID=1", 6000);
             }
-            if (DBHelper.GetColumnType(table, "CarID").Equals("int"))
+            if (DBHelper.GetColumnType(table, "CarID") == "int")
             {
                 Logfile.Log($"ALTER TABLE `{table}` MODIFY `CarID` TINYINT UNSIGNED");
                 DBHelper.ExecuteSQLQuery($"ALTER TABLE `{table}` MODIFY `CarID` TINYINT UNSIGNED", 6000);
@@ -792,7 +1105,7 @@ CREATE TABLE superchargerstate(
                     con.Open();
                     using (MySqlCommand cmd = new MySqlCommand("SELECT default_character_set_name FROM information_schema.SCHEMATA WHERE schema_name = 'teslalogger'; ", con))
                     {
-                        MySqlDataReader dr = cmd.ExecuteReader();
+                        MySqlDataReader dr = SQLTracer.TraceDR(cmd);
                         if (dr.Read())
                         {
                             string charset = dr[0].ToString();
@@ -801,10 +1114,10 @@ CREATE TABLE superchargerstate(
                             {
                                 dr.Close();
 
-                                Logfile.Log("Chage database charset to utf8mb4");
+                                Logfile.Log("Change database charset to utf8mb4");
                                 using (var cmd2 = new MySqlCommand("ALTER DATABASE teslalogger CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci", con))
                                 {
-                                    cmd2.ExecuteNonQuery();
+                                    SQLTracer.TraceNQ(cmd2);
                                 }
                             }
                         }
@@ -813,6 +1126,7 @@ CREATE TABLE superchargerstate(
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -822,9 +1136,13 @@ CREATE TABLE superchargerstate(
             try
             {
                 string phpinipath = "/etc/php/7.0/apache2/php.ini";
+
+                if (!File.Exists(phpinipath))
+                    phpinipath = "/etc/php/7.3/apache2/php.ini";
+
                 if (File.Exists(phpinipath))
                 {
-                    string phpini = File.ReadAllText("/etc/php/7.0/apache2/php.ini");
+                    string phpini = File.ReadAllText(phpinipath);
                     string newphpini = Regex.Replace(phpini, "(post_max_size\\s*=)(.*)", "$1 150M");
                     newphpini = Regex.Replace(newphpini, "(upload_max_filesize\\s*=)(.*)", "$1 150M");
 
@@ -838,6 +1156,7 @@ CREATE TABLE superchargerstate(
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -875,7 +1194,7 @@ CREATE TABLE superchargerstate(
 
                 if (!shareDataOnStartup && Tools.IsShareData())
                 {
-                    foreach (Car c in Car.allcars)
+                    foreach (Car c in Car.Allcars)
                     {
                         shareDataOnStartup = true;
                         Logfile.Log("ShareData turned on!");
@@ -889,15 +1208,16 @@ CREATE TABLE superchargerstate(
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
 
-        private static void UpdateDBView()
+        private static void UpdateDBViews()
         {
             try
             {
-                Logfile.Log("update view: trip");
+                Logfile.Log("UpdateDBViews: trip");
                 DBHelper.ExecuteSQLQuery("DROP VIEW IF EXISTS `trip`");
                 string s = DBViews.Trip;
 
@@ -911,9 +1231,16 @@ CREATE TABLE superchargerstate(
                 File.WriteAllText("view_trip.txt", s);
 
                 DBHelper.ExecuteSQLQuery(s, 300);
+
+                ExceptionlessClient.Default.CreateFeatureUsage("Language_" + language).FirstCarUserID().Submit();
+                ExceptionlessClient.Default.CreateFeatureUsage("Power_" + power).FirstCarUserID().Submit();
+                ExceptionlessClient.Default.CreateFeatureUsage("Temperature_" + temperature).FirstCarUserID().Submit();
+                ExceptionlessClient.Default.CreateFeatureUsage("Length_" + length).FirstCarUserID().Submit();
+                ExceptionlessClient.Default.CreateFeatureUsage("Range_" + Range).FirstCarUserID().Submit();
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -940,7 +1267,7 @@ CREATE TABLE superchargerstate(
                             continue;
                         }
 
-                        if (line.StartsWith("#"))
+                        if (line.StartsWith("#", StringComparison.Ordinal))
                         {
                             continue;
                         }
@@ -950,7 +1277,7 @@ CREATE TABLE superchargerstate(
                             continue;
                         }
 
-                        int pos = line.IndexOf("=");
+                        int pos = line.IndexOf("=", StringComparison.Ordinal);
                         string key = line.Substring(0, pos).Trim();
                         string value = line.Substring(pos + 1);
 
@@ -958,7 +1285,7 @@ CREATE TABLE superchargerstate(
 
                         if (ht.ContainsKey(key))
                         {
-                            Logfile.Log($"Error Key '{key}' already in Dictionary!!!");
+                            Logfile.Log($"INFO: Key '{key}' already in Language Dictionary!");
                             continue;
                         }
 
@@ -974,6 +1301,7 @@ CREATE TABLE superchargerstate(
                 }
                 catch (Exception ex)
                 {
+                    ex.ToExceptionless().FirstCarUserID().Submit();
                     Logfile.Log(ex.Message);
                     Logfile.ExceptionWriter(ex, content);
                 }
@@ -1001,59 +1329,28 @@ CREATE TABLE superchargerstate(
 
                     Logfile.Log("Start Grafana update");
 
-                    string GrafanaVersion = Tools.GetGrafanaVersion();
-                    if (GrafanaVersion == "5.5.0-d3b39f39pre1" || GrafanaVersion == "6.3.5" || GrafanaVersion == "6.7.3")
-                    {
-                        Thread threadGrafanaUpdate = new Thread(() =>
-                        {
-                            string GrafanaFilename = "grafana_7.2.0_armhf.deb";
-
-                            Logfile.Log("upgrade Grafana to 7.2.0!");
-
-                            if (File.Exists(GrafanaFilename))
-                                File.Delete(GrafanaFilename);
-
-                            // use internal downloader
-                            const string grafanaUrl = "https://dl.grafana.com/oss/release/grafana_7.2.0_armhf.deb";
-                            const string grafanaFile = "grafana_7.2.0_armhf.deb";
-                            if (!Tools.DownloadToFile(grafanaUrl, grafanaFile, 300, true).Result)
+                    if (!Tools.IsDocker())
                             {
-                                // fallback to wget
-                                Logfile.Log($"fallback o wget to download {grafanaUrl}");
-                                Tools.Exec_mono("wget", $"{grafanaUrl}  --show-progress");
+                        AllowUnsignedPlugins("/etc/grafana/grafana.ini", true);
                             }
 
-                            if (File.Exists(GrafanaFilename))
-                            {
-                                Logfile.Log(GrafanaFilename + " Sucessfully Downloaded -  Size:" + new FileInfo(GrafanaFilename).Length);
-
-                                if (GrafanaVersion == "6.7.3") // first Raspberry PI4 install
-                                    Tools.Exec_mono("dpkg", "-r grafana-rpi");
-
-                                Tools.Exec_mono("dpkg", "-i --force-overwrite grafana_7.2.0_armhf.deb");
-                            }
-
-                            Logfile.Log("upgrade Grafana DONE!");
-
-                            Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"), new DirectoryInfo("/var/lib/grafana/plugins"));
-                        })
-                        {
-                            Name = "GrafanaUpdate"
-                        };
-                        threadGrafanaUpdate.Start();
-                    }
+                    UpdateGrafanaVersion();
 
                     // TODO Logfile.Log(" Wh/TR km: " + wh.car.Wh_TR);
 
-                    Tools.Exec_mono("rm", "-rf /etc/teslalogger/tmp/*");
-                    Tools.Exec_mono("rm", "-rf /etc/teslalogger/tmp");
+                    Tools.ExecMono("rm", "-rf /etc/teslalogger/tmp/*");
+                    Tools.ExecMono("rm", "-rf /etc/teslalogger/tmp");
 
-                    Tools.Exec_mono("mkdir", "/etc/teslalogger/tmp");
-                    Tools.Exec_mono("mkdir", "/etc/teslalogger/tmp/Grafana");
+                    Tools.ExecMono("mkdir", "/etc/teslalogger/tmp");
+                    Tools.ExecMono("mkdir", "/etc/teslalogger/tmp/Grafana");
 
                     bool useNewTrackmapPanel = Directory.Exists("/var/lib/grafana/plugins/pR0Ps-grafana-trackmap-panel");
 
-                    UpdateDBView();
+                    var DatasourceUID = "000000001";
+                    if (Tools.IsDocker())
+                        DatasourceUID = "PC0C98BF192F75B00";
+
+                    UpdateDBViews();
 
                     List<String> dashboardlinks = new List<String>();
 
@@ -1067,7 +1364,7 @@ CREATE TABLE superchargerstate(
 
                         if (Range == "RR")
                         {
-                            if (!(f.EndsWith("Akku Trips.json") || f.EndsWith("Speed Consumption.json")))
+                            if (!(f.EndsWith("Akku Trips.json", StringComparison.Ordinal) || f.EndsWith("Speed Consumption.json", StringComparison.Ordinal)))
                             {
                                 s = s.Replace("ideal_battery_range_km", "battery_range_km");
                             }
@@ -1077,11 +1374,11 @@ CREATE TABLE superchargerstate(
                         {
                             //Logfile.Log("Convert to kw");
 
-                            if (f.EndsWith("Verbrauch.json"))
+                            if (f.EndsWith("Verbrauch.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace("power as 'Leistung [PS]'", "power/1.35962 as 'Leistung [kW]'");
                             }
-                            else if (f.EndsWith("Trip.json"))
+                            else if (f.EndsWith("Trip.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace("max PS", "max kW");
                                 s = s.Replace("min PS", "min kW");
@@ -1097,17 +1394,17 @@ CREATE TABLE superchargerstate(
                         {
                             //Logfile.Log("Convert to fahrenheit");
 
-                            if (f.EndsWith("Laden.json"))
+                            if (f.EndsWith("Laden.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace("outside_temp as 'Außentemperatur [°C]'", "outside_temp * 9/5 + 32 as 'Außentemperatur [°F]'");
                             }
-                            else if (f.EndsWith("Trip.json"))
+                            else if (f.EndsWith("Trip.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace("Ø °C", "Ø °F");
 
                                 s = s.Replace(" outside_temp_avg", "outside_temp_avg * 9/5 + 32 as outside_temp_avg");
                             }
-                            else if (f.EndsWith("Verbrauch.json"))
+                            else if (f.EndsWith("Verbrauch.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace("outside_temp as 'Außentemperatur [°C]'", "outside_temp * 9/5 + 32 as 'Außentemperatur [°F]'");
                             }
@@ -1117,7 +1414,7 @@ CREATE TABLE superchargerstate(
                         {
                             //Logfile.Log("Convert to mile");
 
-                            if (f.EndsWith("Akku Trips.json"))
+                            if (f.EndsWith("Akku Trips.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace("Start km", "Start mi");
                                 s = s.Replace("End km", "End mi");
@@ -1130,7 +1427,7 @@ CREATE TABLE superchargerstate(
 
                                 s = s.Replace("\"unit\": \"lengthkm\"", "\"unit\": \"lengthmi\"");
                             }
-                            else if (f.EndsWith("Degradation.json"))
+                            else if (f.EndsWith("Degradation.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace(" as 'Maximalreichweite [km]'", " / 1.609 as 'Maximalreichweite [mi]'");
                                 s = s.Replace(" AS 'Max. Reichweite (Monatsmittel) [km]'", " / 1.609 AS 'Max. Reichweite (Monatsmittel) [mi]'");
@@ -1138,13 +1435,13 @@ CREATE TABLE superchargerstate(
                                 s = s.Replace("km Stand [km]", "mi Stand [mi]");
 
                             }
-                            else if (f.EndsWith("Laden.json"))
+                            else if (f.EndsWith("Laden.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace(" as 'Reichweite [km]',", " / 1.609 as 'Reichweite [mi]',");
 
                                 s = s.Replace("Reichweite [km]", "Reichweite [mi]");
                             }
-                            else if (f.EndsWith("Trip.json"))
+                            else if (f.EndsWith("Trip.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace(" speed_max,", "speed_max / 1.609 as speed_max,");
                                 s = s.Replace(" avg_consumption_kWh_100km,", " avg_consumption_kWh_100km * 1.609 as avg_consumption_kWh_100km,");
@@ -1156,7 +1453,7 @@ CREATE TABLE superchargerstate(
                                 s = s.Replace("\"Ø km/h\"", "\"Ø mph\"");
                                 s = s.Replace("\"km\"", "\"mi\"");
                             }
-                            else if (f.EndsWith("Vampir Drain.json"))
+                            else if (f.EndsWith("Vampir Drain.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace(" TP2.odometer,", " TP2.odometer / 1.609 as odometer,");
                                 s = s.Replace("ideal_battery_range_km ", "ideal_battery_range_km / 1.609 ");
@@ -1167,18 +1464,18 @@ CREATE TABLE superchargerstate(
                                 s = s.Replace("\"TR km Verlust\"", "\"TR mi Verlust\"");
                                 s = s.Replace("\"TR km Verlust pro Stunde\"", "\"TR mi Verlust pro Stunde\"");
                             }
-                            else if (f.EndsWith("Vampir Drain Monatsstatistik.json"))
+                            else if (f.EndsWith("Vampir Drain Monatsstatistik.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace(" as RangeLost", " / 1.609 as RangeLost");
 
                                 s = s.Replace("TR km Verlust", "TR mi Verlust");
                             }
-                            else if (f.EndsWith("Verbrauch.json"))
+                            else if (f.EndsWith("Verbrauch.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace(" speed as 'Geschwindigkeit [km/h]'", " speed / 1.609 as 'Geschwindigkeit [mph]'");
                                 s = s.Replace(" ideal_battery_range_km as 'Reichweite [km]'", " ideal_battery_range_km / 1.609 as 'Reichweite [mi]'");
                             }
-                            else if (f.EndsWith("Ladehistorie.json"))
+                            else if (f.EndsWith("Ladehistorie.json", StringComparison.Ordinal))
                             {
                                 s = s.Replace("ideal_battery_range_km ", "ideal_battery_range_km / 1.609 ");
 
@@ -1192,33 +1489,34 @@ CREATE TABLE superchargerstate(
                             Logfile.Log("Convert to language: " + language);
 
                             s = ReplaceAliasTags(s, dictLanguage);
+                            s = ReplaceValuesTags(s, dictLanguage);
 
-                            if (f.EndsWith("Akku Trips.json"))
+                            if (f.EndsWith("Akku Trips.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Akku Trips", dictLanguage);
                                 s = ReplaceLanguageTags(s, new string[] {
                                     "AVG Max Range","AVG Consumption","AVG Trip Days","AVG SOC Diff"
                                 }, dictLanguage, true);
                             }
-                            else if (f.EndsWith("Degradation.json"))
+                            else if (f.EndsWith("Degradation.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Degradation", dictLanguage);
                                 s = ReplaceLanguageTags(s, new string[] {
-                                    "Maximalreichweite[km]", "Maximalreichweite [mi]","mi Stand [mi]","km Stand [km]","Max. Reichweite (Monatsmittel) [km]","Max. Reichweite (Monatsmittel) [mi]"
+                                    "Maximalreichweite [km]", "Maximalreichweite [mi]","mi Stand [mi]","km Stand [km]","Max. Reichweite (Monatsmittel) [km]","Max. Reichweite (Monatsmittel) [mi]"
                                 }, dictLanguage, true);
                             }
-                            else if (f.EndsWith("Firmware.json"))
+                            else if (f.EndsWith("Firmware.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Degradation", dictLanguage);
                                 s = ReplaceLanguageTags(s, new string[] {
                                     "Firmware","Date Installed","Days since previous update","Min Days Between Updates","AVG Days Between Updates","Max Days Between Updates"
                                 }, dictLanguage, true);
                             }
-                            else if (f.EndsWith("Ladehistorie.json"))
+                            else if (f.EndsWith("Ladehistorie.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Ladehistorie", dictLanguage);
                             }
-                            else if (f.EndsWith("Laden.json"))
+                            else if (f.EndsWith("Laden.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Laden", dictLanguage);
 
@@ -1228,30 +1526,30 @@ CREATE TABLE superchargerstate(
                                     "Angefordert [A]", "Pilot [A]", "Zelltemperatur [°C]", "Zelltemperatur [°F]"
                                 }, dictLanguage, true);
                             }
-                            else if (f.EndsWith("Speed Consumption.json"))
+                            else if (f.EndsWith("Speed Consumption.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Speed Consumption", dictLanguage);
                             }
-                            else if (f.EndsWith("Status.json"))
+                            else if (f.EndsWith("Status.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Status", dictLanguage);
                                 s = ReplaceLanguageTags(s, new string[] {
                                     "Current Status","SOC","Reichweite","Außentemperatur","Zelltemperatur","km Stand","Firmware","Nur verfügbar mit ScanMyTesla","N/A","Asleep","Online","Offline","Waking","Driving","Charging"
                                 }, dictLanguage, true);
                             }
-                            else if (f.EndsWith("Trip.json"))
+                            else if (f.EndsWith("Trip.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Trip", dictLanguage);
                             }
-                            else if (f.EndsWith("Vampir Drain.json"))
+                            else if (f.EndsWith("Vampir Drain.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Vampir Drain", dictLanguage);
                             }
-                            else if (f.EndsWith("Vampir Drain Monatsstatistik.json"))
+                            else if (f.EndsWith("Vampir Drain Monatsstatistik.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Vampir Drain Monatsstatistik", dictLanguage);
                             }
-                            else if (f.EndsWith("Verbrauch.json"))
+                            else if (f.EndsWith("Verbrauch.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Verbrauch", dictLanguage);
 
@@ -1265,61 +1563,61 @@ CREATE TABLE superchargerstate(
                                     "Außentemperatur [°C]", "Außentemperatur [°F]", "Höhe [m]","Innentemperatur [°C]","Innentemperatur [°F]"
                                 }, dictLanguage, true);
                             }
-                            else if (f.EndsWith("Verbrauchsstatstik.json"))
+                            else if (f.EndsWith("Verbrauchsstatstik.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Verbrauchsstatistik", dictLanguage);
                                 s = ReplaceLanguageTags(s, new string[] {
                                     "km Stand[km]","mi Stand [mi]","Verbrauch Monatsmittel [kWh]","Außentemperatur Monatsmittel [°C]","Außentemperatur Monatsmittel [°F]","Verbrauch Tagesmittel [kWh]","Außentemperatur Tagesmittel [°C]", "Außentemperatur Tagesmittel [°F]"
                                 }, dictLanguage, true);
                             }
-                            else if (f.EndsWith("Visited.json"))
+                            else if (f.EndsWith("Visited.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Visited", dictLanguage);
                             }
-                            else if (f.EndsWith("km Stand.json"))
+                            else if (f.EndsWith("km Stand.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "km Stand", dictLanguage);
                                 s = ReplaceLanguageTags(s, new string[] {
                                     "km Stand [km]"
                                 }, dictLanguage, true);
                             }
-                            else if (f.EndsWith("Ladestatistik.json"))
+                            else if (f.EndsWith("Ladestatistik.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Ladestatistik", dictLanguage);
                             }
-                            else if (f.EndsWith("SOC Ladestatistik.json"))
+                            else if (f.EndsWith("SOC Ladestatistik.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "SOC Ladestatistik", dictLanguage);
                             }
-                            else if (f.EndsWith("Zellspannungen 01-20 - ScanMyTesla.json"))
+                            else if (f.EndsWith("Zellspannungen 01-20 - ScanMyTesla.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Zellspannungen 01-20 - ScanMyTesla", dictLanguage);
                             }
-                            else if (f.EndsWith("Zellspannungen 21-40 - ScanMyTesla.json"))
+                            else if (f.EndsWith("Zellspannungen 21-40 - ScanMyTesla.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Zellspannungen 21-40 - ScanMyTesla", dictLanguage);
                             }
-                            else if (f.EndsWith("Zellspannungen 41-60 - ScanMyTesla.json"))
+                            else if (f.EndsWith("Zellspannungen 41-60 - ScanMyTesla.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Zellspannungen 41-60 - ScanMyTesla", dictLanguage);
                             }
-                            else if (f.EndsWith("Zellspannungen 61-80 - ScanMyTesla.json"))
+                            else if (f.EndsWith("Zellspannungen 61-80 - ScanMyTesla.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Zellspannungen 61-80 - ScanMyTesla", dictLanguage);
                             }
-                            else if (f.EndsWith("Zellspannungen 81-99 - ScanMyTesla.json"))
+                            else if (f.EndsWith("Zellspannungen 81-99 - ScanMyTesla.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Zellspannungen 81-99 - ScanMyTesla", dictLanguage);
                             }
-                            else if (f.EndsWith("SOC Ladestatistik.json"))
+                            else if (f.EndsWith("SOC Ladestatistik.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "SOC Ladestatistik", dictLanguage);
                             }
-                            else if (f.EndsWith("Trip Monatsstatistik.json"))
+                            else if (f.EndsWith("Trip Monatsstatistik.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Trip Monatsstatistik", dictLanguage);
                             }
-                            else if (f.EndsWith("Alle Verbräuche -ScanMyTesla.json"))
+                            else if (f.EndsWith("Alle Verbräuche -ScanMyTesla.json", StringComparison.Ordinal))
                             {
                                 s = ReplaceTitleTag(s, "Alle Verbräuche - ScanMyTesla", dictLanguage);
                                 s = ReplaceLanguageTags(s, new string[] {
@@ -1335,7 +1633,7 @@ CREATE TABLE superchargerstate(
                         if (URL_Admin.Length > 0)
                         {
                             string temp_URL = URL_Admin;
-                            if (!temp_URL.EndsWith("/"))
+                            if (!temp_URL.EndsWith("/", StringComparison.Ordinal))
                             {
                                 temp_URL += "/";
                             }
@@ -1347,7 +1645,7 @@ CREATE TABLE superchargerstate(
                         {
                             s = s.Replace("grafana-trackmap-panel", "pr0ps-trackmap-panel");
                         }
-                        
+
                         string title, uid, link;
                         GrafanaGetTitleAndLink(s, URL_Grafana, out title, out uid, out link);
 
@@ -1355,7 +1653,9 @@ CREATE TABLE superchargerstate(
                         dictLanguage.TryGetValue("Car", out carLabel);
 
                         s = UpdateDefaultCar(s, defaultcar, defaultcarid, carLabel);
-                        
+
+                        s = UpdateDatasourceUID(s, DatasourceUID);
+
                         if (!title.Contains("ScanMyTesla") && !title.Contains("Zelltemperaturen") && !title.Contains("SOC ") && !title.Contains("Chargertype") && !title.Contains("Mothership"))
                             dashboardlinks.Add(title + "|" + link);
 
@@ -1373,6 +1673,7 @@ CREATE TABLE superchargerstate(
                     }
                     catch (Exception ex)
                     {
+                        ex.ToExceptionless().FirstCarUserID().Submit();
                         Logfile.Log(ex.ToString());
                     }
 
@@ -1380,7 +1681,8 @@ CREATE TABLE superchargerstate(
 
                     if (!Tools.IsDocker())
                     {
-                        Tools.Exec_mono("service", "grafana-server restart");
+                        Tools.ExecMono("grafana-cli", "admin data-migration encrypt-datasource-passwords");
+                        Tools.ExecMono("service", "grafana-server restart");
                     }
 
                     CopyLanguageFileToTimelinePanel(language);
@@ -1390,6 +1692,7 @@ CREATE TABLE superchargerstate(
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
             finally
@@ -1398,23 +1701,138 @@ CREATE TABLE superchargerstate(
             }
         }
 
+        internal static string UpdateDatasourceUID(string s, string v)
+        {
+            string pattern = "(\\\"datasource\\\":\\s+{\\s+\\\"type\\\":\\s+\\\"mysql\\\",\\s+\\\"uid\\\":\\s+\\\")(.*?)(\\\")";
+            Regex r = new Regex(pattern, RegexOptions.Compiled | RegexOptions.Singleline);
+            var m = r.Match(s);
+            if (!m.Success)
+            {
+                // Logfile.Log("datasource not found!!!");
+                return s;
+            }
+
+            s = r.Replace(s, "${1}" + v + "${3}");
+
+            return s;
+        }
+
+        private static void UpdateGrafanaVersion()
+        {
+            string newversion = "8.3.2";
+
+            string GrafanaVersion = Tools.GetGrafanaVersion();
+            if (GrafanaVersion == "5.5.0-d3b39f39pre1" || GrafanaVersion == "6.3.5" || GrafanaVersion == "6.7.3" || GrafanaVersion == "7.2.0" || GrafanaVersion == "8.3.1")
+            {
+                Thread threadGrafanaUpdate = new Thread(() =>
+                {
+                    string GrafanaFilename = $"grafana_{newversion}_armhf.deb";
+
+                    Logfile.Log($"upgrade Grafana to {newversion}!");
+
+                    if (File.Exists(GrafanaFilename))
+                        File.Delete(GrafanaFilename);
+
+                    // use internal downloader
+                    string grafanaUrl = "https://dl.grafana.com/oss/release/grafana_" + newversion + "_armhf.deb";
+                    string grafanaFile = $"grafana_{newversion}_armhf.deb";
+                    if (!Tools.DownloadToFile(grafanaUrl, grafanaFile, 300, true).Result)
+                    {
+                        // fallback to wget
+                        Logfile.Log($"fallback o wget to download {grafanaUrl}");
+                        Tools.ExecMono("wget", $"{grafanaUrl}  --show-progress");
+                    }
+
+                    if (File.Exists(GrafanaFilename))
+                    {
+                        Logfile.Log(GrafanaFilename + " Sucessfully Downloaded -  Size:" + new FileInfo(GrafanaFilename).Length);
+
+                        if (GrafanaVersion == "6.7.3") // first Raspberry PI4 install
+                            Tools.ExecMono("dpkg", "-r grafana-rpi");
+
+                        Tools.ExecMono("dpkg", $"-i --force-overwrite grafana_{newversion}_armhf.deb");
+                    }
+
+                    Logfile.Log("upgrade Grafana DONE!");
+
+                    Tools.CopyFilesRecursively(new DirectoryInfo("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"), new DirectoryInfo("/var/lib/grafana/plugins"));
+                })
+                {
+                    Name = "GrafanaUpdate"
+                };
+                threadGrafanaUpdate.Start();
+            }
+        }
+
+        internal static string AllowUnsignedPlugins(string path, bool overwrite)
+        {
+            try
+            {
+                Logfile.Log("Start Grafana.ini -> AllowUnsignedPlugins");
+
+                var content = File.ReadAllText(path);
+                if (content.Contains("[plugins]"))
+                {
+                    if (!content.Contains("allow_loading_unsigned_plugins"))
+                    {
+                        Logfile.Log("Grafana.ini -> AllowUnsignedPlugins with [plugin] section");
+                        content = content.Replace("[plugins]", "[plugins]\r\nallow_loading_unsigned_plugins=natel-discrete-panel,pr0ps-trackmap-panel,teslalogger-timeline-panel\r\n");
+                        if (overwrite)
+                        {
+                            File.WriteAllText(path, content);
+                            Logfile.Log("Grafana.ini -> AllowUnsignedPlugins - Write File");
+                        }
+                        return content;
+                    }
+
+                    Logfile.Log("Grafana.ini -> AllowUnsignedPlugins - Plugins Section available");
+                    return content;
+                }
+
+                if (content.Contains("allow_loading_unsigned_plugins"))
+                {
+                    Logfile.Log("Grafana.ini -> AllowUnsignedPlugins - allow_loading_unsigned_plugins available");
+                    return content;
+                }
+
+                Logfile.Log("Grafana.ini -> AllowUnsignedPlugins");
+
+                content += "[plugins]\r\nallow_loading_unsigned_plugins=natel-discrete-panel,pr0ps-trackmap-panel,teslalogger-timeline-panel\r\n";
+
+                if (overwrite)
+                {
+                    File.WriteAllText(path, content);
+                    Logfile.Log("Grafana.ini -> AllowUnsignedPlugins - Write File");
+                }
+                return content;
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                Logfile.Log(ex.ToString());
+            }
+
+            return "";
+        }
+
         private static void CopyLanguageFileToTimelinePanel(string language)
         {
-                    try
-                    {
-                        string languageFilepath = GetLanguageFilepath(language);
-                        if (File.Exists(languageFilepath))
-                        {
-                            string dst = "/var/lib/grafana/plugins/teslalogger-timeline-panel/dist/language.txt";
-                            Logfile.Log("Copy " + languageFilepath + " to " + dst);
-                            File.Copy(languageFilepath, dst, true);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Logfile.Log(ex.ToString());
-                    }
+            try
+            {
+                string languageFilepath = GetLanguageFilepath(language);
+                if (File.Exists(languageFilepath))
+                {
+                    string dst = "/var/lib/grafana/plugins/teslalogger-timeline-panel/dist/language.txt";
+                    Logfile.Log("Copy " + languageFilepath + " to " + dst);
+                    File.Copy(languageFilepath, dst, true);
                 }
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                Logfile.Log(ex.ToString());
+            }
+        }
 
         private static void CopySettingsToTimelinePanel()
         {
@@ -1430,6 +1848,7 @@ CREATE TABLE superchargerstate(
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -1448,6 +1867,7 @@ CREATE TABLE superchargerstate(
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
             return s;
@@ -1460,19 +1880,44 @@ CREATE TABLE superchargerstate(
             link = "";
             try
             {
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                dynamic j = JsonConvert.DeserializeObject(json);
                 title = j["title"];
                 uid = j["uid"];
 
-                if (!URL_Grafana.EndsWith("/"))
+                if (!URL_Grafana.EndsWith("/", StringComparison.Ordinal))
+                {
                     URL_Grafana += "/";
+                }
 
                 link = URL_Grafana + "d/" + uid + "/" + title;
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.ExceptionWriter(ex, "");
             }
+        }
+
+        internal static string ReplaceValuesTags(string content, Dictionary<string, string> dictLanguage)
+        {
+            try
+            {
+                Regex regexAlias = new Regex("\\\"value\\\":.*?\\\"(.+)\\\"");
+
+                MatchCollection matches = regexAlias.Matches(content);
+
+                foreach (Match match in matches)
+                {
+                    content = ReplaceValueTag(content, match.Groups[1].Value, dictLanguage);
+                }
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                Logfile.Log(ex.ToString());
+            }
+
+            return content;
         }
 
         private static string ReplaceAliasTags(string content, Dictionary<string, string> dictLanguage)
@@ -1490,6 +1935,7 @@ CREATE TABLE superchargerstate(
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 
@@ -1506,6 +1952,20 @@ CREATE TABLE superchargerstate(
 
             Regex regexAlias = new Regex("\\\"alias\\\":.*?\\\"" + v + "\\\"");
             string replace = "\"alias\": \"" + dictLanguage[v] + "\"";
+
+            return regexAlias.Replace(content, replace);
+        }
+
+        private static string ReplaceValueTag(string content, string v, Dictionary<string, string> dictLanguage)
+        {
+            if (!dictLanguage.ContainsKey(v))
+            {
+                Logfile.Log("Key '" + v + "' not Found in Translationfile!");
+                return content;
+            }
+
+            Regex regexAlias = new Regex("\\\"value\\\":.*?\\\"" + v + "\\\"");
+            string replace = "\"value\": \"" + dictLanguage[v] + "\"";
 
             return regexAlias.Replace(content, replace);
         }
@@ -1595,6 +2055,7 @@ CREATE TABLE superchargerstate(
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log("chmod " + filename + " " + ex.Message);
             }
         }
@@ -1603,9 +2064,9 @@ CREATE TABLE superchargerstate(
         {
             try
             {
-                for (int x = 0; x < Car.allcars.Count; x++)
+                for (int x = 0; x < Car.Allcars.Count; x++)
                 {
-                    Car c = Car.allcars[x];
+                    Car c = Car.Allcars[x];
                     if (c.GetCurrentState() == Car.TeslaState.Charge || c.GetCurrentState() == Car.TeslaState.Drive)
                         return;
                 }
@@ -1655,7 +2116,7 @@ CREATE TABLE superchargerstate(
                         else
                         {
                             Logfile.Log("Rebooting");
-                            Tools.Exec_mono("reboot", "");
+                            Tools.ExecMono("reboot", "");
                         }
                     }
                     else
@@ -1668,6 +2129,7 @@ CREATE TABLE superchargerstate(
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }

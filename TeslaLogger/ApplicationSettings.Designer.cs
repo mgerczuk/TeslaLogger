@@ -133,7 +133,8 @@ namespace TeslaLogger {
         
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("curl/2.7")]
+        [global::System.Configuration.DefaultSettingValueAttribute("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/93.0.4577.63 Safari/537.36")]
         public string UserAgent {
             get {
                 return ((string)(this["UserAgent"]));
@@ -146,6 +147,33 @@ namespace TeslaLogger {
         public bool VerboseMode {
             get {
                 return ((bool)(this["VerboseMode"]));
+            }
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("http://home.pogea.de:5002")]
+        public string ExceptionlessServerUrl {
+            get {
+                return ((string)(this["ExceptionlessServerUrl"]));
+            }
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool SQLTrace {
+            get {
+                return ((bool)(this["SQLTrace"]));
+            }
+        }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Fr6JebtLWFka4nFwGXSkZAYEXIKCXn6AYGJb1mzt")]
+        public string ExceptionlessApiKey {
+            get {
+                return ((string)(this["ExceptionlessApiKey"]));
             }
         }
     }

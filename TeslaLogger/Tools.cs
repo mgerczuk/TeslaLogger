@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.SqlClient;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -14,16 +13,21 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web.Script.Serialization;
+using System.Web;
+
 using MySql.Data.MySqlClient;
+using Exceptionless;
+using Newtonsoft.Json;
 
 namespace TeslaLogger
 {
-    public class Tools
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1303:Literale nicht als lokalisierte Parameter übergeben", Justification = "<Pending>")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
+    public static class Tools
     {
 
-        public static System.Globalization.CultureInfo ciEnUS = new System.Globalization.CultureInfo("en-US");
-        public static System.Globalization.CultureInfo ciDeDE = new System.Globalization.CultureInfo("de-DE");
+        public static readonly System.Globalization.CultureInfo ciEnUS = new System.Globalization.CultureInfo("en-US");
+        public static readonly System.Globalization.CultureInfo ciDeDE = new System.Globalization.CultureInfo("de-DE");
         private static int _startSleepingHour = -1;
         private static int _startSleepingMinutes = -1;
         private static string _power = "hp";
@@ -35,9 +39,9 @@ namespace TeslaLogger
         private static string _Range = "IR";
         private static string _defaultcar = "";
         private static string _defaultcarid = "";
-        public static DateTime lastGrafanaSettings = DateTime.UtcNow.AddDays(-1);
-        private static DateTime lastSleepingHourMinutsUpdated = DateTime.UtcNow.AddDays(-1);
-        public static bool? _StreamingPos = null;
+        internal static DateTime lastGrafanaSettings = DateTime.UtcNow.AddDays(-1);
+        internal static DateTime lastSleepingHourMinutsUpdated = DateTime.UtcNow.AddDays(-1);
+        internal static bool? _StreamingPos = null;
 
         internal static bool UseNearbySuCService()
         {
@@ -51,7 +55,7 @@ namespace TeslaLogger
 
         internal static Queue<Tuple<DateTime, string>> debugBuffer = new Queue<Tuple<DateTime, string>>();
 
-        public static void SetThread_enUS()
+        public static void SetThreadEnUS()
         {
             Thread.CurrentThread.CurrentCulture = ciEnUS;
         }
@@ -61,16 +65,33 @@ namespace TeslaLogger
             return (long)(dateTime - new DateTime(1970, 1, 1)).TotalSeconds;
         }
 
-        public static void DebugLog(MySqlCommand cmd, [CallerFilePath] string _cfp = null, [CallerLineNumber] int _cln = 0, [CallerMemberName] string _cmn = null)
+        public static void DebugLog(MySqlCommand cmd, string prefix = "", [CallerFilePath] string callerFilePath = null, [CallerLineNumber] int callerLineNumber = 0, [CallerMemberName] string callerMemberName = null)
         {
-            try
+            if (Program.SQLTRACE)
             {
-                string msg = "SQL" + Environment.NewLine + ExpandSQLCommand(cmd);
-                DebugLog($"{_cmn}: " + msg, null, _cfp, _cln);
+                try
+                {
+                    string msg = "SQL" + Environment.NewLine + ExpandSQLCommand(cmd).Trim();
+                    DebugLog($"{callerMemberName}: " + msg, null, prefix, callerFilePath, callerLineNumber);
+                }
+                catch (Exception ex)
+                {
+                    ex.ToExceptionless().FirstCarUserID().Submit();
+                    DebugLog("Exception in SQL DEBUG", ex, prefix);
+                }
             }
-            catch (Exception ex)
+        }
+
+        public static void DebugLog(MySqlDataReader dr, [CallerFilePath] string callerFilePath = null, [CallerLineNumber] int callerLineNumber = 0, [CallerMemberName] string callerMemberName = null)
+        {
+            if (dr != null)
             {
-                DebugLog("Exception in SQL DEBUG", ex);
+                string msg = "RAWSQL:";
+                for (int column = 0; column < dr.FieldCount; column++)
+                {
+                    msg += (column == 0 ? "" : "|") + dr.GetName(column) + "<" + dr.GetValue(column) + ">";
+                }
+                DebugLog($"{callerMemberName}: " + msg, null, "", callerFilePath, callerLineNumber);
             }
         }
 
@@ -138,9 +159,9 @@ namespace TeslaLogger
             return msg;
         }
 
-        public static void DebugLog(string text, Exception ex = null, [CallerFilePath] string _cfp = null, [CallerLineNumber] int _cln = 0)
+        public static void DebugLog(string text, Exception ex = null, string prefix = "", [CallerFilePath] string callerFilePath = null, [CallerLineNumber] int callerLineNumber = 0)
         {
-            string temp = "DEBUG : " + text + " (" + Path.GetFileName(_cfp) + ":" + _cln + ")";
+            string temp = "DEBUG : " + prefix + text + " (" + Path.GetFileName(callerFilePath) + ":" + callerLineNumber + ")";
             AddToBuffer(temp);
             if (Program.VERBOSE)
             {
@@ -197,6 +218,7 @@ namespace TeslaLogger
             }
             catch (Exception ee)
             {
+                ee.ToExceptionless().FirstCarUserID().Submit();
                 //Avoid any situation that the Trace is what crashes you application. While trace can log to a file. Console normally not output to the same place.
                 Logfile.Log("Tracing exception in TraceException(Exception e)" + ee.Message);
             }
@@ -219,7 +241,7 @@ namespace TeslaLogger
         private static string ThreadAndDateInfo
         {
             //returns thread number and precise date and time.
-            get { return "[" + Thread.CurrentThread.ManagedThreadId + " - " + DateTime.Now.ToString("dd/MM HH:mm:ss.ffffff") + "] "; }
+            get { return "[" + Thread.CurrentThread.ManagedThreadId + " - " + DateTime.Now.ToString("dd/MM HH:mm:ss.ffffff", Tools.ciEnUS) + "] "; }
         }
 
         public static string GetMonoRuntimeVersion()
@@ -244,30 +266,38 @@ namespace TeslaLogger
 
         public static void CopyFilesRecursively(DirectoryInfo source, DirectoryInfo target, string excludeFile = null)
         {
-            try
+            if (source != null && target != null)
             {
-                foreach (DirectoryInfo dir in source.GetDirectories())
+                try
                 {
-                    CopyFilesRecursively(dir, target.CreateSubdirectory(dir.Name));
-                }
+                    foreach (DirectoryInfo dir in source.GetDirectories())
+                    {
+                        CopyFilesRecursively(dir, target.CreateSubdirectory(dir.Name));
+                    }
 
-                foreach (FileInfo file in source.GetFiles())
+                    foreach (FileInfo file in source.GetFiles())
+                    {
+                        if (excludeFile != null && file.Name == excludeFile)
+                        {
+                            Logfile.Log($"CopyFilesRecursively: skip {excludeFile}");
+                        }
+                        else
+                        {
+                            string p = Path.Combine(target.FullName, file.Name);
+                            Logfile.Log("Copy '" + file.FullName + "' to '" + p + "'");
+                            File.Copy(file.FullName, p, true);
+                        }
+                    }
+                }
+                catch (Exception ex)
                 {
-                    if (excludeFile != null && file.Name.Equals(excludeFile))
-                    {
-                        Logfile.Log($"CopyFilesRecursively: skip {excludeFile}");
-                    }
-                    else
-                    {
-                        string p = Path.Combine(target.FullName, file.Name);
-                        Logfile.Log("Copy '" + file.FullName + "' to '" + p + "'");
-                        File.Copy(file.FullName, p, true);
-                    }
+                    ex.ToExceptionless().FirstCarUserID().Submit();
+                    Logfile.Log("CopyFilesRecursively Exception: " + ex.ToString());
                 }
             }
-            catch (Exception ex)
+            else
             {
-                Logfile.Log("CopyFilesRecursively Exception: " + ex.ToString());
+                Logfile.Log($"CopyFilesRecursively: source or target is null - source:{source} target:{target}");
             }
         }
 
@@ -317,15 +347,20 @@ namespace TeslaLogger
                 if (
                         vin[7] == '2' || // Dual Motor (standard) (Designated for Model S & Model X)
                         vin[7] == '4' || // Dual Motor (performance) (Designated for Model S & Model X)
+                        vin[7] == '5' || // Dual Motor Models S und Model X 2021 Refresh
+                        vin[7] == '6' || // Triple Motor Models S und Model X 2021 Plaid
                         vin[7] == 'B' || // Dual motor - standard Model 3
                         vin[7] == 'C' || // Dual motor - performance Model 3
-                        vin[7] == 'E'    // Dual motor - Model Y
+                        vin[7] == 'E' ||  // Dual motor - Model Y
+                        vin[7] == 'F' ||  // Dual motor Performance - Model Y
+                        vin[7] == 'K' ||  // Dual motor Standard "Hairpin Windings"
+                        vin[7] == 'L'   // Dual motor Performance "Hairpin Windings"
                     )
                 {
                     AWD = true;
                 }
                 // check made in China
-                if (vin.StartsWith("LRW"))
+                if (vin.StartsWith("LRW", StringComparison.Ordinal))
                 {
                     MIC = true;
                 }
@@ -363,14 +398,32 @@ namespace TeslaLogger
                     case '4':
                         motor = "dual performance";
                         break;
+                    case '5':
+                        motor = "dual 2021 refresh";
+                        break;
+                    case '6':
+                        motor = "triple 2021 plaid";
+                        break;
+                    case 'A':
+                        motor = "3 single";
+                        break;
                     case 'B':
                         motor = "3 dual";
                         break;
                     case 'C':
                         motor = "3 dual performance";
                         break;
+                    case 'D':
+                    case 'J':
+                        motor = "Y single";
+                        break;
                     case 'E':
+                    case 'K':
+                    case 'L':
                         motor = "Y dual";
+                        break;
+                    case 'F':
+                        motor = "Y dual performance";
                         break;
                 }
 
@@ -378,6 +431,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 
@@ -393,31 +447,35 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log("CopyFile Exception: " + ex.ToString());
             }
         }
 
         public static string DataTableToJSONWithJavaScriptSerializer(DataTable table)
         {
-            JavaScriptSerializer jsSerializer = new JavaScriptSerializer();
             List<Dictionary<string, object>> parentRow = new List<Dictionary<string, object>>();
             Dictionary<string, object> childRow;
-            foreach (DataRow row in table.Rows)
+            if (table != null)
             {
-                childRow = new Dictionary<string, object>();
-                foreach (DataColumn col in table.Columns)
+                foreach (DataRow row in table.Rows)
                 {
-                    childRow.Add(col.ColumnName, row[col]);
+                    childRow = new Dictionary<string, object>();
+                    foreach (DataColumn col in table.Columns)
+                    {
+                        childRow.Add(col.ColumnName, row[col]);
+                    }
+                    parentRow.Add(childRow);
                 }
-                parentRow.Add(childRow);
             }
-            return jsSerializer.Serialize(parentRow);
+            return JsonConvert.SerializeObject(parentRow);
         }
 
         internal static void EndSleeping(out int stopSleepingHour, out int stopSleepingMinute)
         {
             stopSleepingHour = -1;
             stopSleepingMinute = -1;
+            string json = "";
 
             try
             {
@@ -428,21 +486,27 @@ namespace TeslaLogger
                     return;
                 }
 
-                string json = File.ReadAllText(filePath);
+                json = File.ReadAllText(filePath);
 
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                dynamic j = JsonConvert.DeserializeObject(json);
 
-                if (bool.Parse(j["SleepTimeSpanEnable"]))
+                if (j.ContainsKey("SleepTimeSpanEnable"))
                 {
-                    string start = j["SleepTimeSpanEnd"];
-                    string[] s = start.Split(':');
+                    bool SleepTimeSpanEnable = j["SleepTimeSpanEnable"];
 
-                    int.TryParse(s[0], out stopSleepingHour);
-                    int.TryParse(s[1], out stopSleepingMinute);
+                    if (SleepTimeSpanEnable)
+                    {
+                        string start = j["SleepTimeSpanEnd"];
+                        string[] s = start.Split(':');
+
+                        _ = int.TryParse(s[0], out stopSleepingHour);
+                        _ = int.TryParse(s[1], out stopSleepingMinute);
+                    }
                 }
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().AddObject(json,"JSON").Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -459,10 +523,10 @@ namespace TeslaLogger
                     return httpport;
                 }
                 string json = File.ReadAllText(filePath);
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                dynamic j = JsonConvert.DeserializeObject(json);
                 if (IsPropertyExist(j, "HTTPPort"))
                 {
-                    int.TryParse(j["HTTPPort"], out httpport);
+                    int.TryParse(j["HTTPPort"].ToString(), out httpport);
 
                     if (httpport == 0)
                     {
@@ -472,6 +536,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
             return httpport;
@@ -488,10 +553,10 @@ namespace TeslaLogger
                     return false;
                 }
                 string json = File.ReadAllText(filePath);
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                dynamic j = JsonConvert.DeserializeObject(json);
                 if (IsPropertyExist(j, "CombineChargingStates"))
                 {
-                    if (bool.TryParse(j["CombineChargingStates"], out bool combineChargingStates))
+                    if (bool.TryParse(j["CombineChargingStates"].ToString(), out bool combineChargingStates))
                     {
                         return combineChargingStates;
                     }
@@ -499,6 +564,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
             return true;
@@ -518,7 +584,7 @@ namespace TeslaLogger
                     return false;
                 }
                 string json = File.ReadAllText(filePath);
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                dynamic j = JsonConvert.DeserializeObject(json);
                 if (IsPropertyExist(j, "UseOpenTopoData"))
                 {
                     if(bool.TryParse(j["UseOpenTopoData"], out bool useOpenTopoData)) {
@@ -548,10 +614,10 @@ namespace TeslaLogger
                     return false;
                 }
                 string json = File.ReadAllText(filePath);
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                dynamic j = JsonConvert.DeserializeObject(json);
                 if (IsPropertyExist(j, "StreamingPos"))
                 {
-                    if(bool.TryParse(j["StreamingPos"], out bool streamingPos)) {
+                    if(bool.TryParse(j["StreamingPos"].ToString(), out bool streamingPos)) {
                         Logfile.Log("StreamingPos: " + streamingPos);
                         _StreamingPos = streamingPos;
                         return streamingPos;
@@ -562,6 +628,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
             _StreamingPos = false;
@@ -581,6 +648,7 @@ namespace TeslaLogger
             startSleepingHour = -1;
             startSleepingMinutes = -1;
 
+            string json = "";
             try
             {
                 string filePath = FileManager.GetFilePath(TLFilename.SettingsFilename);
@@ -591,20 +659,20 @@ namespace TeslaLogger
                     return;
                 }
 
-                string json = File.ReadAllText(filePath);
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                json = File.ReadAllText(filePath);
+                dynamic j = JsonConvert.DeserializeObject(json);
 
                 if (IsPropertyExist(j, "SleepTimeSpanEnable") && IsPropertyExist(j, "SleepTimeSpanStart"))
                 {
-                    if (bool.Parse(j["SleepTimeSpanEnable"]))
+                    if (bool.Parse(j["SleepTimeSpanEnable"].ToString()))
                     {
                         string start = j["SleepTimeSpanStart"];
                         string[] s = start.Split(':');
 
                         if (s.Length >= 2)
                         {
-                            int.TryParse(s[0], out startSleepingHour);
-                            int.TryParse(s[1], out startSleepingMinutes);
+                            _ = int.TryParse(s[0], out startSleepingHour);
+                            _ = int.TryParse(s[1], out startSleepingMinutes);
                         }
                     }
                 }
@@ -616,13 +684,14 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().AddObject(json, "JSON").Submit();
                 Logfile.Log(ex.ToString());
             }
         }
 
         // timeout in seconds
         // https://docs.microsoft.com/de-de/dotnet/api/system.diagnostics.process.exitcode?view=netcore-3.1
-        public static string Exec_mono(string cmd, string param, bool logging = true, bool stderr2stdout = false, int timeout = 0)
+        public static string ExecMono(string cmd, string param, bool logging = true, bool stderr2stdout = false, int timeout = 0)
         {
             Logfile.Log("Exec_mono: " + cmd + " " + param);
 
@@ -690,6 +759,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log("Exception " + cmd + " " + ex.Message);
                 return "Exception";
             }
@@ -733,15 +803,16 @@ namespace TeslaLogger
                 }
 
                 string json = File.ReadAllText(filePath);
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                dynamic j = JsonConvert.DeserializeObject(json);
 
                 if (IsPropertyExist(j, "ScanMyTesla"))
                 {
-                    return bool.Parse(j["ScanMyTesla"]);
+                    return bool.Parse(j["ScanMyTesla"].ToString());
                 }
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 
@@ -760,7 +831,7 @@ namespace TeslaLogger
                 }
 
                 string json = File.ReadAllText(filePath);
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                dynamic j = JsonConvert.DeserializeObject(json);
 
                 if (IsPropertyExist(j, "update"))
                 {
@@ -776,6 +847,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 
@@ -809,6 +881,8 @@ namespace TeslaLogger
             defaultcar = "";
             defaultcarid = "";
 
+            string json = null;
+
             try
             {
                 string filePath = FileManager.GetFilePath(TLFilename.SettingsFilename);
@@ -819,8 +893,9 @@ namespace TeslaLogger
                     return;
                 }
 
-                string json = File.ReadAllText(filePath);
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                json = File.ReadAllText(filePath);
+
+                dynamic j = JsonConvert.DeserializeObject(json);
 
                 if (IsPropertyExist(j, "Power"))
                 {
@@ -852,7 +927,7 @@ namespace TeslaLogger
 
                 if (IsPropertyExist(j, "Range"))
                 {
-                    if (j["Range"].ToString().Length > 0)
+                    if (j["Range"]?.ToString()?.Length > 0)
                     {
                         Range = j["Range"];
                     }
@@ -860,7 +935,7 @@ namespace TeslaLogger
 
                 if (IsPropertyExist(j, "URL_Grafana"))
                 {
-                    if (j["URL_Grafana"].ToString().Length > 0)
+                    if (j["URL_Grafana"]?.ToString()?.Length > 0)
                     {
                         URL_Grafana = j["URL_Grafana"];
                     }
@@ -868,7 +943,7 @@ namespace TeslaLogger
 
                 if (IsPropertyExist(j, "defaultcar"))
                 {
-                    if (j["defaultcar"].ToString().Length > 0)
+                    if (j["defaultcar"]?.ToString()?.Length > 0)
                     {
                         defaultcar = j["defaultcar"];
                     }
@@ -876,7 +951,7 @@ namespace TeslaLogger
 
                 if (IsPropertyExist(j, "defaultcarid"))
                 {
-                    if (j["defaultcarid"].ToString().Length > 0)
+                    if (j["defaultcarid"]?.ToString()?.Length > 0)
                     {
                         defaultcarid = j["defaultcarid"];
                     }
@@ -896,12 +971,41 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().AddObject(json, "JSON").AddObject(Tools.ConvertString2Base64(json),"JSON-Base64").Submit();
                 Logfile.Log(ex.ToString());
             }
         }
 
-        public static bool IsPropertyExist(dynamic settings, string name)
+        public static string ConvertString2Base64(string content)
         {
+            string base64 = "";
+            try
+            {
+                if (content != null)
+                {
+                    var t = System.Text.UTF8Encoding.UTF8.GetBytes(content);
+                    base64 = Convert.ToBase64String(t);
+                }
+            }
+            catch (Exception)
+            { }
+
+            return base64;
+        }
+
+        public static bool IsPropertyExist(object settings, string name)
+        {
+            if (settings == null)
+                return false;
+
+            if (settings is Newtonsoft.Json.Linq.JObject)
+            {
+                return ((Newtonsoft.Json.Linq.JObject)settings).ContainsKey(name);
+            }
+
+            if (!(settings is IDictionary<string, object>))
+                return false;
+
             return settings is IDictionary<string, object> dictionary && dictionary.ContainsKey(name);
         }
 
@@ -923,7 +1027,7 @@ namespace TeslaLogger
                         using (WebClient wc = new WebClient())
                         {
                             temp = wc.DownloadString("http://grafana:3000/api/health");
-                            dynamic j = new JavaScriptSerializer().DeserializeObject(temp);
+                            dynamic j = JsonConvert.DeserializeObject(temp);
                             return j["version"];
                         }
                     }
@@ -932,6 +1036,19 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                if (ex is WebException we)
+                {
+                    if (we.Status == WebExceptionStatus.NameResolutionFailure)
+                    {
+                        return "NRF";
+                    }
+                    else if (we.Status == WebExceptionStatus.ConnectFailure)
+                    {
+                        return "CF";
+                    }
+                }
+
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.ExceptionWriter(ex, "GetGrafanaVersion");
             }
 
@@ -952,6 +1069,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.ExceptionWriter(ex, "IsDocker");
             }
 
@@ -981,6 +1099,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.ExceptionWriter(ex, "IsShareData");
             }
 
@@ -990,7 +1109,7 @@ namespace TeslaLogger
 
         internal static string GetOsVersion()
         {
-            if (!_OSVersion.Equals(string.Empty))
+            if (!string.IsNullOrEmpty(_OSVersion))
             {
                 return _OSVersion;
             }
@@ -1024,6 +1143,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 
@@ -1225,6 +1345,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
         }
@@ -1236,9 +1357,9 @@ namespace TeslaLogger
 
             bool filesFoundForDeletion = false;
             int countDeletedFiles = 0;
-            long freeDiskSpaceNeeded = 1024;
+            long freeDiskSpaceNeeded = 2048;
 
-            if (FreeDiskSpaceMB() > freeDiskSpaceNeeded) // Keep 1GB of free disk space
+            if (FreeDiskSpaceMB() > freeDiskSpaceNeeded) // Keep 2GB of free disk space
                 return;
 
 
@@ -1264,6 +1385,7 @@ namespace TeslaLogger
                         }
                         catch (Exception ex)
                         {
+                            ex.ToExceptionless().FirstCarUserID().Submit();
                             Logfile.Log(ex.ToString());
                         }
                     }
@@ -1309,7 +1431,7 @@ WHERE
                     cmd.Parameters.AddWithValue("@dbname", DBHelper.Database);
                     try
                     {
-                        MySqlDataReader dr = cmd.ExecuteReader();
+                        MySqlDataReader dr = SQLTracer.TraceDR(cmd);
                         while (dr.Read())
                         {
                             Logfile.Log($"Table: {dr[0],20} data:{dr[1],5} MB index:{dr[2],5} MB rows:{dr[3],10}");
@@ -1333,7 +1455,7 @@ WHERE
         private static void HousekeepingCallback(CacheEntryRemovedArguments arguments)
         {
             bool allCarsAsleep = true;
-            foreach (Car car in Car.allcars)
+            foreach (Car car in Car.Allcars)
             {
                 // first car to return false will set allCarsAsleep to false and it'll stay false
                 allCarsAsleep &= car.TLUpdatePossible();
@@ -1363,7 +1485,7 @@ WHERE
                     cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-GetMothershipKeepDays()));
                     try
                     {
-                        MySqlDataReader dr = cmd.ExecuteReader();
+                        MySqlDataReader dr = SQLTracer.TraceDR(cmd);
                         if (dr.Read())
                         {
                             _ = long.TryParse(dr[0].ToString(), out mothershipCount);
@@ -1394,7 +1516,7 @@ WHERE
                             cmd.Parameters.AddWithValue("@maxid", dbupdate);
                             try
                             {
-                                cmd.ExecuteNonQuery();
+                                SQLTracer.TraceNQ(cmd);
                             }
                             catch (Exception ex)
                             {
@@ -1404,29 +1526,6 @@ WHERE
                         }
                     }
                     Thread.Sleep(1000);
-                }
-                // report again
-                using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
-                {
-                    con.Open();
-                    using (MySqlCommand cmd = new MySqlCommand("SELECT COUNT(id) FROM mothership WHERE ts < @tsdate", con))
-                    {
-                        cmd.Parameters.AddWithValue("@tsdate", DateTime.Now.AddDays(-GetMothershipKeepDays()));
-                        try
-                        {
-                            MySqlDataReader dr = cmd.ExecuteReader();
-                            if (dr.Read())
-                            {
-                                _ = long.TryParse(dr[0].ToString(), out mothershipCount);
-                                Logfile.Log($"Housekeeping: database.mothership older than {GetMothershipKeepDays()} days count: " + mothershipCount);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Logfile.Log(ex.ToString());
-                        }
-                        con.Close();
-                    }
                 }
             }
         }
@@ -1460,25 +1559,25 @@ WHERE
                 Logfile.Log($"Housekeeping: {countDeletedFiles} file(s) deleted in Exception direcotry");
                 if (Directory.Exists(System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) + "/Exception"))
                 {
-                    Exec_mono("/usr/bin/du", "-sk " + System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) + "/Exception", true, true);
+                    ExecMono("/usr/bin/du", "-sk " + System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) + "/Exception", true, true);
                 }
             }
         }
 
         private static void LogDiskUsage()
         {
-            _ = Exec_mono("/bin/df", "-k", true, true);
+            _ = ExecMono("/bin/df", "-k", true, true);
             if (Directory.Exists(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/backup"))
             {
-                _ = Exec_mono("/usr/bin/du", "-sk " + Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/backup", true, true);
+                _ = ExecMono("/usr/bin/du", "-sk " + Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/backup", true, true);
             }
             if (Directory.Exists(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/Exception"))
             {
-                _ = Exec_mono("/usr/bin/du", "-sk " + Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/Exception", true, true);
+                _ = ExecMono("/usr/bin/du", "-sk " + Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/Exception", true, true);
             }
             if (File.Exists(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/nohup.out"))
             {
-                _ = Exec_mono("/usr/bin/du", "-sk " + Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/nohup.out", true, true);
+                _ = ExecMono("/usr/bin/du", "-sk " + Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/nohup.out", true, true);
             }
         }
 
@@ -1506,7 +1605,7 @@ WHERE
         {
             if (Uri.TryCreate(url, UriKind.Absolute, out Uri uri))
             {
-                return await DownloadToFile(uri, path, timeout, overwrite);
+                return await DownloadToFile(uri, path, timeout, overwrite).ConfigureAwait(true);
             }
             return false;
         }
@@ -1573,10 +1672,10 @@ WHERE
                     return days;
                 }
                 string json = File.ReadAllText(filePath);
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                dynamic j = JsonConvert.DeserializeObject(json);
                 if (IsPropertyExist(j, "MothershipKeepDays"))
                 {
-                    int.TryParse(j["MothershipKeepDays"], out days);
+                    int.TryParse(j["MothershipKeepDays"].ToString(), out days);
 
                     if (days == 0)
                     {
@@ -1589,6 +1688,35 @@ WHERE
                 Logfile.Log(ex.ToString());
             }
             return days;
+        }
+
+        internal static int GetSettingsInt(string name, int Default)
+        {
+            int value = 0;
+            string json = "";
+            try
+            {
+                string filePath = FileManager.GetFilePath(TLFilename.SettingsFilename);
+                if (!File.Exists(filePath))
+                {
+                    Logfile.Log("settings file not found at " + filePath);
+                    return Default;
+                }
+                json = File.ReadAllText(filePath);
+                dynamic j = JsonConvert.DeserializeObject(json);
+                if (IsPropertyExist(j, name))
+                {
+                    if (int.TryParse(j[name].ToString(), out value))
+                        return value;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log("GetSettingsInt:" + name +"\r\n"+  ex.ToString());
+
+                ex.ToExceptionless().FirstCarUserID().AddObject(json, "JSON").Submit();
+            }
+            return Default;
         }
 
         internal static string GetMapProvider()
@@ -1604,7 +1732,7 @@ WHERE
                 }
 
                 string json = File.ReadAllText(filePath);
-                dynamic j = new JavaScriptSerializer().DeserializeObject(json);
+                dynamic j = JsonConvert.DeserializeObject(json);
 
                 if (IsPropertyExist(j, "MapProvider"))
                 {
@@ -1622,5 +1750,67 @@ WHERE
             return mapProvider;
         }
 
+        internal static void ExternalLog(string text)
+        {
+            try
+            {
+                text = "V:" + Assembly.GetExecutingAssembly().GetName().Version + " - " + text;
+                var c = WebHelper.httpclient_teslalogger_de;
+
+                UriBuilder b = new UriBuilder("https://teslalogger.de/log.php");
+                b.Port = -1;
+                var q = HttpUtility.ParseQueryString(b.Query);
+                q["t"] = text;
+                b.Query = q.ToString();
+                string url = b.ToString();
+
+                HttpResponseMessage result = c.GetAsync(new Uri(url)).Result;
+                string resultContent = result.Content.ReadAsStringAsync().Result;
+
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+        }
+
+        public static string ConvertBase64toString(string base64)
+        {
+            return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(base64));
+        }
+    }
+
+    public static class EventBuilderExtension
+    {
+        static String lastFirstCar;
+        public static EventBuilder FirstCarUserID(this EventBuilder v)
+        {
+            try
+            {
+                if (lastFirstCar != null)
+                    return v.SetUserIdentity(lastFirstCar);
+
+                using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+                {
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand("SELECT tasker_hash FROM teslalogger.cars where length(tasker_hash) >= 8 limit 1", con))
+                    {
+                        object o = cmd.ExecuteScalar().ToString();
+                        if (o is String && o.ToString().Length >= 8)
+                        {
+                            lastFirstCar = o.ToString();
+                            return v.SetUserIdentity(o.ToString());
+                        }
+                    }
+                }
+                
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+
+            return v;
+        }
     }
 }

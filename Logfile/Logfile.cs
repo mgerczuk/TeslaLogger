@@ -1,14 +1,18 @@
 ﻿using System;
 using System.IO;
-using System.Runtime.CompilerServices;
+using System.Net.Http;
+using System.Reflection;
+using System.Web;
 
 namespace TeslaLogger
 {
     public class Logfile
     {
-        private static bool WriteToLogfile = false;
+        public static bool WriteToLogfile = false;
         private static string _logfilepath = null;
         private static System.Threading.Mutex mutex = new System.Threading.Mutex(false, "teslaloggerlogfile");
+
+        public static HttpClient httpclient_teslalogger_de = new HttpClient();
         static Logfile()
         {
             if (IsDocker())
@@ -17,7 +21,7 @@ namespace TeslaLogger
             }
         }
 
-        private static string Logfilepath
+        public static string Logfilepath
         {
             get
             {
@@ -28,10 +32,17 @@ namespace TeslaLogger
 
                 return _logfilepath;
             }
+            set
+            {
+                _logfilepath = value;
+            }
         }
 
         public static void Log(string text)
         {
+            
+            ExternalLog(text);
+
             string temp = DateTime.Now.ToString(ciDeDE) + " : " + text;
             Console.WriteLine(temp);
 
@@ -180,6 +191,8 @@ namespace TeslaLogger
 
         public static void WriteException(string temp)
         {
+            ExternalLog(temp);
+
             string filename = "Exception/Exception_" + DateTime.Now.ToString("yyyyMMddHHmmssfff") + ".txt";
 
             string filepath = Path.Combine(GetExecutingPath(), filename);
@@ -256,6 +269,39 @@ namespace TeslaLogger
             }
 
             return false;
+        }
+
+        internal static void ExternalLog(string text)
+        {
+            try
+            {
+                if (!text.Contains("SqlException"))
+                    return;
+
+                if (text.Contains("Unable to connect to any of the specified MySQL hosts"))
+                    return;
+
+                if (text.Contains("MySqlException (0x80004005): Too many connections"))
+                    return;
+
+                text = "V:" + Assembly.GetEntryAssembly()?.GetName().Version + " - " + text;
+                var c = httpclient_teslalogger_de;
+
+                UriBuilder b = new UriBuilder("https://teslalogger.de/log.php");
+                b.Port = -1;
+                var q = HttpUtility.ParseQueryString(b.Query);
+                q["t"] = text;
+                b.Query = q.ToString();
+                string url = b.ToString();
+
+                var result = c.GetAsync(url).Result;
+                var resultContent = result.Content.ReadAsStringAsync().Result;
+
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log("Exception in ExternalLog " + ex.Message);
+            }
         }
     }
 }

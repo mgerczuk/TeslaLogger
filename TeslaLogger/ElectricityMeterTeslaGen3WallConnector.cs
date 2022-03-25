@@ -5,17 +5,19 @@ using System.Net;
 using System.Runtime.Caching;
 using System.Text;
 using System.Threading.Tasks;
-using System.Web.Script.Serialization;
+
+using Exceptionless;
+using Newtonsoft.Json;
 
 namespace TeslaLogger
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     class ElectricityMeterTeslaGen3WallConnector : ElectricityMeterBase
     {
         string host;
         string parameter;
         internal int LP = 1;
 
-        Guid guid = new Guid();
         static WebClient client;
         internal string mockup_lifetime, mockup_version, mockup_vitals;
 
@@ -42,6 +44,16 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                if (ex is WebException wx)
+                {
+                    if ((wx.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        Logfile.Log(wx.Message);
+                        return "";
+                    }
+
+                }
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 
@@ -62,6 +74,16 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                if (ex is WebException wx)
+                {
+                    if ((wx.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        Logfile.Log(wx.Message);
+                        return "";
+                    }
+
+                }
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 
@@ -75,13 +97,23 @@ namespace TeslaLogger
                 if (mockup_version != null)
                     return mockup_version;
 
-                string url = host + "/api/1/vitals";
+                string url = host + "/api/1/version";
                 string lastJSON = client.DownloadString(url);
 
                 return lastJSON;
             }
             catch (Exception ex)
             {
+                if (ex is WebException wx)
+                {
+                    if ((wx.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        Logfile.Log(wx.Message);
+                        return "";
+                    }
+
+                }
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 
@@ -100,10 +132,17 @@ namespace TeslaLogger
             try
             {
                 j = GetCurrentDataLifetime();
+                if (string.IsNullOrEmpty(j))
+                    return null;
 
-                dynamic jsonResult = new JavaScriptSerializer().DeserializeObject(j);
+                j = j.Replace("nan,", "null,");
+
+                dynamic jsonResult = JsonConvert.DeserializeObject(j);
                 string key = "energy_wh";
-                string value = jsonResult[key];
+                string value = jsonResult[key].ToString();
+
+                if (value == null)
+                    return null;
 
                 double v = Double.Parse(value, Tools.ciEnUS);
                 v = v / 1000.0;
@@ -112,6 +151,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.ExceptionWriter(ex, j);
             }
 
@@ -124,15 +164,17 @@ namespace TeslaLogger
             try
             {
                 j = GetCurrentDataVitals();
+                j = j.Replace("nan,", "null,");
 
-                dynamic jsonResult = new JavaScriptSerializer().DeserializeObject(j);
-                string key = "session_s";
-                string value = jsonResult[key];
+                dynamic jsonResult = JsonConvert.DeserializeObject(j);
 
-                return value == "1";
+                bool vehicle_connected = jsonResult["vehicle_connected"];
+
+                return vehicle_connected;
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.ExceptionWriter(ex, j);
             }
 
@@ -141,14 +183,19 @@ namespace TeslaLogger
 
         public override string GetVersion()
         {
+            string j = "";
             try
             {
-                string url = host + "/openWB/web/version?t=" + new Guid().ToString();
-                string v = client.DownloadString(url).Trim();
-                return v;
+                j = GetCurrentDataVersion();
+
+                dynamic jsonResult = JsonConvert.DeserializeObject(j);
+                string key = "firmware_version";
+                string value = jsonResult[key];
+                return value;
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().AddObject(j,"json").Submit();
                 Logfile.Log(ex.ToString());
             }
 

@@ -1,4 +1,4 @@
-FROM mono:5.20.1.34
+FROM mono:6.12.0.122
 
 # timezone / date
 RUN echo "Europe/Berlin" > /etc/timezone && dpkg-reconfigure -f noninteractive tzdata
@@ -7,6 +7,7 @@ RUN echo "Europe/Berlin" > /etc/timezone && dpkg-reconfigure -f noninteractive t
 RUN apt-get update && \
   apt-get install -y --no-install-recommends git && \
   apt-get install -y --no-install-recommends mariadb-client && \
+  apt-get install -y optipng && \
   apt-get clean && \
   apt-get autoremove -y && \
   rm -rf /var/lib/apt/lists/* && \

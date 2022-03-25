@@ -8,12 +8,12 @@ require_once("tools.php");
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Teslalogger Set Charging Cost</title>
-	<link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/smoothness/jquery-ui.css">
-	<link rel="stylesheet" href="https://teslalogger.de/teslalogger_style.css">
-	<script src="https://code.jquery.com/jquery-1.12.4.js"></script>
-	<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+	<link rel="stylesheet" href="static/jquery/ui/1.12.1/themes/smoothness/jquery-ui.css">
+	<link rel="stylesheet" href="static/teslalogger_style.css">
+	<script src="static/jquery/jquery-1.12.4.js"></script>
+	<script src="static/jquery/ui/1.12.1/jquery-ui.js"></script>
 	<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/timepicker/1.3.5/jquery.timepicker.min.css">
-	<link rel='stylesheet' id='genericons-css'  href='https://www.impala64.de/blog/tesla/wp-content/themes/twentyfourteen/genericons/genericons.css?ver=3.0.3' type='text/css' media='all' />
+	<link rel='stylesheet' id='genericons-css'  href='static/genericons.css?ver=3.0.3' type='text/css' media='all' />
 	<script src="//cdnjs.cloudflare.com/ajax/libs/timepicker/1.3.5/jquery.timepicker.min.js"></script>
 <style>
 .sum {padding-left: 20px; text-align: right;}
@@ -60,8 +60,8 @@ require_once("tools.php");
         kwh = Number(json[0]["kWh"]);
         $("#charge_energy_added").text(kwh + " kWh");   
         
-        var StartDate = new Date(parseInt(json[0]["StartDate"].substr(6)));    
-        var EndDate = new Date(parseInt(json[0]["EndDate"].substr(6)));   
+        var StartDate = new Date(json[0]["StartDate"]);    
+        var EndDate = new Date(json[0]["EndDate"]);   
 
         minutes = diff_minutes(StartDate, EndDate);
         $("#minutes").text(minutes + " Minutes");       
@@ -72,7 +72,7 @@ require_once("tools.php");
         $("#cost_per_session").val(json[0]["cost_per_session"]);
         $("#cost_per_minute").val(json[0]["cost_per_minute"]);
         $("#cost_idle_fee_total").val(json[0]["cost_idle_fee_total"]);
-        $("#cost_kwh_meter_invoice").val(json[0]["cost_kwh_meter_invoice"]);
+        $("#cost_kwh_meter_invoice").val(Round(json[0]["cost_kwh_meter_invoice"],2));
 
 		updatecalculation();
 
@@ -90,6 +90,15 @@ require_once("tools.php");
         return +(num.replace(",", "."));
     }
 
+    function Round(value, digits)
+    {
+        if (value === null)
+            return value;
+
+        var factor = Math.pow(10,digits);
+        return Math.round(value * factor)/factor;
+    }
+
     function updatecalculation()
     {
         $("#minutes_charged").text(minutes);
@@ -99,6 +108,7 @@ require_once("tools.php");
         if (cost_kwh_meter_invoice !== "")
         {
             cost_kwh_meter_invoice = parseLocalNum($("#cost_kwh_meter_invoice").val());
+            cost_kwh_meter_invoice = Round(cost_kwh_meter_invoice, 2);
             var efficiency = kwh_calc / cost_kwh_meter_invoice * 100;
             $("#charge_efficiency").text(efficiency.toFixed(1) + " %");    
             kwh_calc = cost_kwh_meter_invoice;

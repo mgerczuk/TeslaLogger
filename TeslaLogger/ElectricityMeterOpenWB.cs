@@ -1,14 +1,13 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Runtime.Caching;
-using System.Text;
-using System.Threading.Tasks;
-using System.Web.Script.Serialization;
+
+using Exceptionless;
+using Newtonsoft.Json;
 
 namespace TeslaLogger
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     class ElectricityMeterOpenWB : ElectricityMeterBase
     {
         string host;
@@ -21,7 +20,9 @@ namespace TeslaLogger
         public ElectricityMeterOpenWB(string host, string parameter)
         {
             if (client == null)
+            {
                 client = new WebClient();
+            }
 
             this.host = host;
             this.parameter = parameter;
@@ -31,7 +32,7 @@ namespace TeslaLogger
             {
                 if (p.StartsWith("LP", StringComparison.InvariantCultureIgnoreCase))
                 {
-                    LP = int.Parse(p.Substring(2));
+                    LP = int.Parse(p.Substring(2), Tools.ciDeDE);
                 }
             }
         }
@@ -54,6 +55,16 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                if (ex is WebException wx)
+                {
+                    if ((wx.Response as HttpWebResponse)?.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        Logfile.Log(wx.Message);
+                        return "";
+                    }
+
+                }
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 
@@ -68,8 +79,12 @@ namespace TeslaLogger
             {
                 j = GetCurrentData();
 
-                dynamic jsonResult = new JavaScriptSerializer().DeserializeObject(j);
-                string value = jsonResult["evubezugWh"];
+                if (string.IsNullOrEmpty(j))
+                    return null;
+
+                dynamic jsonResult = JsonConvert.DeserializeObject(j);
+
+                string value = jsonResult["evubezugWh"];               
 
                 double v = Double.Parse(value, Tools.ciEnUS);
                 v = v / 1000;
@@ -78,6 +93,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.ExceptionWriter(ex, j);
             }
 
@@ -91,7 +107,7 @@ namespace TeslaLogger
             {
                 j = GetCurrentData();
 
-                dynamic jsonResult = new JavaScriptSerializer().DeserializeObject(j);
+                dynamic jsonResult = JsonConvert.DeserializeObject(j);
                 string key = "llkwhLP" + LP;
                 string value = jsonResult[key];
 
@@ -101,6 +117,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.ExceptionWriter(ex, j);
             }
 
@@ -114,7 +131,10 @@ namespace TeslaLogger
             {
                 j = GetCurrentData();
 
-                dynamic jsonResult = new JavaScriptSerializer().DeserializeObject(j);
+                dynamic jsonResult = JsonConvert.DeserializeObject(j);
+                if (jsonResult == null)
+                    return null;
+
                 string key = "ladungaktivLP" + LP;
                 string value = jsonResult[key];
 
@@ -122,6 +142,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.ExceptionWriter(ex, j);
             }
 
@@ -138,6 +159,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
 

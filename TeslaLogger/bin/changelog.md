@@ -1,3 +1,77 @@
+# Version 1.52.1
+- Bugfixes
+
+# Version 1.52.0
+- Tesla changed the authentification proccess. 
+
+# Version 1.51.10
+- Link to release notes of firmware in admin panel and firmware dashboard
+- Show available firmware updates on admin panel
+
+# Version 1.51.9
+- Using Newtonsoft JSON instead of buggy build in Mono JSON Parser.
+
+# Version 1.51.6
+- Bugfixes 
+- New MySql Client [Link](https://github.com/advisories/GHSA-77rm-9x9h-xj3g)
+- Restart car thread after 5 x 404 errors within 10 Minutes 
+
+# Version 1.51.5
+- Using [Excptionless](https://exceptionless.com/) to track exceptions.
+
+# Version 1.51.4
+- Easier auth proccess.
+
+# Version 1.51.3
+- You can use journeys to combine a long trip / time and summarize all numbers. This is very useful to track the complete charge time of a long trip or to compare the consumption of summer or winter tires. This feature can be find in: Admin Panel / Extras / Journeys 
+
+# Version 1.51.2
+- Bugfix: Restart whole thread after access_token has been updated
+
+# Version 1.49.3
+- Grafana 8.3.2 @Docker Users: Make sure you updated your docker-compose.yml and datasource.yaml [LINK](https://github.com/bassmaster187/TeslaLogger/blob/master/docker_setup.md)
+- Trip Dashboard using the new table
+
+# Version 1.49.1
+- French Language
+- Support for Shelly 3EM
+
+# Version 1.49.0
+- Bugfixes and Release
+
+# Version 1.48.17
+- Support for wallboxes [LINK](https://github.com/bassmaster187/TeslaLogger/blob/master/wallbox.md)
+
+# Version 1.48.15
+- turn off name & passwort authentification to Tesla Server because it won't work anymore
+- calculate ampere if tesla server returns 0
+- improve calculation of charge energy added for combined/interrupted charging session
+- remove database password from logs
+- detect more car models
+
+# Version 1.48.14
+- BF: prevent endless loop in reCaptcha service
+
+# Version 1.48.13
+- Tesla Wallbox Gen 3 first support
+
+# Version 1.48.12
+- Using 2Captcha for resolving ReCaptchas
+
+# Version 1.48.11
+- authentification with access token & refresh token as a fallback if email & password doesn't work
+
+# Version 1.48.10
+- BF: new authentification
+- combine charging is disabled per default, can be enabled for Geofences, but will fail if the car stays plugged in all the time
+- VIN decoder now decodes more vehicles
+
+# Version 1.48.9
+- Skip inactive cars from authentification to server
+- Don't wait (forever) for user input. Give other Cars a chance to authentificate meanwile
+- List cars in account if car id not found
+- Wrong captcha has been showed for car id > 1
+
 # Version 1.48.8
 - Delete password from database after successful login.
 - Show if your account is locked during authentification process

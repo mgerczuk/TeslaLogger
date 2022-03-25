@@ -4,9 +4,12 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using Exceptionless;
 
 namespace TeslaLogger
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1303:Literale nicht als lokalisierte Parameter übergeben", Justification = "<Pending>")]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     public abstract class StaticMapProvider
     {
 
@@ -84,25 +87,33 @@ namespace TeslaLogger
 
         public static void SaveImage(Bitmap image, string filename)
         {
-            try
+            if (image != null)
             {
-                image.Save(filename);
-                Logfile.Log("Create File: " + filename);
-            }
-            catch (Exception ex)
-            {
-                Tools.DebugLog("Exception", ex);
+                try
+                {
+                    image.Save(filename);
+                    Logfile.Log("Create File: " + filename);
+                }
+                catch (Exception ex)
+                {
+                    ex.ToExceptionless().FirstCarUserID().Submit();
+                    Tools.DebugLog("Exception", ex);
+                }
             }
         }
 
         protected static Tuple<double, double, double, double> DetermineExtent(DataTable coords)
         {
-            double min_lat = Convert.ToDouble(coords.Compute("min(lat)", string.Empty));
-            double min_lng = Convert.ToDouble(coords.Compute("min(lng)", string.Empty));
-            double max_lat = Convert.ToDouble(coords.Compute("max(lat)", string.Empty));
-            double max_lng = Convert.ToDouble(coords.Compute("max(lng)", string.Empty));
-            Tools.DebugLog($"DetermineExtent {min_lat},{min_lng} {max_lat},{max_lng}");
-            return new Tuple<double, double, double, double>(min_lat, min_lng, max_lat, max_lng);
+            if (coords != null)
+            {
+                double min_lat = Convert.ToDouble(coords.Compute("min(lat)", string.Empty), Tools.ciDeDE);
+                double min_lng = Convert.ToDouble(coords.Compute("min(lng)", string.Empty), Tools.ciDeDE);
+                double max_lat = Convert.ToDouble(coords.Compute("max(lat)", string.Empty), Tools.ciDeDE);
+                double max_lng = Convert.ToDouble(coords.Compute("max(lng)", string.Empty), Tools.ciDeDE);
+                Tools.DebugLog($"DetermineExtent {min_lat},{min_lng} {max_lat},{max_lng}");
+                return new Tuple<double, double, double, double>(min_lat, min_lng, max_lat, max_lng);
+            }
+            return null;
         }
 
         internal static bool MapFileExistsOrIsTooOld(string filename, int days = 90)
@@ -125,6 +136,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
+                ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
             return false;
