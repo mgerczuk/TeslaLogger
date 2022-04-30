@@ -19,6 +19,7 @@ using Exceptionless;
 using Newtonsoft.Json;
 using System.Web;
 using Newtonsoft.Json.Linq;
+using System.Net.Http.Headers;
 
 namespace TeslaLogger
 {
@@ -72,7 +73,7 @@ namespace TeslaLogger
 
         private double battery_range2ideal_battery_range = 0.8000000416972936;
 
-        internal static HttpClient httpclient_teslalogger_de = new HttpClient();
+        internal HttpClient httpclient_teslalogger_de = new HttpClient();
         internal static HttpClient httpClientForAuthentification;
         internal static HttpClient httpClientABRP = null;
         internal HttpClient httpclientTeslaAPI = null;
@@ -90,9 +91,14 @@ namespace TeslaLogger
 #pragma warning restore CA5359 // Deaktivieren Sie die Zertifikatüberprüfung nicht
         }
 
-        public WebHelper(Car car)
+        internal WebHelper(Car car)
         {
             this.car = car;
+
+            httpclient_teslalogger_de.DefaultRequestHeaders.ConnectionClose = true;
+            ProductInfoHeaderValue userAgent = new ProductInfoHeaderValue("Teslalogger", Assembly.GetExecutingAssembly().GetName().Version.ToString());
+            httpclient_teslalogger_de.DefaultRequestHeaders.UserAgent.Add(userAgent);
+            httpclient_teslalogger_de.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("(" + car.TaskerHash + "; " + Thread.CurrentThread.ManagedThreadId +")"));
 
             CheckUseTaskerToken();
         }
@@ -533,8 +539,47 @@ namespace TeslaLogger
                             // as of March 21 2022 Tesla returns a bearer token. GetTokenAsync4 is no longer neeaded. 
                             car.CreateExeptionlessLog("Tesla Token", "UpdateTeslaTokenFromRefreshToken Success", Exceptionless.Logging.LogLevel.Info).Submit();
                             Tesla_token = jsonResult["access_token"];
+                            car.Tesla_Token = Tesla_token;
                             car.DbHelper.UpdateTeslaToken();
                             car.LoginRetryCounter = 0;
+
+                            try
+                            {
+                                var c = GethttpclientTeslaAPI(true); // dispose old client and create a new Client with new token.
+                                _ = IsOnline(true).Result; // get new Tesla_Streamingtoken;
+                                // restart streaming thread with new token
+                                _ = Task.Factory.StartNew(() =>
+                                {
+                                    Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
+                                    StopStreaming();
+                                    bool newThreadCreated = false;
+                                    for (int i = 0; i < 100 && !newThreadCreated; i++)
+                                    {
+                                        Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
+                                        if (streamThread.ThreadState == ThreadState.Stopped)
+                                        {
+                                            newThreadCreated = true;
+                                            streamThread = null;
+                                            StartStreamThread();
+                                            Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
+                                        }
+                                        else
+                                        {
+                                            Thread.Sleep(1000);
+                                            Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
+                                        }
+                                    }
+                                    if (!newThreadCreated)
+                                    {
+                                        car.Log("Failed to restart stream thread");
+                                    }
+                                }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+                            }
+                            catch (Exception ex)
+                            {
+                                car.CreateExceptionlessClient(ex).AddObject(HttpStatusCode, "HTTP StatusCode").AddObject(resultContent, "ResultContent").Submit();
+                                car.Log("Refresh TeslaToken and Streamingtoken: " + ex.ToString());
+                            }
 
                             return Tesla_token;
 
@@ -1176,7 +1221,7 @@ namespace TeslaLogger
                     }
                 }
             }
-            catch (ThreadAbortException ex)
+            catch (ThreadAbortException)
             {
                 System.Diagnostics.Debug.WriteLine("Thread Stop!");
             }
@@ -1690,7 +1735,7 @@ namespace TeslaLogger
 
         private int unknownStateCounter = 0;
 
-        public async Task<string> IsOnline()
+        public async Task<string> IsOnline(bool returnOnUnauthorized = false)
         {
             string resultContent = "";
             try
@@ -1701,11 +1746,12 @@ namespace TeslaLogger
                 DateTime start = DateTime.UtcNow;
                 HttpResponseMessage result = await client.GetAsync(adresse);
 
-                if (result.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    if (LoginRetry(result))
-                        return "NULL";
-                }
+                if (returnOnUnauthorized && result?.StatusCode == HttpStatusCode.Unauthorized)
+                    return "NULL";
+
+                if (LoginRetry(result))
+                    return "NULL";
+                
 
                 resultContent = await result.Content.ReadAsStringAsync();
                 // resultContent = Tools.ConvertBase64toString("");
@@ -1728,6 +1774,13 @@ namespace TeslaLogger
                 {
                     Log("isOnline: operation_timedout with 10s timeout");
                     Thread.Sleep(20000);
+                    return "NULL";
+                }
+
+                if (resultContent.Contains("Retry later"))
+                {
+                    Log("isOnline: Retry later");
+                    Thread.Sleep(30000);
                     return "NULL";
                 }
 
@@ -1760,7 +1813,7 @@ namespace TeslaLogger
                     Log("IsOnline response = NULL: " + resultContent);
 
                     car.CreateExeptionlessLog("WebHelper", "IsOnline:Not Found", Exceptionless.Logging.LogLevel.Warn).AddObject(resultContent, "resultContent").Submit();
-                    car.Restart("IsOnline: not found", 60);
+                    car.Restart("IsOnline: not found", 0);
                     
                     return "NULL";
                 }
@@ -1774,7 +1827,13 @@ namespace TeslaLogger
                 var r4 = r1[car.CarInAccount];
 
                 string state = r4["state"].ToString();
-                Tesla_Streamingtoken = r4["tokens"][0].ToString();
+                string temp_Tesla_Streamingtoken = r4["tokens"][0].ToString();
+                
+                if (temp_Tesla_Streamingtoken != Tesla_Streamingtoken)
+                {
+                    Tesla_Streamingtoken = temp_Tesla_Streamingtoken;
+                     // can be ignored, is not used at the moment car.Log("Tesla_Streamingtoken changed!");
+                }
 
                 try
                 {
@@ -2608,7 +2667,7 @@ namespace TeslaLogger
             if (streamThread == null)
             {
                 streamThread = new System.Threading.Thread(() => StartStream());
-                streamThread.Name = "StreamAPIThread";
+                streamThread.Name = "StreamAPIThread_" + car.CarInDB;
                 streamThread.Start();
             }
         }
@@ -2618,7 +2677,7 @@ namespace TeslaLogger
             string resultContent = null;
             byte[] buffer = new byte[1024];
 
-            Log("StartStream");
+            car.Log("StartStream");
             stopStreaming = false;
             string line = "";
             while (!stopStreaming)
@@ -2641,7 +2700,7 @@ namespace TeslaLogger
 
                     ws = new System.Net.WebSockets.ClientWebSocket();
 
-                    byte[] byteArray = Encoding.ASCII.GetBytes(string.Format("{0}:{1}", ApplicationSettings.Default.TeslaName, Tesla_Streamingtoken));
+                    // byte[] byteArray = Encoding.ASCII.GetBytes(string.Format("{0}:{1}", ApplicationSettings.Default.TeslaName, Tesla_Streamingtoken));
                     Uri serverUri = new Uri($"wss://streaming.vn.teslamotors.com/streaming/");
 
                     string connectmsg = "{\n" +
@@ -2663,12 +2722,12 @@ namespace TeslaLogger
                     ArraySegment<byte> bufferPing = new ArraySegment<byte>(Encoding.ASCII.GetBytes("PING"));
                     ArraySegment<byte> bufferMSG = new ArraySegment<byte>(Encoding.ASCII.GetBytes(connectmsg));
 
-                    if (ws.State == System.Net.WebSockets.WebSocketState.Open)
+                    if (!stopStreaming && ws.State == System.Net.WebSockets.WebSocketState.Open)
                     {
                         ws.SendAsync(bufferMSG, System.Net.WebSockets.WebSocketMessageType.Text, true, CancellationToken.None).Wait();
                     }
 
-                    while (ws.State == System.Net.WebSockets.WebSocketState.Open)
+                    while (!stopStreaming && ws.State == System.Net.WebSockets.WebSocketState.Open)
                     {
                         Thread.Sleep(100);
                         var cts = new CancellationTokenSource(10000);
@@ -2939,7 +2998,7 @@ namespace TeslaLogger
             
         }*/
 
-        public static async Task<string> ReverseGecocodingAsync(Car c, double latitude, double longitude, bool forceGeocoding = false, bool insertGeocodecache = true)
+        internal static async Task<string> ReverseGecocodingAsync(Car c, double latitude, double longitude, bool forceGeocoding = false, bool insertGeocodecache = true)
         {
             string url = "";
             string resultContent = "";
@@ -3726,7 +3785,7 @@ namespace TeslaLogger
                     if (HttpNotFoundCounter > 5)
                     {
                         car.CreateExeptionlessLog("WebHelper", $"404 Error ({cmd}) -> Restart Car Thread", Exceptionless.Logging.LogLevel.Warn).Submit();
-                        car.Restart("404 Error", 10);
+                        car.Restart("404 Error", 0);
                     }
                 }
                 else
@@ -3754,12 +3813,14 @@ namespace TeslaLogger
                     System.Threading.Thread.Sleep(60000);
 
                     car.LoginRetryCounter++;
-                    Tesla_token = GetToken();
+
+                    string tempToken = UpdateTeslaTokenFromRefreshToken();
+
                     return true;
                 }
                 else
                 {
-                    car.ExitTeslaLogger("Login retrys exeeded!");
+                    car.ExitCarThread("Login retrys exeeded!");
                 }
             }
             return false;
@@ -3994,11 +4055,11 @@ namespace TeslaLogger
         public void StopStreaming()
         {
             Log("Request StopStreaming");
-            //stopStreaming = true;
+            stopStreaming = true;
         }
 
         private DateTime lastTaskerWakeupfile = DateTime.Today;
-        private bool stopStreaming = false;
+        private volatile bool stopStreaming = false;
 
         public bool TaskerWakeupfile(bool force = false)
         {
@@ -4163,8 +4224,8 @@ namespace TeslaLogger
             }
             catch (WebException wex)
             {
-                return "Error during online version check: " + wex.Message;
                 wex.ToExceptionless().AddObject(contents, "ResultContent").Submit();
+                return "Error during online version check: " + wex.Message;
             }
             catch (Exception ex)
             {
@@ -4218,6 +4279,7 @@ namespace TeslaLogger
                         c.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
                         c.DefaultRequestHeaders.Connection.Add("keep-alive");
                         c.DefaultRequestHeaders.Add("Authorization", "APIKEY 54ac054f-0412-4747-b788-bcc8c6b60f27");
+                        c.DefaultRequestHeaders.ConnectionClose = true;
                         httpClientABRP = c;
 
                         Logfile.Log("ABRP initialized!");

@@ -180,8 +180,8 @@ Supercharger-V3 DE-Hamburg - Stillhorn, 53.479701, 10.025150
 Supercharger DE-Hengersberg, 48.76555, 13.04668
 Supercharger DE-Herboltzheim, 48.22704, 7.75368
 Supercharger-V3 DE-Hermsdorf, 50.889889,11.871397, 30
-Supercharger-V3 DE-Herzsprung, 53.067343, 12.533212
-Supercharger DE-Herzsprung, 53.067343, 12.533212
+Supercharger-V3 DE-Herzsprung, 53.067341,12.533227,20
+Supercharger DE-Herzsprung, 53.067341,12.533227,20
 Supercharger DE-Hilden, 51.191193,6.936986, 30
 Supercharger-V3 DE-Hilden, 51.19213, 6.935785, 10
 Supercharger-V3 DE-Hilden, 51.192013, 6.935892, 12 
@@ -1218,6 +1218,7 @@ Allego DE-Gateway-Gardens Frankfurt, 50.055232, 8.587298, 20
 Allego DE-Hannover-Lahe, 52.419419, 9.832403, 10
 Allego DE-Hermsdorf McDonalds, 50.889717, 11.872576, 10
 Allego DE-Heppenheim, 49.643165, 8.624373
+Allego DE-Herzsprung,53.067101,12.533024,4
 Allego DE-Hilpoltstein, 49.161056, 11.260274, 7
 Allego DE-Hilpoltstein, 49.161067,11.260181, 8
 Allego DE-Hohenwarsleben, 52.174039, 11.495273, 6
@@ -1845,7 +1846,7 @@ Ionity FR-Mionnay Chatanay, 45.889238, 4.893502
 Ionity FR-Mionnay Saint Galmier, 45.885078, 4.894234
 Ionity FR-Montbartier, 43.915744, 1.309462
 Ionity FR-Montelimar Est, 44.513818, 4.781396
-Ionity FR-Montelimar Ouest, 44.5149, 4.78
+Ionity FR-Montelimar Ouest, 44.515081, 4.780751, 25
 Ionity FR-Morières, 43.922931, 4.912040
 Ionity FR-Mouxy, 45.673865, 5.929976
 Ionity FR-Nemours, 48.262403, 2.722228
@@ -2038,7 +2039,7 @@ Grønn Kontakt NO-Stryn Extra Markt, 61.902547, 6.715027
 
 Kaufland CZ-Praha,50.092464, 14.499563
 Kaufland DE-Aachen, 50.769387, 6.058244
-Kaufland DE-Anbach, 49.305557,10.588955
+Kaufland DE-Ansbach, 49.305557,10.588955
 Kaufland DE-Aschaffenburg, 49.968144, 9.165434
 Kaufland DE-Backnang, 48.962571,9.43141
 Kaufland DE-Berlin Grünhofer Weg, 52.533887, 13.188849
@@ -2222,8 +2223,6 @@ Lidl DE-Winterthur, 47.498986,8.763822
 Lidl FI-Vantaa, 60.261581, 24.87252
 Lidl IT-Peschiera del Garda, 45.43475, 10.680242
 Lidl SE-Falkenberg, 56.91611,12.502524
-
-Mainova DE-Frankfurt am Main Parkhaus Börse, 50.115389, 8.675916
 
 MOL CZ-Bělčice, 49.840839,14.813349
 MOL CZ-Velké Němčice, 49.010451,16.686846,10
