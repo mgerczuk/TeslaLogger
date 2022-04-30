@@ -18,7 +18,7 @@ namespace TeslaLogger
         private readonly string token;
         Car car;
 
-        public TeslaCanSync(Car c)
+        internal TeslaCanSync(Car c)
         {
             if (c != null)
             {
