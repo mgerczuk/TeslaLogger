@@ -137,7 +137,7 @@ namespace TeslaLogger
                     if (!DBHelper.TableExists("trip") || !DBHelper.ColumnExists("trip", "outside_temp_avg"))
                     {
                         UpdateDBViews();
-                }
+                    }
                     Logfile.Log("DBView Update (Task) finished.");
                 }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
 
@@ -152,24 +152,24 @@ namespace TeslaLogger
                         Logfile.Log("alter table can add index can_ix2 (id,carid,datum)");
                         DBHelper.ExecuteSQLQuery("alter table can add index can_ix2 (id,carid,datum)", 6000);
                         Logfile.Log("ALTER TABLE OK");
-                }
+                    }
 
                     if (!DBHelper.IndexExists("chargingsate_ix_pos", "chargingstate"))
-                {
+                    {
                         Logfile.Log("alter table chargingstate add index chargingsate_ix_pos (Pos)");
                         DBHelper.ExecuteSQLQuery("alter table chargingstate add index chargingsate_ix_pos (Pos)", 6000);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+                        Logfile.Log("ALTER TABLE OK");
+                    }
 
                     if (!DBHelper.IndexExists("ixAnalyzeChargingStates1", "chargingstate"))
-                {
+                    {
                         Logfile.Log("ALTER TABLE chargingstate ADD INDEX ixAnalyzeChargingStates1 ...");
                         DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD INDEX ixAnalyzeChargingStates1 (id, CarID, StartChargingID, EndChargingID)", 6000);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+                        Logfile.Log("ALTER TABLE OK");
+                    }
 
                     if (!DBHelper.IndexExists("idx_pos_CarID_id", "pos"))
-                {
+                    {
                         Logfile.Log("alter table pos add index idx_pos_CarID_id (CarID, id)");      // used for: select max(id) from pos where CarID=?
                         DBHelper.ExecuteSQLQuery("alter table pos add index idx_pos_CarID_id (CarID, id)", 600);
                         Logfile.Log("ALTER TABLE OK");
@@ -224,8 +224,8 @@ namespace TeslaLogger
                         {
                             Logfile.Log("ALTER TABLE mothership ADD UNIQUE ix_id_ts (id, ts)");
                             DBHelper.ExecuteSQLQuery("ALTER TABLE mothership ADD UNIQUE ix_id_ts (id, ts)", 1200);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+                            Logfile.Log("ALTER TABLE OK");
+                        }
 
                         if (!DBHelper.IndexExists("ix_endpos2", "drivestate"))
                         {
@@ -370,33 +370,33 @@ CREATE TABLE superchargers(
                 DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN battery_level DOUBLE NULL");
             }
 
-                if (!DBHelper.ColumnExists("pos", "inside_temp"))
-                {
-                    Logfile.Log("ALTER TABLE pos ADD COLUMN inside_temp DOUBLE NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN inside_temp DOUBLE NULL", 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+            if (!DBHelper.ColumnExists("pos", "inside_temp"))
+            {
+                Logfile.Log("ALTER TABLE pos ADD COLUMN inside_temp DOUBLE NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN inside_temp DOUBLE NULL", 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
 
-                if (!DBHelper.ColumnExists("pos", "battery_heater"))
-                {
-                    Logfile.Log("ALTER TABLE pos ADD COLUMN battery_heater TINYINT(1) NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN battery_heater TINYINT(1) NULL", 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+            if (!DBHelper.ColumnExists("pos", "battery_heater"))
+            {
+                Logfile.Log("ALTER TABLE pos ADD COLUMN battery_heater TINYINT(1) NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN battery_heater TINYINT(1) NULL", 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
 
-                if (!DBHelper.ColumnExists("pos", "is_preconditioning"))
-                {
-                    Logfile.Log("ALTER TABLE pos ADD COLUMN is_preconditioning TINYINT(1) NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN is_preconditioning TINYINT(1) NULL", 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+            if (!DBHelper.ColumnExists("pos", "is_preconditioning"))
+            {
+                Logfile.Log("ALTER TABLE pos ADD COLUMN is_preconditioning TINYINT(1) NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN is_preconditioning TINYINT(1) NULL", 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
 
-                if (!DBHelper.ColumnExists("pos", "sentry_mode"))
-                {
-                    Logfile.Log("ALTER TABLE pos ADD COLUMN sentry_mode TINYINT(1) NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN sentry_mode TINYINT(1) NULL", 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+            if (!DBHelper.ColumnExists("pos", "sentry_mode"))
+            {
+                Logfile.Log("ALTER TABLE pos ADD COLUMN sentry_mode TINYINT(1) NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE pos ADD COLUMN sentry_mode TINYINT(1) NULL", 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
 
             if (!DBHelper.ColumnExists("pos", "battery_range_km"))
             {
@@ -547,43 +547,43 @@ CREATE TABLE superchargers(
 
         private static void CheckDBSchema_chargingstate()
         {
-                if (!DBHelper.ColumnExists("chargingstate", "conn_charge_cable"))
-                {
-                    Logfile.Log("ALTER TABLE chargingstate ADD COLUMN conn_charge_cable varchar(50)");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD COLUMN conn_charge_cable varchar(50)", 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+            if (!DBHelper.ColumnExists("chargingstate", "conn_charge_cable"))
+            {
+                Logfile.Log("ALTER TABLE chargingstate ADD COLUMN conn_charge_cable varchar(50)");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD COLUMN conn_charge_cable varchar(50)", 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
 
-                if (!DBHelper.ColumnExists("chargingstate", "fast_charger_brand"))
-                {
-                    Logfile.Log("ALTER TABLE chargingstate ADD COLUMN fast_charger_brand varchar(50)");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD COLUMN fast_charger_brand varchar(50)", 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+            if (!DBHelper.ColumnExists("chargingstate", "fast_charger_brand"))
+            {
+                Logfile.Log("ALTER TABLE chargingstate ADD COLUMN fast_charger_brand varchar(50)");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD COLUMN fast_charger_brand varchar(50)", 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
 
-                if (!DBHelper.ColumnExists("chargingstate", "fast_charger_type"))
-                {
-                    Logfile.Log("ALTER TABLE chargingstate ADD COLUMN fast_charger_type varchar(50)");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD COLUMN fast_charger_type varchar(50)", 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+            if (!DBHelper.ColumnExists("chargingstate", "fast_charger_type"))
+            {
+                Logfile.Log("ALTER TABLE chargingstate ADD COLUMN fast_charger_type varchar(50)");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD COLUMN fast_charger_type varchar(50)", 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
 
-                if (!DBHelper.ColumnExists("chargingstate", "fast_charger_present"))
-                {
-                    Logfile.Log("ALTER TABLE chargingstate ADD COLUMN fast_charger_present TINYINT(1)");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD COLUMN fast_charger_present TINYINT(1)", 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+            if (!DBHelper.ColumnExists("chargingstate", "fast_charger_present"))
+            {
+                Logfile.Log("ALTER TABLE chargingstate ADD COLUMN fast_charger_present TINYINT(1)");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD COLUMN fast_charger_present TINYINT(1)", 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
 
-                if (!DBHelper.ColumnExists("chargingstate", "max_charger_power"))
-                {
-                    Logfile.Log("ALTER TABLE chargingstate ADD COLUMN max_charger_power int NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD COLUMN max_charger_power int NULL", 600);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+            if (!DBHelper.ColumnExists("chargingstate", "max_charger_power"))
+            {
+                Logfile.Log("ALTER TABLE chargingstate ADD COLUMN max_charger_power int NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE chargingstate ADD COLUMN max_charger_power int NULL", 600);
+                Logfile.Log("ALTER TABLE OK");
+            }
 
             if (!DBHelper.ColumnExists("chargingstate", "cost_total"))
-                {
+            {
                 Logfile.Log("ALTER TABLE chargingstate ADD Column cost_total");
                 DBHelper.ExecuteSQLQuery(@"ALTER TABLE `chargingstate` 
                         ADD COLUMN `cost_total` DOUBLE NULL DEFAULT NULL,
@@ -592,25 +592,25 @@ CREATE TABLE superchargers(
                         ADD COLUMN `cost_per_session` DOUBLE NULL DEFAULT NULL,
                         ADD COLUMN `cost_per_minute` DOUBLE NULL DEFAULT NULL,
                         ADD COLUMN `cost_idle_fee_total` DOUBLE NULL DEFAULT NULL", 600);
-                }
+            }
 
             if (!DBHelper.ColumnExists("chargingstate", "cost_kwh_meter_invoice"))
-                {
+            {
                 Logfile.Log("ALTER TABLE chargingstate ADD Column cost_kwh_meter_invoice");
                 DBHelper.ExecuteSQLQuery(@"ALTER TABLE `chargingstate` 
                         ADD COLUMN `cost_kwh_meter_invoice` DOUBLE NULL DEFAULT NULL", 600);
-                }
+            }
 
             if (!DBHelper.ColumnExists("chargingstate", "meter_vehicle_kwh_start"))
-                {
+            {
                 string sql = "ALTER TABLE chargingstate ADD COLUMN meter_vehicle_kwh_start double NULL,  ADD COLUMN meter_vehicle_kwh_end double NULL, ADD COLUMN meter_utility_kwh_start double NULL, ADD COLUMN meter_utility_kwh_end double NULL, ADD COLUMN meter_utility_kwh_sum double NULL";
                 Logfile.Log(sql);
                 DBHelper.ExecuteSQLQuery(sql, 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+                Logfile.Log("ALTER TABLE OK");
+            }
 
             if (!DBHelper.ColumnExists("chargingstate", "hidden"))
-                {
+            {
                 string sql = "ALTER TABLE chargingstate ADD hidden BOOLEAN NOT NULL DEFAULT FALSE ";
                 Logfile.Log(sql);
                 DBHelper.ExecuteSQLQuery(sql, 300);
@@ -622,14 +622,14 @@ CREATE TABLE superchargers(
                 Logfile.Log(sql);
                 DBHelper.ExecuteSQLQuery(sql, 300);
                 Logfile.Log("ALTER TABLE OK");
-                }
+            }
 
             if (!DBHelper.ColumnExists("chargingstate", "meter_vehicle_kwh_sum"))
-                {
+            {
                 string sql = "ALTER TABLE chargingstate ADD meter_vehicle_kwh_sum DOUBLE NULL DEFAULT NULL";
                 Logfile.Log(sql);
                 DBHelper.ExecuteSQLQuery(sql, 300);
-                    Logfile.Log("ALTER TABLE OK");
+                Logfile.Log("ALTER TABLE OK");
 
                 DBHelper.ExecuteSQLQuery("update chargingstate set meter_vehicle_kwh_sum = meter_vehicle_kwh_end - meter_vehicle_kwh_start where meter_vehicle_kwh_sum is null and meter_vehicle_kwh_start is not null and meter_vehicle_kwh_end is not null", 300);
                 DBHelper.ExecuteSQLQuery("update chargingstate set cost_kwh_meter_invoice = meter_vehicle_kwh_end - meter_vehicle_kwh_start where cost_kwh_meter_invoice is null and meter_vehicle_kwh_start is not null and meter_vehicle_kwh_end is not null and charge_energy_added < (meter_vehicle_kwh_end - meter_vehicle_kwh_start)", 300);
@@ -641,7 +641,7 @@ CREATE TABLE superchargers(
         }
 
         private static void CheckDBSchema_charging()
-                {
+        {
             if (!DBHelper.ColumnExists("charging", "charger_pilot_current"))
             {
                 Logfile.Log("ALTER TABLE charging ADD COLUMN charger_pilot_current INT NULL, ADD COLUMN charge_current_request INT NULL");
@@ -654,35 +654,35 @@ CREATE TABLE superchargers(
                 Logfile.Log("ALTER TABLE charging ADD COLUMN battery_heater TINYINT(1) NULL");
                 DBHelper.ExecuteSQLQuery("ALTER TABLE charging ADD COLUMN battery_heater TINYINT(1) NULL", 600);
                 Logfile.Log("ALTER TABLE OK");
-                }
+            }
 
-                if (!DBHelper.ColumnExists("charging", "battery_range_km"))
-                {
-                    Logfile.Log("ALTER TABLE charging ADD COLUMN battery_range_km DOUBLE NULL");
-                    DBHelper.ExecuteSQLQuery("ALTER TABLE charging ADD COLUMN battery_range_km DOUBLE NULL", 600);
-                }
+            if (!DBHelper.ColumnExists("charging", "battery_range_km"))
+            {
+                Logfile.Log("ALTER TABLE charging ADD COLUMN battery_range_km DOUBLE NULL");
+                DBHelper.ExecuteSQLQuery("ALTER TABLE charging ADD COLUMN battery_range_km DOUBLE NULL", 600);
+            }
 
             InsertCarID_Column("charging");
-                }
+        }
 
         private static void CheckDBSchema_car_version()
-                {
+        {
             if (!DBHelper.TableExists("car_version"))
             {
                 Logfile.Log("CREATE TABLE car_version (id int NOT NULL AUTO_INCREMENT, StartDate datetime NOT NULL, version varchar(50), PRIMARY KEY(id))");
                 DBHelper.ExecuteSQLQuery("CREATE TABLE car_version (id int NOT NULL AUTO_INCREMENT, StartDate datetime NOT NULL, version varchar(50), PRIMARY KEY(id))");
                 Logfile.Log("ALTER TABLE OK");
-                }
+            }
 
-                InsertCarID_Column("car_version");
+            InsertCarID_Column("car_version");
         }
 
         private static void CheckDBSchema_cars()
         {
-                if (!DBHelper.TableExists("cars"))
-                {
-                    Logfile.Log("create table cars");
-                    DBHelper.ExecuteSQLQuery(@"CREATE TABLE `cars` (
+            if (!DBHelper.TableExists("cars"))
+            {
+                Logfile.Log("create table cars");
+                DBHelper.ExecuteSQLQuery(@"CREATE TABLE `cars` (
                           `id` int(11) NOT NULL,
                           `tesla_name` varchar(45) DEFAULT NULL,
                           `tesla_password` varchar(45) DEFAULT NULL,
@@ -704,82 +704,94 @@ CREATE TABLE superchargers(
                           PRIMARY KEY (`id`)
                         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;", 600);
 
-                    try
+                try
+                {
+                    using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
                     {
-                        using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+                        con.Open();
+                        using (MySqlCommand cmd = new MySqlCommand("INSERT INTO cars (id,tesla_name,tesla_password,tesla_carid, display_name) values (1, @tesla_name, @tesla_password, @tesla_carid, 'Tesla')", con))
                         {
-                            con.Open();
-                            using (MySqlCommand cmd = new MySqlCommand("INSERT INTO cars (id,tesla_name,tesla_password,tesla_carid, display_name) values (1, @tesla_name, @tesla_password, @tesla_carid, 'Tesla')", con))
-                            {
-                                cmd.Parameters.AddWithValue("@tesla_name", ApplicationSettings.Default.TeslaName);
-                                cmd.Parameters.AddWithValue("@tesla_password", ApplicationSettings.Default.TeslaPasswort);
-                                cmd.Parameters.AddWithValue("@tesla_carid", ApplicationSettings.Default.Car);
+                            cmd.Parameters.AddWithValue("@tesla_name", ApplicationSettings.Default.TeslaName);
+                            cmd.Parameters.AddWithValue("@tesla_password", ApplicationSettings.Default.TeslaPasswort);
+                            cmd.Parameters.AddWithValue("@tesla_carid", ApplicationSettings.Default.Car);
                             SQLTracer.TraceNQ(cmd);
-                            }
                         }
                     }
-                    catch (Exception ex)
-                    {
+                }
+                catch (Exception ex)
+                {
                     ex.ToExceptionless().FirstCarUserID().Submit();
-                        Logfile.Log(ex.ToString());
-                    }
+                    Logfile.Log(ex.ToString());
                 }
+            }
 
-                if (!DBHelper.ColumnExists("cars", "vin"))
-                {
-                    Logfile.Log("ALTER TABLE cars ADD Column vin");
-                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` 
+            if (!DBHelper.ColumnExists("cars", "vin"))
+            {
+                Logfile.Log("ALTER TABLE cars ADD Column vin");
+                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` 
                         ADD COLUMN `vin` VARCHAR(20) NULL DEFAULT NULL", 600);
-                }
+            }
 
-                if (!DBHelper.ColumnExists("cars", "freesuc"))
-                {
-                    Logfile.Log("ALTER TABLE cars ADD Column freesuc");
-                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD `freesuc` TINYINT UNSIGNED NOT NULL DEFAULT '0'", 600);
-                }
+            if (!DBHelper.ColumnExists("cars", "freesuc"))
+            {
+                Logfile.Log("ALTER TABLE cars ADD Column freesuc");
+                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD `freesuc` TINYINT UNSIGNED NOT NULL DEFAULT '0'", 600);
+            }
 
-                if (!DBHelper.ColumnExists("cars", "lastscanmytesla"))
-                {
-                    Logfile.Log("ALTER TABLE cars ADD Column lastscanmytesla");
-                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `lastscanmytesla` datetime NULL DEFAULT NULL", 600);
-                }
+            if (!DBHelper.ColumnExists("cars", "lastscanmytesla"))
+            {
+                Logfile.Log("ALTER TABLE cars ADD Column lastscanmytesla");
+                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `lastscanmytesla` datetime NULL DEFAULT NULL", 600);
+            }
 
-                if (!DBHelper.ColumnExists("cars", "refresh_token"))
-                {
-                    Logfile.Log("ALTER TABLE cars ADD Column refresh_token");
-                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `refresh_token` TEXT NULL DEFAULT NULL", 600);
-                }
+            if (!DBHelper.ColumnExists("cars", "refresh_token"))
+            {
+                Logfile.Log("ALTER TABLE cars ADD Column refresh_token");
+                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `refresh_token` TEXT NULL DEFAULT NULL", 600);
+            }
 
-                if (!DBHelper.ColumnExists("cars", "ABRP_token"))
-                {
-                    Logfile.Log("ALTER TABLE cars ADD Column ABRP_token");
-                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `ABRP_token` VARCHAR(40) NULL DEFAULT NULL", 600);
-                }
+            if (!DBHelper.ColumnExists("cars", "ABRP_token"))
+            {
+                Logfile.Log("ALTER TABLE cars ADD Column ABRP_token");
+                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `ABRP_token` VARCHAR(40) NULL DEFAULT NULL", 600);
+            }
 
-                if (!DBHelper.ColumnExists("cars", "ABRP_mode"))
-                {
-                    Logfile.Log("ALTER TABLE cars ADD Column ABRP_mode");
-                    DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `ABRP_mode` TINYINT(1) NULL DEFAULT 0", 600);
-                }
+            if (!DBHelper.ColumnExists("cars", "ABRP_mode"))
+            {
+                Logfile.Log("ALTER TABLE cars ADD Column ABRP_mode");
+                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `ABRP_mode` TINYINT(1) NULL DEFAULT 0", 600);
+            }
 
-                if (!DBHelper.ColumnExists("cars", "meter_type"))
-                {
-                    string sql = "ALTER TABLE cars ADD COLUMN meter_type varchar(20) NULL, ADD COLUMN meter_host varchar(50) NULL, ADD COLUMN meter_parameter varchar(200) NULL";
-                    Logfile.Log(sql);
-                    DBHelper.ExecuteSQLQuery(sql, 300);
-                    Logfile.Log("ALTER TABLE OK");
-                }
+            if (!DBHelper.ColumnExists("cars", "SuCBingo_user"))
+            {
+                Logfile.Log("ALTER TABLE cars ADD Column SuCBingo_user");
+                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `SuCBingo_user` VARCHAR(40) NULL DEFAULT NULL", 600);
+            }
+
+            if (!DBHelper.ColumnExists("cars", "SuCBingo_apiKey"))
+            {
+                Logfile.Log("ALTER TABLE cars ADD Column SuCBingo_apiKey");
+                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD COLUMN `SuCBingo_apiKey` VARCHAR(100) NULL DEFAULT NULL", 600);
+            }
+
+            if (!DBHelper.ColumnExists("cars", "meter_type"))
+            {
+                string sql = "ALTER TABLE cars ADD COLUMN meter_type varchar(20) NULL, ADD COLUMN meter_host varchar(50) NULL, ADD COLUMN meter_parameter varchar(200) NULL";
+                Logfile.Log(sql);
+                DBHelper.ExecuteSQLQuery(sql, 300);
+                Logfile.Log("ALTER TABLE OK");
+            }
 
             if (DBHelper.GetColumnType("cars", "tesla_token").Contains("varchar"))
-                {
+            {
                 DBHelper.ExecuteSQLQuery("alter table cars modify tesla_token TEXT NULL", 120);
             }
-            }
+        }
 
         private static void CheckDBSchema_can()
-            {
+        {
             if (!DBHelper.TableExists("can"))
-                {
+            {
                 Logfile.Log("CREATE TABLE `can` (`datum` datetime NOT NULL, `id` mediumint NOT NULL, `val` double DEFAULT NULL, PRIMARY KEY(`datum`,`id`) ) ENGINE = InnoDB DEFAULT CHARSET = latin1;");
                 DBHelper.ExecuteSQLQuery("CREATE TABLE `can` (`datum` datetime NOT NULL, `id` mediumint NOT NULL, `val` double DEFAULT NULL, PRIMARY KEY(`datum`,`id`) ) ENGINE = InnoDB DEFAULT CHARSET = latin1;");
                 Logfile.Log("ALTER TABLE OK");
@@ -812,10 +824,10 @@ CREATE TABLE superchargers(
 
                     Logfile.Log("Apache Config changed! Old: " + oldValue);
                 }
-                       
+
                 temp = r.Replace(temp, "$1$2AllowOverride All$4$5");
             }
-            
+
             if (write)
                 File.WriteAllText(path, temp);
 
@@ -859,7 +871,7 @@ CREATE TABLE superchargers(
                     Tools.ExecMono("apt-get", "-y install git");
                     Tools.ExecMono("git", "--version");
                 }
-
+                
                 if (!File.Exists("/usr/bin/optipng") || !Tools.ExecMono("optipng", "-version", false).Contains("OptiPNG version"))
                 {
                     Logfile.Log("Try to install optipng");
@@ -1330,9 +1342,9 @@ CREATE TABLE superchargers(
                     Logfile.Log("Start Grafana update");
 
                     if (!Tools.IsDocker())
-                            {
+                    {
                         AllowUnsignedPlugins("/etc/grafana/grafana.ini", true);
-                            }
+                    }
 
                     UpdateGrafanaVersion();
 

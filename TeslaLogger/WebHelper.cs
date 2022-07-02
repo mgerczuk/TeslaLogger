@@ -76,6 +76,7 @@ namespace TeslaLogger
         internal HttpClient httpclient_teslalogger_de = new HttpClient();
         internal static HttpClient httpClientForAuthentification;
         internal static HttpClient httpClientABRP = null;
+        internal static HttpClient httpClientSuCBingo = null;
         internal HttpClient httpclientTeslaAPI = null;
         internal static object httpClientLock = new object();
 
@@ -548,32 +549,7 @@ namespace TeslaLogger
                                 var c = GethttpclientTeslaAPI(true); // dispose old client and create a new Client with new token.
                                 _ = IsOnline(true).Result; // get new Tesla_Streamingtoken;
                                 // restart streaming thread with new token
-                                _ = Task.Factory.StartNew(() =>
-                                {
-                                    Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
-                                    StopStreaming();
-                                    bool newThreadCreated = false;
-                                    for (int i = 0; i < 100 && !newThreadCreated; i++)
-                                    {
-                                        Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
-                                        if (streamThread.ThreadState == ThreadState.Stopped)
-                                        {
-                                            newThreadCreated = true;
-                                            streamThread = null;
-                                            StartStreamThread();
-                                            Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
-                                        }
-                                        else
-                                        {
-                                            Thread.Sleep(1000);
-                                            Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
-                                        }
-                                    }
-                                    if (!newThreadCreated)
-                                    {
-                                        car.Log("Failed to restart stream thread");
-                                    }
-                                }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+                                RestartStreamThreadWithTask();
                             }
                             catch (Exception ex)
                             {
@@ -603,6 +579,37 @@ namespace TeslaLogger
             }
             return "";
         }
+
+        private void RestartStreamThreadWithTask()
+        {
+            _ = Task.Factory.StartNew(() =>
+            {
+                Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
+                StopStreaming();
+                bool newThreadCreated = false;
+                for (int i = 0; i < 100 && !newThreadCreated; i++)
+                {
+                    Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
+                    if (streamThread.ThreadState == ThreadState.Stopped)
+                    {
+                        newThreadCreated = true;
+                        streamThread = null;
+                        StartStreamThread();
+                        Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
+                    }
+                    else
+                    {
+                        Thread.Sleep(1000);
+                        Tools.DebugLog($"streamThread {streamThread.Name}:{streamThread.ManagedThreadId} state:{streamThread.ThreadState}");
+                    }
+                }
+                if (!newThreadCreated)
+                {
+                    car.Log("Failed to restart stream thread");
+                }
+            }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+        }
+
         /// <summary>
         /// 
         /// </summary>
@@ -1551,10 +1558,11 @@ namespace TeslaLogger
                     if (car.Vin != vin)
                     {
                         car.Vin = vin;
-                        Tools.VINDecoder(vin, out int year, out _, out bool aWD, out bool mIC, out _, out string motor, out _);
+                        Tools.VINDecoder(vin, out int year, out _, out bool aWD, out bool mIC, out _, out string motor, out bool mIG);
                         car.Year = year;
                         car.AWD = aWD;
                         car.MIC = mIC;
+                        car.MIG = mIG;
                         car.Motor = motor;
                         Log("WriteCarsettings -> VIN");
                         car.WriteSettings();
@@ -2273,15 +2281,44 @@ namespace TeslaLogger
             }
             else if (car.CarType == "modely" && car.CarSpecialType == "base")
             {
+                Tools.VINDecoder(car.Vin, out int year, out _, out bool _, out bool MIC, out string _, out string _, out bool MIG);
                 if (car.TrimBadging == "74d")
                 {
-                    WriteCarSettings("0.148", "Y LR AWD");
-                    return;
+                    if (MIC)
+                    {
+                        if (year < 2022)
+                        {
+                            WriteCarSettings("0.148", "Y LR AWD (MIC 2021)"); //LG 74kWh
+                            return;
+                        }else{
+                            WriteCarSettings("0.148", "Y LR AWD (MIC 2022)"); //LG 79kWh
+                            return;
+                        }
+                    }
+                    else if(MIG)
+                    {
+                        WriteCarSettings("0.148", "Y LR AWD (MIG)");
+                        return;
+                    }
+                    else
+                    {
+                        WriteCarSettings("0.148", "Y LR AWD (US)");
+                        return;
+                    }
+                    
                 }
                 else if (car.TrimBadging == "p74d")
                 {
-                    WriteCarSettings("0.148", "Y P");
-                    return;
+                    if (MIG)
+                    {
+                        WriteCarSettings("0.165", "Y P (MIG)");
+                        return;
+                    }
+                    else
+                    {
+                        WriteCarSettings("0.148", "Y P (US)");
+                        return;
+                    }
                 }
                 else if (car.TrimBadging == "50")
                 {
@@ -2766,11 +2803,21 @@ namespace TeslaLogger
                                         {
                                             string v = j["value"];
                                             if (v == "Vehicle is offline")
+                                            {
                                                 throw new Exception("Vehicle is offline");
+                                            }
                                             else
                                             {
                                                 car.Log("Stream Data Error: " + resultContent);
                                                 throw new Exception("unhandled vehicle_error: " + v);
+                                            }
+                                        }
+                                        else if (error_type == "client_error")
+                                        {
+                                            string v = j["value"];
+                                            if (v.Contains("Can't validate token"))
+                                            {
+                                                RestartStreamThreadWithTask();
                                             }
                                         }
                                         else
@@ -2778,6 +2825,7 @@ namespace TeslaLogger
                                             car.Log("Stream Data Error: " + resultContent);
                                             throw new Exception("unhandled error_type: " + error_type);
                                         }
+                                        break;
                                     case "data:update":
                                         string value = j["value"];
                                         StreamDataUpdate(value);
@@ -2873,6 +2921,8 @@ namespace TeslaLogger
                         ws.Abort();
                         ws.Dispose();
                     }
+
+                    DrivingOrChargingByStream = false;
                 }
             }
 
@@ -4056,6 +4106,7 @@ namespace TeslaLogger
         {
             Log("Request StopStreaming");
             stopStreaming = true;
+            DrivingOrChargingByStream = false;
         }
 
         private DateTime lastTaskerWakeupfile = DateTime.Today;
@@ -4340,6 +4391,77 @@ namespace TeslaLogger
 
                 Logfile.Log(ex.ToString());
                 Tools.DebugLog("SendDataToAbetterrouteplannerAsync exception: " + ex.ToString() + Environment.NewLine + ex.StackTrace);
+            }
+        }
+
+        internal async Task SuperchargeBingoCheckin(double latitude, double longitude)
+        {
+            try
+            {
+                DateTime start = DateTime.UtcNow;
+
+                lock (httpClientLock)
+                {
+                    if (httpClientSuCBingo == null)
+                    {
+                        HttpClient c = new HttpClient();
+                        c.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                        c.DefaultRequestHeaders.ConnectionClose = true;
+                        httpClientSuCBingo = c;
+
+                        Logfile.Log("SuperchargeBingo: initialized!");
+                    }
+                }
+
+                Dictionary<string, object> values = new Dictionary<string, object>
+                    {
+                        { "user", car.SuCBingoUser },
+                        { "key", car.SuCBingoApiKey},
+                        { "lat", latitude.ToString(Tools.ciEnUS) },
+                        { "long", longitude.ToString(Tools.ciEnUS) },
+                        { "type", "teslalogger" },
+                    };
+
+                string json = JsonConvert.SerializeObject(values);
+                using (var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"))
+                {
+                    Tools.SetThreadEnUS();
+                    var result = await httpClientSuCBingo.PostAsync("https://supercharge.bingo/v1.php/api/v1/checkin", content);
+                    string response = result.Content.ReadAsStringAsync().Result;
+
+                    DBHelper.AddMothershipDataToDB("SuperchargeBingoCheckin()", start, (int)result.StatusCode);
+
+                    int checkinID = 0;
+                    try
+                    {
+                        int.TryParse(response, out checkinID);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logfile.Log(ex.Message);
+                    }
+                    finally
+                    {
+                        if (checkinID != 0)
+                        {
+                            Logfile.Log("SuperchargeBingo: Checkin OK, Checkin ID: " + checkinID.ToString());
+                        }
+                        else
+                        {
+                            //Logfile.Log("SuperchargeBingo: Checkin not OK, response: " + response);
+                            dynamic jsonResult = JsonConvert.DeserializeObject(response);
+                            dynamic message = jsonResult["message"];
+                            Logfile.Log("SuperchargeBingo: Checkin Error: " + message);
+                        }
+                    }
+                    
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+                car.SendException2Exceptionless(ex);
+                Tools.DebugLog("SuperchargeBingo: Checkin exception: " + ex.ToString() + Environment.NewLine);
             }
         }
     }

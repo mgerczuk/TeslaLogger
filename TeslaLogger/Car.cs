@@ -101,6 +101,9 @@ namespace TeslaLogger
         private string aBRP_token = "";
         private int aBRP_mode = 0;
 
+        private string sucBingo_user = "";
+        private string sucBingo_apiKey = "";
+
         private CurrentJSON currentJSON;
 
         private static List<Car> allcars = new List<Car>();
@@ -137,6 +140,8 @@ namespace TeslaLogger
         public string Vin { get => vin; set => vin = value; }
         public string ABRPToken { get => aBRP_token; set => aBRP_token = value; }
         public int ABRPMode { get => aBRP_mode; set => aBRP_mode = value; }
+        public string SuCBingoUser { get => sucBingo_user; set => sucBingo_user = value; }
+        public string SuCBingoApiKey { get => sucBingo_apiKey; set => sucBingo_apiKey = value; }
         public CurrentJSON CurrentJSON { get => currentJSON; set => currentJSON = value; }
         public static List<Car> Allcars { get => allcars; }
         public DBHelper DbHelper { get => dbHelper; set => dbHelper = value; }
@@ -154,6 +159,7 @@ namespace TeslaLogger
         public int Year { get => year; set => year = value; }
         public bool AWD { get => aWD; set => aWD = value; }
         public bool MIC { get => mIC; set => mIC = value; }
+        public bool MIG { get => mIG; set => mIG = value; }
         public string Motor { get => motor; set => motor = value; }
         public static object InitCredentialsLock { get => initCredentialsLock; set => initCredentialsLock = value; }
         public double Sumkm { get => sumkm; set => sumkm = value; }
@@ -175,6 +181,7 @@ namespace TeslaLogger
         private int year = 0;
         private bool aWD = false;
         private bool mIC = false;
+        private bool mIG = false;
         private string motor = "";
         internal bool waitForMFACode;
         internal bool waitForRecaptcha;
@@ -366,7 +373,7 @@ namespace TeslaLogger
                 CarVoltageAt50SOC = DbHelper.GetVoltageAt50PercentSOC(out DateTime startdate, out DateTime ende);
                 Log("Voltage at 50% SOC:" + CarVoltageAt50SOC + "V Date:" + startdate.ToString(Tools.ciEnUS));
 
-                string vindecoder = Tools.VINDecoder(Vin, out year, out _, out aWD, out mIC, out _, out motor, out _).ToString();
+                string vindecoder = Tools.VINDecoder(Vin, out year, out _, out aWD, out mIC, out _, out motor, out mIG).ToString();
 
                 webhelper.DeleteWakeupFile();
 
@@ -386,6 +393,7 @@ namespace TeslaLogger
                 CurrentJSON.current_car_version = DbHelper.GetLastCarVersion();
 
                 DbHelper.GetABRP(out aBRP_token, out aBRP_mode);
+                DbHelper.GetSuCBingo(out sucBingo_user, out sucBingo_apiKey);
 
                 webhelper.StartStreamThread();
             }
@@ -1000,6 +1008,12 @@ namespace TeslaLogger
             odometerLastTrip = CurrentJSON.current_odometer;
 
             DbHelper.GetAvgConsumption(out this.sumkm, out this.avgkm, out this.kwh100km, out this.avgsocdiff, out this.maxkm);
+
+            Task.Run(() =>
+            {
+                var sd = new ShareData(this);
+                sd.SendAllDrivingData();
+            });
         }
 
 
