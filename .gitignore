@@ -80,3 +80,17 @@ TeslaLogger/bin/OVMS/protocollogging/*
 TeslaLogger/bin/OVMS/OVMS.exe.config
 TeslaLogger/bin/OVMS/geofence-private.csv
 TeslaLogger/copytoOVMS.cmd
+/TeslaLogger/bin/Exceptionless.pdb
+/TeslaLogger/bin/Exceptionless.xml
+/TeslaLogger/bin/K4os.Compression.LZ4.Streams.xml
+/TeslaLogger/bin/Google.Protobuf.pdb
+/TeslaLogger/bin/Google.Protobuf.xml
+/TeslaLogger/bin/K4os.Compression.LZ4.xml
+/TeslaLogger/bin/K4os.Hash.xxHash.xml
+/TeslaLogger/bin/Newtonsoft.Json.xml
+/TeslaLogger/bin/System.Buffers.xml
+/TeslaLogger/bin/System.Collections.Immutable.xml
+/TeslaLogger/bin/System.Memory.xml
+/TeslaLogger/bin/System.Reflection.Metadata.xml
+/TeslaLogger/bin/System.Runtime.CompilerServices.Unsafe.xml
+/TeslaLogger/bin/System.Threading.Tasks.Extensions.xml
