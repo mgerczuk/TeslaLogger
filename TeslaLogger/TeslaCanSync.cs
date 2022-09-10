@@ -13,10 +13,11 @@ namespace TeslaLogger
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     public class TeslaCanSync
     {
-        private const int SECONDS = 5;
+        private const int Seconds = 5;
 
         private readonly string token;
-        Car car;
+        private readonly Car car;
+        private readonly string url = "http://teslacan-esp.fritz.box";
 
         internal TeslaCanSync(Car c)
         {
@@ -24,7 +25,9 @@ namespace TeslaLogger
             {
                 token = c.TaskerHash;
                 car = c;
+                url = $"http://teslacan-{c.CarInDB}.fritz.box";
 
+                c.Log($"TeslaCanSync: Connectiong to {url}");
                 new Thread(Start).Start();
             }
         }
@@ -49,8 +52,8 @@ namespace TeslaLogger
                         foreach (var d in data) SaveData(d);
 
                         var lag = DateTime.Now - data.Last().Timestamp;
-                        if (lag < TimeSpan.FromSeconds(SECONDS))
-                            Thread.Sleep((int) (SECONDS - lag.TotalSeconds + 0.5) * 1000);
+                        if (lag < TimeSpan.FromSeconds(Seconds))
+                            Thread.Sleep((int) (Seconds - lag.TotalSeconds + 0.5) * 1000);
                     }
                 }
                 catch (Exception ex)
@@ -71,10 +74,10 @@ namespace TeslaLogger
             using (var client = new HttpClient())
             {
                 var start = DateTime.UtcNow;
-                var result = await client.GetAsync(new Uri("http://teslacan-esp.fritz.box/getdata?limit=12")).ConfigureAwait(true);
+                var result = await client.GetAsync(new Uri(url+"/getdata?limit=12")).ConfigureAwait(true);
                 var resultContent = await result.Content.ReadAsStringAsync().ConfigureAwait(true);
 
-                DBHelper.AddMothershipDataToDB("teslacan-esp.fritz.box/getdata", start, (int) result.StatusCode);
+                DBHelper.AddMothershipDataToDB(url+"/getdata", start, (int) result.StatusCode);
 
                 try
                 {
