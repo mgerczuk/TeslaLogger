@@ -94,3 +94,5 @@ TeslaLogger/copytoOVMS.cmd
 /TeslaLogger/bin/System.Reflection.Metadata.xml
 /TeslaLogger/bin/System.Runtime.CompilerServices.Unsafe.xml
 /TeslaLogger/bin/System.Threading.Tasks.Extensions.xml
+
+TeslaLogger/www/admin/plugins/*
