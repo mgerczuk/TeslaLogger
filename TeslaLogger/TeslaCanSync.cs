@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MySql.Data.MySqlClient;
+using Exceptionless;
 using Newtonsoft.Json;
 
 namespace TeslaLogger
@@ -16,6 +17,8 @@ namespace TeslaLogger
         private const int Seconds = 5;
 
         private readonly string token;
+        private Thread thread;
+        private bool run = true;
         private readonly Car car;
         private readonly string url = "http://teslacan-esp.fritz.box";
 
@@ -26,9 +29,11 @@ namespace TeslaLogger
                 token = c.TaskerHash;
                 car = c;
                 url = $"http://teslacan-{c.CarInDB}.fritz.box";
-
                 c.Log($"TeslaCanSync: Connectiong to {url}");
-                new Thread(Start).Start();
+
+                thread = new Thread(new ThreadStart(Start));
+                thread.Name = "TeslaCAN_" + car.CarInDB;
+                thread.Start();
             }
         }
 
@@ -36,7 +41,7 @@ namespace TeslaLogger
         {
             car.Log("Start refactored TeslaCAN Thread!");
 
-            while (true)
+            while (run)
             {
                 try
                 {
@@ -60,6 +65,7 @@ namespace TeslaLogger
                 {
                     if (!((ex as AggregateException)?.InnerExceptions[0] is HttpRequestException))
                     {
+                        car.CreateExceptionlessClient(ex).Submit();
                         car.Log("TeslaCAN: " + ex.Message);
                         Logfile.WriteException(ex.ToString());
                     }
@@ -218,6 +224,24 @@ namespace TeslaLogger
                     catch (Exception)
                     { }
                 }
+            }
+        }
+
+        public void StopThread()
+        {
+            run = false;
+        }
+
+        public void KillThread()
+        {
+            try
+            {
+                thread?.Abort();
+                thread = null;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.Write(ex.ToString());
             }
         }
 
