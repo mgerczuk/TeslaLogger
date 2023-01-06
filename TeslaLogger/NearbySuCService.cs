@@ -8,14 +8,14 @@ using System.Threading;
 using MySql.Data.MySqlClient;
 using Exceptionless;
 using Newtonsoft.Json;
+using System.Runtime.Caching;
 
 namespace TeslaLogger
 {
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Globalization", "CA1303:Literale nicht als lokalisierte Parameter übergeben", Justification = "<Pending>")]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     public class NearbySuCService
     {
-        private static NearbySuCService _NearbySuCService = null;
+        private static NearbySuCService _NearbySuCService;
 
         private NearbySuCService()
         {
@@ -40,7 +40,7 @@ namespace TeslaLogger
                 while (true)
                 {
                     Work();
-                    // sleep 10 Minutes
+                    // sleep 5 Minutes
                     Thread.Sleep(300000);
                 }
             }
@@ -55,9 +55,9 @@ namespace TeslaLogger
         {
             ArrayList send = new ArrayList();
 
-            // nearby_charging_sites
-            foreach (Car car in Car.Allcars)
+            for (int id = 0; id < Car.Allcars.Count; id++)
             {
+                Car car = Car.Allcars[id];
                 if (car.IsInService())
                     continue;
 
@@ -83,6 +83,12 @@ namespace TeslaLogger
                             Tools.DebugLog("NearbySuCService: vehicle unavailable");
                             return;
                         }
+                        else if (result.Contains("502 Bad Gateway"))
+                        {
+                            Tools.DebugLog("NearbySuCService: 502 Bad Gateway");
+                            return;
+                        }
+
                         dynamic jsonResult = JsonConvert.DeserializeObject(result);
                         if (jsonResult == null)
                             continue;
@@ -124,7 +130,7 @@ namespace TeslaLogger
 
                                             try
                                             {
-                                                AddSuperchargerState(suc, send);
+                                                AddSuperchargerState(suc, send, result);
                                             }
                                             catch (Exception ex)
                                             {
@@ -151,7 +157,7 @@ namespace TeslaLogger
             }
         }
 
-        private void ShareSuc(ArrayList send)
+        private static void ShareSuc(ArrayList send)
         {
             try
             {
@@ -178,7 +184,7 @@ namespace TeslaLogger
             }
         }
 
-        private void AddSuperchargerState(Newtonsoft.Json.Linq.JObject suc, ArrayList send)
+        private static void AddSuperchargerState(Newtonsoft.Json.Linq.JObject suc, ArrayList send, string resultContent)
         {
             int sucID = int.MinValue;
             string name = suc["localizedSiteName"]["value"].ToString();
@@ -187,6 +193,7 @@ namespace TeslaLogger
             dynamic location = suc["centroid"];
             double lat = location["latitude"];
             double lng = location["longitude"];
+            string Message = "";
 
             string siteType = suc["siteType"].ToString();
             if (siteType != "SITE_TYPE_SUPERCHARGER")
@@ -207,6 +214,32 @@ namespace TeslaLogger
             if (activeOutageCount > 0)
             {
                 System.Diagnostics.Debug.WriteLine("Outage: " + name);
+                foreach (dynamic ao in activeOutages)
+                {
+                    if (ao.ContainsKey("message"))
+                    {
+                        if (Message.Length > 0)
+                            Message += "|";
+
+                        Message += ao["message"].ToString();
+                    }
+                }
+
+                System.Diagnostics.Debug.WriteLine("Message: " + Message);
+
+                string cacheKey = "SuperchargerStateOutages_" + name;
+                object cacheValue = MemoryCache.Default.Get(cacheKey);
+                if (cacheValue == null)
+                {
+                    string base64 = Tools.ConvertString2Base64(resultContent);
+
+                    ExceptionlessClient.Default.CreateLog("SuperchargerStateOutages", name + " " + Message, Exceptionless.Logging.LogLevel.Info)
+                        .FirstCarUserID()
+                        .AddObject(resultContent, "ResultContent")
+                        .AddObject(base64, "ResultContentBase64").Submit();
+
+                    MemoryCache.Default.Add(cacheKey, true, DateTime.Now.AddHours(1));
+                }
             }
 
             if (!SuCfound)
@@ -220,11 +253,11 @@ namespace TeslaLogger
                 && suc.ContainsKey("totalStalls")
                 )
             {
-
-                Tools.DebugLog($"SuC: <{suc["name"]}> <{suc["available_stalls"]}> <{suc["total_stalls"]}>");
                 if (int.TryParse(suc["availableStalls"]["value"].ToString(), out int available_stalls)
                     && int.TryParse(suc["totalStalls"]["value"].ToString(), out int total_stalls))
                 {
+                    Tools.DebugLog($"SuC: <{name}> <{available_stalls}> <{total_stalls}>");
+
                     if (total_stalls > 0)
                     {
                         if (!ContainsSupercharger(send, name))
@@ -238,6 +271,7 @@ namespace TeslaLogger
                             sendKV.Add("a", available_stalls);
                             sendKV.Add("t", total_stalls);
                             sendKV.Add("kw", maxPowerKw);
+                            sendKV.Add("m", Message);
 
                             using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
                             {
@@ -321,7 +355,7 @@ VALUES(
 
         }
 
-        private bool ContainsSupercharger(ArrayList send, string name)
+        private static bool ContainsSupercharger(ArrayList send, string name)
         {
             foreach (object a in send)
             {
@@ -334,7 +368,7 @@ VALUES(
             return false;
         }
 
-        private int AddNewSupercharger(string name, double lat, double lng)
+        private static int AddNewSupercharger(string name, double lat, double lng)
         {
             using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
             {

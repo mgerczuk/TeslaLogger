@@ -923,7 +923,7 @@ AND id <=(
                 }
                 Tools.DebugLog($"RecalculateChargeEnergyAdded ChargingStateID:{ChargingStateID} sum:{sum}");
                 UpdateChargeEnergyAdded(ChargingStateID, sum);
-                UpdateChargePrice(ChargingStateID, false);
+                UpdateChargePrice(ChargingStateID);
                 updatedChargePrice = true;
             }
             return updatedChargePrice;
@@ -1309,6 +1309,45 @@ WHERE
             return tuple;
         }
 
+        internal void InsertTPMS(int TireId, double pressure, DateTime dtFL)
+        {
+            try
+            {
+                string cacheKey = "TPMS_" + TireId + "_" + car.CarInDB;
+                object cacheValue = MemoryCache.Default.Get(cacheKey);
+                if (cacheValue != null)
+                    return;
+                
+                MemoryCache.Default.Add(cacheKey, true, DateTime.Now.AddMinutes(2));
+
+                using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+                {
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand(@"insert TPMS (CarID, Datum, TireID, Pressure) values (@CarID, @Datum, @TireID, @Pressure)", con))
+                    {
+                        cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
+                        cmd.Parameters.AddWithValue("@Datum", dtFL);
+                        cmd.Parameters.AddWithValue("@TireID", TireId);
+                        cmd.Parameters.AddWithValue("@Pressure", pressure);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            }
+            catch (MySqlException ex)
+            {
+                if (ex.ErrorCode == -2147467259) // Duplicate entry
+                    return;
+
+                car.SendException2Exceptionless(ex);
+                car.Log(ex.ToString());
+            }
+            catch (Exception ex)
+            {
+                car.SendException2Exceptionless(ex);
+                car.Log(ex.ToString());
+            }
+        }
+
         private Queue<int> FindCombineCandidates()
         {
             Queue<int> combineCandidates = new Queue<int>();
@@ -1403,7 +1442,7 @@ HAVING
                 using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
                 {
                     con.Open();
-                    using (MySqlCommand cmd = new MySqlCommand("update cars set display_name=@display_name, Raven=@Raven, Wh_TR=@Wh_TR, DB_Wh_TR=@DB_Wh_TR, DB_Wh_TR_count=@DB_Wh_TR_count, car_type=@car_type, car_special_type=@car_special_type, car_trim_badging=@trim_badging, model_name=@model_name, Battery=@Battery, tasker_hash=@tasker_hash, vin=@vin where id=@id", con))
+                    using (MySqlCommand cmd = new MySqlCommand("update cars set display_name=@display_name, Raven=@Raven, Wh_TR=@Wh_TR, DB_Wh_TR=@DB_Wh_TR, DB_Wh_TR_count=@DB_Wh_TR_count, car_type=@car_type, car_special_type=@car_special_type, car_trim_badging=@trim_badging, model_name=@model_name, Battery=@Battery, tasker_hash=@tasker_hash, vin=@vin, wheel_type=@wheel_type where id=@id", con))
                     {
                         cmd.Parameters.AddWithValue("@id", car.CarInDB);
                         cmd.Parameters.AddWithValue("@Raven", car.Raven);
@@ -1418,6 +1457,7 @@ HAVING
                         cmd.Parameters.AddWithValue("@display_name", car.DisplayName);
                         cmd.Parameters.AddWithValue("@tasker_hash", car.TaskerHash);
                         cmd.Parameters.AddWithValue("@vin", car.Vin);
+                        cmd.Parameters.AddWithValue("@wheel_type", car.wheel_type);
 
                         int done = SQLTracer.TraceNQ(cmd);
 
@@ -1653,7 +1693,7 @@ HAVING
                     {
                         car.Log($"CopyChargePrice enabled for '{addr.name}'");
                         // find reference charge session for addr
-                        int refChargingState = FindReferenceChargingState(addr.name, out ref_cost_currency, out ref_cost_per_kwh, out ref_cost_per_kwh_found, out ref_cost_per_session, out ref_cost_per_session_found, out ref_cost_per_minute, out ref_cost_per_minute_found);
+                        int refChargingState = FindReferenceChargingState(ChargingStateID, addr.name, out ref_cost_currency, out ref_cost_per_kwh, out ref_cost_per_kwh_found, out ref_cost_per_session, out ref_cost_per_session_found, out ref_cost_per_minute, out ref_cost_per_minute_found);
                         // if exists, copy curreny, per_kwh, per_minute, per_session to current charging state
                         if (refChargingState != int.MinValue)
                         {
@@ -1706,7 +1746,7 @@ WHERE
             return false;
         }
 
-        private void UpdateChargePrice(int ChargingStateID, bool searchReference = true)
+        private void UpdateChargePrice(int ChargingStateID)
         {
             string ref_cost_currency = string.Empty;
             double ref_cost_per_kwh = double.NaN;
@@ -1715,80 +1755,8 @@ WHERE
             bool ref_cost_per_minute_found = false;
             double ref_cost_per_session = double.NaN;
             bool ref_cost_per_session_found = false;
-            if (searchReference)
-            {
-                GetChargeCostDataFromReference(ChargingStateID, ref ref_cost_currency, ref ref_cost_per_kwh, ref ref_cost_per_kwh_found, ref ref_cost_per_minute, ref ref_cost_per_minute_found, ref ref_cost_per_session, ref ref_cost_per_session_found);
-            }
-            else
-            {
-                GetChargeCostDataFromChargingStateID(ChargingStateID, ref ref_cost_currency, ref ref_cost_per_kwh, ref ref_cost_per_kwh_found, ref ref_cost_per_minute, ref ref_cost_per_minute_found, ref ref_cost_per_session, ref ref_cost_per_session_found);
-            }
+            GetChargeCostDataFromReference(ChargingStateID, ref ref_cost_currency, ref ref_cost_per_kwh, ref ref_cost_per_kwh_found, ref ref_cost_per_minute, ref ref_cost_per_minute_found, ref ref_cost_per_session, ref ref_cost_per_session_found);
             UpdateChargePrice(ChargingStateID, ref_cost_currency, ref_cost_per_kwh, ref_cost_per_kwh_found, ref_cost_per_minute, ref_cost_per_minute_found, ref_cost_per_session, ref_cost_per_session_found);
-        }
-
-        private void GetChargeCostDataFromChargingStateID(int ChargingStateID, ref string ref_cost_currency, ref double ref_cost_per_kwh, ref bool ref_cost_per_kwh_found, ref double ref_cost_per_minute, ref bool ref_cost_per_minute_found, ref double ref_cost_per_session, ref bool ref_cost_per_session_found)
-        {
-            ref_cost_currency = string.Empty;
-            ref_cost_per_kwh = double.NaN;
-            ref_cost_per_kwh_found = false;
-            ref_cost_per_minute = double.NaN;
-            ref_cost_per_minute_found = false;
-            ref_cost_per_session = double.NaN;
-            ref_cost_per_session_found = false;
-            try
-            {
-                using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
-                {
-                    con.Open();
-                    using (MySqlCommand cmd = new MySqlCommand(@"
-SELECT
-    chargingstate.cost_currency,
-    chargingstate.cost_per_kwh,
-    chargingstate.cost_per_session,
-    chargingstate.cost_per_minute
-FROM
-    chargingstate
-WHERE
-    chargingstate.id = @ChargingStateID
-", con))
-                    {
-                        cmd.Parameters.Add("@ChargingStateID", MySqlDbType.Int32).Value = ChargingStateID;
-                        MySqlDataReader dr = SQLTracer.TraceDR(cmd);
-                        if (dr.Read())
-                        {
-                            if (dr[0] != DBNull.Value)
-                            {
-                                ref_cost_currency = dr.GetString(1);
-                            }
-                            if (double.TryParse(dr[1].ToString(), out ref_cost_per_kwh))
-                            {
-                                ref_cost_per_kwh_found = true;
-                            }
-                            if (double.TryParse(dr[2].ToString(), out ref_cost_per_session))
-                            {
-                                ref_cost_per_session_found = true;
-                            }
-                            if (double.TryParse(dr[3].ToString(), out ref_cost_per_minute))
-                            {
-                                ref_cost_per_minute_found = true;
-                            }
-                            Tools.DebugLog($"GetChargeCostDataFromChargingStateID currency:{dr[0]} cost_per_kwh:{dr[1]} cost_per_session:{dr[2]} cost_per_minute:{dr[3]}");
-                        }
-                        else
-                        {
-                            Tools.DebugLog("GetChargeCostDataFromChargingStateID dr.read failed");
-                        }
-                        con.Close();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                car.CreateExceptionlessClient(ex).Submit();
-
-                Tools.DebugLog($"Exception during GetChargeCostDataFromChargingStateID(): {ex}");
-                Logfile.ExceptionWriter(ex, "Exception during GetChargeCostDataFromChargingStateID()");
-            }
         }
 
         private void UpdateChargePrice(int ChargingStateID, string ref_cost_currency, double ref_cost_per_kwh, bool ref_cost_per_kwh_found, double ref_cost_per_minute, bool ref_cost_per_minute_found, double ref_cost_per_session, bool ref_cost_per_session_found)
@@ -2033,7 +2001,7 @@ WHERE
                     }
                     catch (Exception ex)
                     {
-                        car.CreateExceptionlessClient(ex).Submit();
+                        car.CreateExceptionlessClient(ex).AddObject(ref_cost_currency, "ref_cost_currency").Submit();
 
                         Tools.DebugLog($"Exception during DBHelper.UpdateChargePrice(): {ex}");
                         Logfile.ExceptionWriter(ex, "Exception during DBHelper.UpdateChargePrice()");
@@ -2224,7 +2192,7 @@ WHERE
             RecalculateChargeEnergyAdded(ChargingStateID);
         }
 
-        private int FindReferenceChargingState(string name, out string ref_cost_currency, out double ref_cost_per_kwh, out bool ref_cost_per_kwh_found, out double ref_cost_per_session, out bool ref_cost_per_session_found, out double ref_cost_per_minute, out bool ref_cost_per_minute_found)
+        private int FindReferenceChargingState(int ChargingStateID, string name, out string ref_cost_currency, out double ref_cost_per_kwh, out bool ref_cost_per_kwh_found, out double ref_cost_per_session, out bool ref_cost_per_session_found, out double ref_cost_per_minute, out bool ref_cost_per_minute_found)
         {
             int referenceID = int.MinValue;
             ref_cost_currency = string.Empty;
@@ -2256,12 +2224,14 @@ WHERE
     AND TIMESTAMPDIFF(MINUTE, chargingstate.StartDate, chargingstate.EndDate) > 3
     AND chargingstate.EndChargingID - chargingstate.StartChargingID > 4
     AND chargingstate.CarID = @CarID
+    AND chargingstate.ID < @ChargingStateID
 ORDER BY
     id DESC
 LIMIT 1", con))
                     {
-                        cmd.Parameters.Add("@addr", MySqlDbType.VarChar).Value = name;
-                        cmd.Parameters.Add("@CarID", MySqlDbType.UByte).Value = car.CarInDB;
+                        cmd.Parameters.AddWithValue("@addr", name);
+                        cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
+                        cmd.Parameters.AddWithValue("@ChargingStateID", ChargingStateID);
                         MySqlDataReader dr = SQLTracer.TraceDR(cmd);
                         if (dr.Read())
                         {
@@ -2475,6 +2445,14 @@ WHERE
     ) AND chargingstate.fast_charger_type =(
         SELECT
             fast_charger_type
+        FROM
+            chargingstate
+        WHERE
+            chargingstate.CarID = @CarID
+            AND id = @referenceID
+    )  AND chargingstate.wheel_type =(
+        SELECT
+            wheel_type
         FROM
             chargingstate
         WHERE
@@ -2805,7 +2783,10 @@ WHERE
     CarID = @carid
 ORDER BY
     StartDate DESC
-LIMIT 1", con))
+LIMIT 1", con)
+                    {
+                        CommandTimeout = 6000
+                    })
                     {
                         cmd.Parameters.AddWithValue("@carid", car.CarInDB);
                         MySqlDataReader dr = SQLTracer.TraceDR(cmd);
@@ -2848,7 +2829,6 @@ LIMIT 1", con))
                         dr.Close();
                     }
 
-
                     using (MySqlCommand cmd = new MySqlCommand(@"
 SELECT
     ideal_battery_range_km,
@@ -2862,7 +2842,10 @@ WHERE
     CarID = @CarID
 ORDER BY
     id DESC
-LIMIT 1", con))
+LIMIT 1", con)
+                    {
+                        CommandTimeout = 6000
+                    })
                     {
                         cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
                         MySqlDataReader dr = SQLTracer.TraceDR(cmd);
@@ -2953,7 +2936,8 @@ INSERT
         conn_charge_cable,
         fast_charger_present,
         meter_vehicle_kwh_start,
-        meter_utility_kwh_start
+        meter_utility_kwh_start,
+        wheel_type
     )
 VALUES(
     @CarID,
@@ -2965,7 +2949,8 @@ VALUES(
     @conn_charge_cable,
     @fast_charger_present,
     @meter_vehicle_kwh_start,
-    @meter_utility_kwh_start
+    @meter_utility_kwh_start,
+    @wheel_type
 )", con))
                     {
                         cmd.Parameters.AddWithValue("@CarID", wh.car.CarInDB);
@@ -2978,6 +2963,7 @@ VALUES(
                         cmd.Parameters.AddWithValue("@fast_charger_present", wh.fast_charger_present);
                         cmd.Parameters.AddWithValue("@meter_vehicle_kwh_start", meter_vehicle_kwh_start);
                         cmd.Parameters.AddWithValue("@meter_utility_kwh_start", meter_utility_kwh_start);
+                        cmd.Parameters.AddWithValue("@wheel_type", wh.car.wheel_type);
                         SQLTracer.TraceNQ(cmd);
 
                         cmd.CommandText = "SELECT LAST_INSERT_ID();";
@@ -3582,7 +3568,17 @@ WHERE
   id = @id", con2))
                                         {
                                             cmd2.Parameters.AddWithValue("@id", posid);
-                                            cmd2.Parameters.AddWithValue("@adress", task.Result);
+                                            string address = task.Result;
+                                            if (address.Length > 250)
+                                                address = address.Substring(0, 250);
+                                            
+                                            cmd2.Parameters.AddWithValue("@adress", address);
+                                            if (task.Result.Length > 250)
+                                            {
+                                                var exl = (new Exception()).ToExceptionless().FirstCarUserID();
+                                                exl.AddObject(task.Result, $"ReverseGecocodingAsync returned long (l:{task.Result.Length}) address for lat:{lat} lng:{lng}");
+                                                exl.Submit();
+                                            }
                                             SQLTracer.TraceNQ(cmd2);
 
                                             GeocodeCache.Instance.Write();
@@ -3853,11 +3849,12 @@ WHERE
             using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
             {
                 con.Open();
-                using (MySqlCommand cmd = new MySqlCommand("insert drivestate (StartDate, StartPos, CarID) values (@StartDate, @Pos, @CarID)", con))
+                using (MySqlCommand cmd = new MySqlCommand("insert drivestate (StartDate, StartPos, CarID, wheel_type) values (@StartDate, @Pos, @CarID, @wheel_type)", con))
                 {
                     cmd.Parameters.AddWithValue("@StartDate", now);
                     cmd.Parameters.AddWithValue("@Pos", GetMaxPosid());
                     cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
+                    cmd.Parameters.AddWithValue("@wheel_type", car.wheel_type);
                     SQLTracer.TraceNQ(cmd);
                 }
             }
@@ -5681,16 +5678,22 @@ WHERE
             return json;
         }
 
-        public static long InsertNewCar(string email, string password, int teslacarid, bool freesuc, string access_token, string refresh_token, string vin, string display_name)
+        public static decimal InsertNewCar(string email, string password, int teslacarid, bool freesuc, string access_token, string refresh_token, string vin, string display_name)
         {
             Logfile.Log($"Insert new Car: {display_name}, VIN: {vin}, TeslaCarId: {teslacarid}");
             using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
             {
                 con.Open();
 
-                using (MySqlCommand cmd = new MySqlCommand("select max(id)+1 from cars", con))
+                using (MySqlCommand cmd = new MySqlCommand(@"
+                    select max(a)+1 from
+                    (
+                        select max(id) as a from cars
+                        union
+                        select max(carid) as a from pos
+                    ) as t", con))
                 {
-                    long newid = SQLTracer.TraceSc(cmd) as long? ?? 1;
+                    decimal newid = SQLTracer.TraceSc(cmd) as decimal? ?? 1;
 
                     using (var cmd2 = new MySqlCommand("insert cars (id, tesla_name, tesla_password, tesla_carid, display_name, freesuc, tesla_token, refresh_token, vin) values (@id, @tesla_name, @tesla_password, @tesla_carid, @display_name, @freesuc,  @tesla_token, @refresh_token, @vin)", con))
                     {
@@ -5713,6 +5716,16 @@ WHERE
                     return newid;
                 }
             }
+        }
+
+        public static DataTable GetAllChargingstates()
+        {
+            var dt = new DataTable();
+
+            MySqlDataAdapter da = new MySqlDataAdapter("SELECT chargingstate.id, StartDate, EndDate, address, lat, lng, charge_energy_added FROM chargingstate join pos on chargingstate.pos = pos.id order by address", "Server=192.168.1.105;Database=teslalogger;Uid=root;Password=teslalogger;CharSet=utf8mb4;");
+            da.Fill(dt);
+
+            return dt;
         }
     }
 }
