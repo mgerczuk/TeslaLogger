@@ -245,7 +245,7 @@ namespace TeslaLogger
                 }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
                 // end index update
 
-                DBHelper.EnableMothership();
+                //DBHelper.EnableMothership();
 
                 timer = new System.Threading.Timer(FileChecker, null, 10000, 5000);
 

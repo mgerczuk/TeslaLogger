@@ -222,11 +222,6 @@ VALUES(
 
         public static void AddMothershipDataToDB(string command, DateTime start, int httpcode)
         {
-            if (mothershipEnabled == false)
-            {
-                return;
-            }
-
             DateTime end = DateTime.UtcNow;
             TimeSpan ts = end - start;
             double duration = ts.TotalSeconds;
@@ -235,6 +230,10 @@ VALUES(
 
         public static void AddMothershipDataToDB(string command, double duration, int httpcode)
         {
+            if (mothershipEnabled == false)
+            {
+                return;
+            }
 
             if (!mothershipCommands.ContainsKey(command))
             {
