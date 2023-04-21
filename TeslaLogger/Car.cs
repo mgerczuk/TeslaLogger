@@ -1357,9 +1357,8 @@ namespace TeslaLogger
             if (_oldState == TeslaState.Start && _newState == TeslaState.Online)
             {
                 _ = webhelper.GetOdometerAsync();
-                Tools.DebugLog($"Start -> Online SendDataToAbetterrouteplannerAsync(utc:{Tools.ToUnixTime(DateTime.UtcNow) * 1000}, soc:{CurrentJSON.current_battery_level}, speed:0, charging:false, power:0, lat:{CurrentJSON.GetLatitude()}, lon:{CurrentJSON.GetLongitude()})");
+                Tools.DebugLog($"#{CarInDB}:Start -> Online SendDataToAbetterrouteplannerAsync(utc:{Tools.ToUnixTime(DateTime.UtcNow) * 1000}, soc:{CurrentJSON.current_battery_level}, speed:0, charging:false, power:0, lat:{CurrentJSON.GetLatitude()}, lon:{CurrentJSON.GetLongitude()})");
                 _ = webhelper.SendDataToAbetterrouteplannerAsync(Tools.ToUnixTime(DateTime.UtcNow) * 1000, CurrentJSON.current_battery_level, 0, false, 0, CurrentJSON.GetLatitude(), CurrentJSON.GetLongitude());
-
             }
             // any -> Driving
             if (_oldState != TeslaState.Drive && _newState == TeslaState.Drive)
@@ -1640,6 +1639,10 @@ namespace TeslaLogger
                     return true;
                 }
             }
+            if (IsInService())
+            {
+                return true;
+            }
             return false;
         }
 
@@ -1719,12 +1722,17 @@ id = @carid", con))
                 }
                 if (teslaAPIState.GetInt("ft", out int ft) && ft > 0)
                 {
-                    reason = $"Fron Trunk {ft}";
+                    reason = $"Front Trunk {ft}";
                     return false;
                 }
                 if (teslaAPIState.GetInt("rt", out int rt) && rt > 0)
                 {
                     reason = $"Rear Trunk {rt}";
+                    return false;
+                }
+                if (teslaAPIState.GetBool("in_service", out bool in_service) && in_service == true)
+                {
+                    reason = "IsInService";
                     return false;
                 }
             }

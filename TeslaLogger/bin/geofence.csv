@@ -123,10 +123,12 @@ Supercharger CH-Melide, 45.95423, 8.95051
 Supercharger CH-Monte Ceneri, 46.13924, 8.9070614
 Supercharger-V3 CH-Obfelden, 47.272009,8.437787, 26
 Supercharger CH-Oftringen, 47.310793,7.935012
+Supercharger-V3 CH-Pfäffikon SZ, 47.199915, 8.794428
 Supercharger CH-Pratteln, 47.524711,7.680202
 Supercharger CH-Quinto, 46.51521, 8.67063
 Supercharger CH-Rubigen, 46.891773, 7.542738
 Supercharger CH-Schaffhausen, 47.720985, 8.646664
+Supercharger-V3 CH-St. Gallen, 47.408150, 9.304028
 Supercharger CH-St. Moritz, 46.496797, 9.84272
 Supercharger CH-Steg-Hohtenn, 46.310364, 7.749565
 Supercharger CN-DoubleTree by Hilton Hotel Guangzhou Huihua, 23.183827,113.470749
@@ -210,6 +212,7 @@ Supercharger DE-Hilpoltstein,49.161201,11.260685,12
 Supercharger DE-Hirschberg, 49.50738, 8.63752
 Supercharger DE-Hohenwarsleben, 52.174053, 11.494502, 15
 Supercharger DE-Irschenberg, 47.82648, 11.89831
+Supercharger-V3 DE-Irschenberg, 47.826678, 11.898501
 Supercharger-V3 DE-Irxleben, 52.170617, 11.484912
 Supercharger-V3 DE-Illertissen, 48.21882, 10.1276145, 25
 Supercharger DE-Jettingen, 48.41105, 10.4403
@@ -221,6 +224,7 @@ Supercharger DE-Kappel-Grafenhausen, 48.281347, 7.77755
 Supercharger-V3 DE-Kaltenkirchen,53.846035,9.936263,20
 Supercharger-V3 DE-Kleinostheim,49.9941,9.0705
 Supercharger-V3 DE-Knetzgau, 49.982399, 10.555616
+Supercharger-V3 DE-Kösching, 48.811333, 11.479899
 Supercharger-V3 DE-Lauenau, 52.279023, 9.35083
 Supercharger DE-Lauenau, 52.279023, 9.35083
 Supercharger-V3 DE-Lehre, 52.313216,10.635089
@@ -1480,7 +1484,7 @@ EnBW DE-Hirschberg, 50.427867, 11.795703
 EnBW DE-Hofoldinger Forst Süd, 47.9971515, 11.676045, 4
 EnBW DE-Hohenwarsleben, 52.175060, 11.495039, 10
 EnBW DE-Höhr-Grenzhausen, 50.439177,7.647429
-EnBW DE-Heßdorf, 49.626682,10.923707, 10
+EnBW DE-Heßdorf, 49.626625,10.923328, 30
 EnBW DE-Hunsrück West, 49.963341, 7.765829
 EnBW DE-Hurlach, 48.12758, 10.834338
 EnBW DE-Hünxe West, 51.635723,6.74493
@@ -1547,6 +1551,7 @@ EnBW DE-Stuhr Proppstraße, 53.011943, 8.7045393, 10
 EnBW DE-Taufkirchen, 48.352605,12.129578,10
 EnBW DE-Ulm, 48.456880, 10.029673, 15
 EnBW DE-Unterhaching, 48.056003,11.601168
+EnBW DE-Urbach, 48.810151, 9.570358
 EnBW DE-Vilsbiburg, 48.454281,12.334936
 EnBW DE-Waldmohr Raststätte Waldmohr, 49.37322,7.374279
 EnBW DE-Wangen im Allgäu, 47.694897, 9.828033, 10
@@ -1559,7 +1564,6 @@ EnBW DE-Wonnegau Ost, 49.647041, 8.293444
 EnBW DE-Wonnegau West, 49.644547, 8.290185
 EnBW DE-Wörth a.d. Donau,49.000989,12.365447
 EnBW DE-Wülferode West, 52.338094,9.86385
-EnBW DE-Urbach, 48.810151, 9.570358
 
 EVM DE-Cochem Bahnhofsvorplatz, 50.153328, 7.167515
 EVM DE-Koblenz Altstadt, 50.359981, 7.598084
@@ -1790,7 +1794,6 @@ Ionity DE-Himmelkron, 50.055972, 11.609148
 Ionity DE-Hohenlohe Nord, 49.207007, 9.639273
 Ionity DE-Hohenlohe Süd, 49.205379, 9.639696
 Ionity DE-Hohenwarsleben, 52.173898, 11.49512, 11
-Ionity DE-Holzheim, 48.381890, 10.086035
 Ionity DE-Holzkirchen Nord, 47.892208, 11.731279
 Ionity DE-Holzkirchen Süd, 47.906573, 11.717379
 Ionity DE-Illertissen, 48.219287,10.127852, 13
@@ -2653,7 +2656,7 @@ TotalEnergies DE-Haag,48.1652,12.16329487,80
 TotalEnergies DE-Hirschberg,49.50792297,8.638197024,80
 TotalEnergies DE-Karlsruhe,48.9858362,8.447499742,80
 TotalEnergies DE-Kirchheim,48.641957,9.433532,80
-TotalEnergies DE-Kösching,48.811149,11.47953615,80
+TotalEnergies DE-Kösching,48.811149,11.47953615
 TotalEnergies DE-Lohfelden,51.28680946,9.529609127,80
 TotalEnergies DE-Mahlberg,48.2751879,7.7865846,80
 TotalEnergies DE-Neuruppin,52.905607,12.748544,80

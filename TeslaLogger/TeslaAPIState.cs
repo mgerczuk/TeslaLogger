@@ -145,6 +145,7 @@ namespace TeslaLogger
                     if (oldvalue != null && newvalue != null && oldvalue != newvalue)
                     {
                         car.SetLastCarUsed(DateTime.Now);
+                        car.CurrentJSON.CreateCurrentJSON();
                     }
                     break;
                 case "charging_state":
@@ -493,6 +494,7 @@ namespace TeslaLogger
                             break;
                         // bool
                         case "in_service":
+                        case "ble_autopair_enrolled":
                         case "calendar_enabled":
                             if (r4.TryGetValue(key, out object value))
                             {
