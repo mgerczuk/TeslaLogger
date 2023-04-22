@@ -1747,7 +1747,7 @@ namespace TeslaLogger
                         { }
                         */
 
-                        scanMyTesla = new ScanMyTesla(car);
+                        // scanMyTesla = new ScanMyTesla(car);
 
                         teslaCanSync = new TeslaCanSync(car);
 
