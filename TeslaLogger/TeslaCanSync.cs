@@ -29,7 +29,7 @@ namespace TeslaLogger
                 token = c.TaskerHash;
                 car = c;
                 url = $"http://teslacan-{c.CarInDB}.fritz.box";
-                c.Log($"TeslaCanSync: Connectiong to {url}");
+                c.Log($"TeslaCanSync: Connecting to {url}");
 
                 thread = new Thread(new ThreadStart(Start));
                 thread.Name = "TeslaCAN_" + car.CarInDB;
@@ -39,6 +39,12 @@ namespace TeslaLogger
 
         private void Start()
         {
+            if (!Tools.UseScanMyTesla())
+            {
+                car.Log("TeslaCAN disabled!");
+                return;
+            }
+
             car.Log("Start refactored TeslaCAN Thread!");
 
             while (run)
