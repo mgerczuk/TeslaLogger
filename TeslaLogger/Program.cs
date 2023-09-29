@@ -27,7 +27,7 @@ namespace TeslaLogger
         }
 
         private static WebServer webServer;
-        private static bool OVMSStarted = false;
+        private static bool OVMSStarted; // defaults to false;
 
         private static void Main(string[] args)
         {
@@ -223,7 +223,7 @@ namespace TeslaLogger
             {
                 Thread threadTLStats = new Thread(() =>
                 {
-                    TLStats.GetInstance().run();
+                    TLStats.run();
                 })
                 {
                     Name = "TLStatsThread"
@@ -286,6 +286,7 @@ namespace TeslaLogger
             Logfile.Log("Current Culture: " + Thread.CurrentThread.CurrentCulture.ToString());
             Logfile.Log("Mono Runtime: " + Tools.GetMonoRuntimeVersion());
             ExceptionlessClient.Default.Configuration.DefaultData.Add("Mono Runtime", Tools.GetMonoRuntimeVersion());
+            ExceptionlessClient.Default.Configuration.DefaultData.Add("OS", Tools.GetOsRelease());
 
             Logfile.Log("Grafana Version: " + Tools.GetGrafanaVersion());
             ExceptionlessClient.Default.Configuration.DefaultData.Add("Grafana Version", Tools.GetGrafanaVersion());
@@ -361,6 +362,8 @@ namespace TeslaLogger
                 Logfile.Log(ex.ToString());
                 ex.ToExceptionless().FirstCarUserID().Submit();
             }
+
+            Logfile.Log("OS: " + Tools.GetOsRelease());
         }
 
         private static void InitConnectToDB()
@@ -392,7 +395,9 @@ namespace TeslaLogger
             }
 
             UpdateTeslalogger.Start();
-            _ = Task.Run(() => { UpdateTeslalogger.UpdateGrafana(); });
+            _ = Task.Factory.StartNew(() => {
+                UpdateTeslalogger.UpdateGrafana();
+            }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
         }
 
         private static void InitCheckDocker()
@@ -546,6 +551,8 @@ namespace TeslaLogger
                     WebHelper.SearchFornewCars();
 
                     GeocodeCache.Cleanup();
+
+                    DBHelper.MigratePosOdometerNullValues();
 
                     Logfile.Log("UpdateDbInBackground finished, took " + (DateTime.Now - start).TotalMilliseconds + "ms");
                     RunHousekeepingInBackground();

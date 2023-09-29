@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using Exceptionless;
 using MySql.Data.MySqlClient;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace TeslaLogger
 {
@@ -53,7 +55,7 @@ INSERT IGNORE INTO teslacharging SET
                     cmd.Parameters.AddWithValue("@siteLocationName", siteLocationName);
                     cmd.Parameters.AddWithValue("@VIN", VIN);
                     cmd.Parameters.AddWithValue("@json", jsonSession.ToString());
-                    SQLTracer.TraceNQ(cmd);
+                    _ = SQLTracer.TraceNQ(cmd, out _);
                 }
             }
         }
@@ -304,34 +306,25 @@ LIMIT 1
             foreach (int chargingstateid in car.DbHelper.GetSuCChargingStatesWithEmptyChargeSessionId())
             {
                 Tools.DebugLog($"GetChargingHistoryV2Service <{chargingstateid}>");
-                if (DBHelper.GetStartValuesFromChargingState(chargingstateid, out DateTime startDate, out int startdID, out int posID))
+                if (DBHelper.GetStartValuesFromChargingState(chargingstateid, out DateTime startDate, out int startdID, out int _, out string posName, out object _, out object _))
                 {
                     if (GetTeslaChargingSessionByDate(car, startDate, out string chargeSessionId, out string siteLocationName, out DateTime chargeStartDateTime, out string VIN, out string json))
                     {
                         Tools.DebugLog($"SyncAll <{chargingstateid}> -> <{chargeSessionId}> timediff:{Math.Abs((chargeStartDateTime - startDate).TotalMinutes)}");
-                        string tlname = DBHelper.GetSuCNameFromChargingStateID(chargingstateid);
-                        // check names, time difference and VIN
-                        if (siteLocationName.Contains(","))
-                        {
-                            siteLocationName = siteLocationName.Split(',')[0];
-                        }
-                        if (tlname.Contains(siteLocationName)
-                            && Math.Abs((chargeStartDateTime - startDate).TotalMinutes) < 10
+                        if (Math.Abs((chargeStartDateTime - startDate).TotalMinutes) < 10
                             && car.Vin.Equals(VIN)
                             )
                         {
                             UpdateChargingState(chargingstateid, json, car);
                             updatedChargingStates++;
                         }
-                        else if (Math.Abs((chargeStartDateTime - startDate).TotalMinutes) < 10
-                            && car.Vin.Equals(VIN))
-                        {
-                            Tools.DebugLog($"GetChargingHistoryV2Service could not map <{tlname}> and <{siteLocationName}>");
-                            (new Exception($"GetChargingHistoryV2Service could not map <{tlname}> and <{siteLocationName}>")).ToExceptionless().FirstCarUserID().Submit();
-                        }
                         else if (!car.Vin.Equals(VIN))
                         {
                             Tools.DebugLog($"GetChargingHistoryV2Service {chargeSessionId} VIN does not match car:{car.Vin} session:{VIN}");
+                        }
+                        else
+                        {
+                            Tools.DebugLog($"GetChargingHistoryV2Service no SuC session found for <{chargingstateid}> <{posName}>");
                         }
                     }
                 }
@@ -381,17 +374,40 @@ LIMIT 1
                                 }
                                 if (fee.ContainsKey("usageBase"))
                                 {
-                                    _ = double.TryParse(fee["usageBase"].ToString(Tools.ciEnUS), out cost_kwh_meter_invoice);
+                                    if (double.TryParse(fee["usageBase"].ToString(Tools.ciEnUS), out double cost_kwh_meter_invoice_t))
+                                    {
+                                        if (double.IsNaN(cost_kwh_meter_invoice))
+                                        {
+                                            cost_kwh_meter_invoice = cost_kwh_meter_invoice_t;
+                                        }
+                                        else
+                                        {
+                                            cost_kwh_meter_invoice += cost_kwh_meter_invoice_t;
+                                        }
+                                    }
                                 }
                                 if (fee.ContainsKey("pricingType")
                                     && fee["pricingType"].ToString().Equals("PAYMENT")
                                     && fee.ContainsKey("totalDue")
                                     )
                                 {
-                                    _ = double.TryParse(fee["totalDue"].ToString(Tools.ciEnUS), out cost_for_charging);
+                                    if (double.TryParse(fee["totalDue"].ToString(Tools.ciEnUS), out double cost_for_charging_t))
+                                    {
+                                        if (double.IsNaN(cost_for_charging))
+                                        {
+                                            cost_for_charging = cost_for_charging_t;
+                                        }
+                                        else
+                                        {
+                                            cost_for_charging += cost_for_charging_t;
+                                        }
+                                    }
                                 }
                                 if (fee.ContainsKey("pricingType")
-                                    && fee["pricingType"].ToString().Equals("NO_CHARGE")
+                                    && (
+                                        fee["pricingType"].ToString().Equals("NO_CHARGE") // free supercharging
+                                        || fee["pricingType"].ToString().Equals("CREDIT") // charging cerdits
+                                        )
                                     )
                                 {
                                     freesuc = true;
@@ -402,7 +418,17 @@ LIMIT 1
                         {
                             if (fee.ContainsKey("totalDue"))
                             {
-                                _ = double.TryParse(fee["totalDue"].ToString(Tools.ciEnUS), out cost_idle_fee_total);
+                                if (double.TryParse(fee["totalDue"].ToString(Tools.ciEnUS), out double cost_idle_fee_total_t))
+                                {
+                                    if (double.IsNaN(cost_idle_fee_total))
+                                    {
+                                        cost_idle_fee_total = cost_idle_fee_total_t;
+                                    }
+                                    else
+                                    {
+                                        cost_idle_fee_total += cost_idle_fee_total_t;
+                                    }
+                                }
                             }
                         }
                     }
@@ -426,8 +452,11 @@ LIMIT 1
                 {
                     cost_total = cost_idle_fee_total;
                 }
-                Tools.DebugLog($@"UpdateChargingState:
-chargingstateid:{chargingstateid}
+                car.Log($@"GetChargingHistoryV2Service -> UpdateChargingState:
+teslalogger.chargingstate.id:{chargingstateid}
+siteLocationName:{(session.ContainsKey("siteLocationName") ? session["siteLocationName"].ToString() : "n/a")}
+chargeStartDateTime:{(session.ContainsKey("chargeStartDateTime") ? session["chargeStartDateTime"].ToString() : "n/a")}
+chargeStopDateTime:{(session.ContainsKey("chargeStopDateTime") ? session["chargeStopDateTime"].ToString() : "n/a")}
 chargeSessionId:{chargeSessionId}
 cost_total:{cost_total}
 cost_currency:{cost_currency}
@@ -466,7 +495,7 @@ WHERE
                             if (!double.IsNaN(cost_kwh_meter_invoice)) { cmd.Parameters.AddWithValue("@cost_kwh_meter_invoice", cost_kwh_meter_invoice); }
                             if (!double.IsNaN(cost_freesuc_savings_total)) { cmd.Parameters.AddWithValue("@cost_freesuc_savings_total", cost_freesuc_savings_total); }
                             //Tools.DebugLog(cmd);
-                            int rowsUpdated = SQLTracer.TraceNQ(cmd);
+                            int rowsUpdated = SQLTracer.TraceNQ(cmd, out _);
                             if (rowsUpdated == 1)
                             {
                                 car.Log($"ChargingState <{chargingstateid}> updated from GetChargingHistoryV2Service");
@@ -484,6 +513,119 @@ WHERE
             {
                 Tools.DebugLog("Error parsing json:" + json);
             }
+        }
+
+        internal static void CalculateCombinedChargeSessions(Car car)
+        {
+            foreach (int chargingstateid in car.DbHelper.GetSuCChargingStatesWithChargeSessionId())
+            {
+                List<string> chargesessionids = new List<string>();
+                string chargesessionidmaster = string.Empty;
+                Tools.DebugLog($"CalculateCombinedChargeSessions: chargingstateid<{chargingstateid}>");
+                try
+                {
+                    using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+                    {
+                        con.Open();
+                        using (MySqlCommand cmd = new MySqlCommand(@"
+SELECT
+    chargingstate.chargesessionid,
+    teslacharging.chargesessionid
+FROM
+    chargingstate,
+    teslacharging
+WHERE
+    chargingstate.id = @chargingstateid AND
+    (
+        (
+            teslacharging.chargeStartDateTime >= chargingstate.startdate
+            AND teslacharging.chargeStartDateTime <= chargingstate.enddate
+        ) OR chargingstate.chargesessionid = teslacharging.chargesessionid
+    )
+", con))
+                        {
+                            cmd.Parameters.AddWithValue("@chargingstateid", chargingstateid);
+                            MySqlDataReader dr = SQLTracer.TraceDR(cmd);
+                            while (dr.Read())
+                            {
+                                if (dr[0] != DBNull.Value
+                                    && dr[1] != DBNull.Value
+                                    && !dr[0].ToString().Equals(dr[1].ToString())
+                                    )
+                                {
+                                    chargesessionidmaster = dr[0].ToString();
+                                    chargesessionids.Add(dr[1].ToString());
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Tools.DebugLog(ex.ToString());
+                }
+                if (!string.IsNullOrEmpty(chargesessionidmaster) && chargesessionids.Count > 0)
+                {
+                    // load master ID
+                    dynamic masterJSON = LoadJSON(chargesessionidmaster);
+                    if (masterJSON != null
+                        && masterJSON.ContainsKey("fees")
+                        )
+                    {
+                        // load other SuC charging sessions and add their fees to the master
+                        foreach (string otherID in chargesessionids)
+                        {
+                            dynamic otherJSON = LoadJSON(otherID);
+                            if (otherJSON != null
+                                && otherJSON.ContainsKey("fees")
+                                && masterJSON["vin"].Equals(otherJSON["vin"])
+                                && masterJSON["siteLocationName"].Equals(otherJSON["siteLocationName"])
+                                )
+                            {
+                                foreach (dynamic fee in otherJSON["fees"])
+                                {
+                                    ((JArray)masterJSON["fees"]).Add(fee);
+                                }
+                            }
+                        }
+                        Tools.DebugLog($"CalculateCombinedChargeSessions <{chargingstateid}> <{masterJSON["siteLocationName"]}> <{masterJSON["chargeStartDateTime"]}> fees:{((JArray)masterJSON["fees"]).Count}");
+                        UpdateChargingState(chargingstateid, masterJSON.ToString(), car);
+                    }
+                }
+            }
+        }
+
+        private static dynamic LoadJSON(string chargesessionid)
+        {
+            try
+            {
+                using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+                {
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand(@"
+SELECT
+    JSON
+FROM
+    teslacharging
+WHERE
+    chargesessionid = @chargesessionid
+", con))
+                    {
+                        cmd.Parameters.AddWithValue("@chargesessionid", chargesessionid);
+                        MySqlDataReader dr = SQLTracer.TraceDR(cmd);
+                        if (dr.Read() && dr[0] != DBNull.Value)
+                        {
+                            return JsonConvert.DeserializeObject(dr[0].ToString());
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Tools.DebugLog(ex.ToString());
+            }
+
+            return null;
         }
     }
 }

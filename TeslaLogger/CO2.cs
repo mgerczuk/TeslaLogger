@@ -1,17 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data;
-using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
 using Newtonsoft.Json;
 using System.IO;
-using System.Runtime.InteropServices;
-using Microsoft.VisualBasic;
 using Exceptionless;
-using System.Reflection;
-using Org.BouncyCastle.Crypto.Modes;
+using Newtonsoft.Json.Linq;
 
 namespace TeslaLogger
 {
@@ -19,17 +12,11 @@ namespace TeslaLogger
     {
         HashSet<string> supportedCountries = new HashSet<string> { "at", "be", "bg", "ch", "cz", "de", "dk", "ee", "es", "fi", "fr", "gr", "hr", "hu", "it", "lu", "lv", "nl", "no", "pl", "pt" ,"ro", "se", "si", "sk", "uk" };
 
-
-        public void GetData()
-        {
-            
-        }
-
-        void Log(string msg) {
+        static void Log(string msg) {
             Logfile.Log(" ** CO2: " + msg);
         }
 
-        void SubmitExceptionlessLog(string msg)
+        static void SubmitExceptionlessLog(string msg)
         {
             Log(msg);
             ExceptionlessClient.Default.CreateLog("CO2", msg, Exceptionless.Logging.LogLevel.Warn).FirstCarUserID().Submit();
@@ -92,9 +79,27 @@ namespace TeslaLogger
 
             foreach (dynamic d in j)
             {
-                string name = d["name"]["en"];
-                string namede = d["name"]["de"];
-                if (name.Contains("forecast") || name.Contains("consumption") || name.Contains("planned") 
+                string name = "";
+                string namede = "";
+
+                if (d["name"] is JObject && d["name"].ContainsKey("en") && d["name"].ContainsKey("de"))
+                {
+                    name = d["name"]["en"];
+                    namede = d["name"]["de"];
+                }
+                else if (d["name"] is JArray)
+                {
+                    name = d["name"][0]["en"];
+                    namede = d["name"][0]["de"];
+                }
+                else 
+                {
+                    Logfile.Log("Not Handled: (missing name)" + d["name"].ToString());
+                    continue;
+                }
+
+
+                if (name.Contains("forecast") || name.Contains("consumption") || name.Contains("planned") || name.Contains("Day Ahead Auction")
                     || name == "Residual load" || name == "Renewable share of generation" || name == "Renewable share of load" || name == "Import Balance" || name == "Load")
                     continue;
 
@@ -150,7 +155,7 @@ namespace TeslaLogger
             return (int)Math.Round(avgCO2,0);
         }
 
-        private void GetImport(string country, DateTime dateTime, ref double co2sum, ref double co2count)
+        private static void GetImport(string country, DateTime dateTime, ref double co2sum, ref double co2count)
         {
             string content = "";
 
@@ -268,7 +273,7 @@ namespace TeslaLogger
             }
         }
 
-        public string GetEnergyChartData(string country, string filename, Boolean writeCache)
+        public static string GetEnergyChartData(string country, string filename, Boolean writeCache)
         {
             string resultContent = "";
            

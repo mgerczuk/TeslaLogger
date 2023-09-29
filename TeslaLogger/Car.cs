@@ -21,7 +21,7 @@ namespace TeslaLogger
         private TeslaState _currentState = TeslaState.Start;
         internal TeslaState GetCurrentState() { return _currentState; }
 
-        private Address lastRacingPoint = null;
+        private Address lastRacingPoint; // defaults to null;
         internal WebHelper webhelper;
 
         internal enum TeslaState
@@ -33,7 +33,8 @@ namespace TeslaLogger
             Sleep,
             WaitForSleep,
             Online,
-            GoSleep
+            GoSleep,
+            Inactive
         }
 
         // encapsulate state
@@ -51,13 +52,13 @@ namespace TeslaLogger
         internal DateTime GetLastTryTokenRefresh() { return lastTryTokenRefresh; }
         private string lastSetChargeLimitAddressName = string.Empty;
 
-        private bool goSleepWithWakeup = false;
+        private bool goSleepWithWakeup; // defaults to false;
         internal bool GetGoSleepWithWakeup() { return goSleepWithWakeup; }
         private double odometerLastTrip;
         internal double GetOdometerLastTrip() { return odometerLastTrip; }
-        private bool highFrequencyLogging = false;
+        private bool highFrequencyLogging; // defaults to false;
         internal bool GetHighFrequencyLogging() { return highFrequencyLogging; }
-        private int highFrequencyLoggingTicks = 0;
+        private int highFrequencyLoggingTicks; // defaults to 0;
         internal int GetHighFrequencyLoggingTicks() { return highFrequencyLoggingTicks; }
         private int highFrequencyLoggingTicksLimit = 100;
         internal int GetHighFrequencyLoggingTicksLimit() { return highFrequencyLoggingTicksLimit; }
@@ -82,10 +83,10 @@ namespace TeslaLogger
         internal int CarInDB;
 
         private string modelName;
-        private bool raven = false;
+        private bool raven; // defaults to false;
         private double _wh_TR = 0.190052356;
-        private double dB_Wh_TR = 0;
-        private int dB_Wh_TR_count = 0;
+        private double dB_Wh_TR; // defaults to 0;
+        private int dB_Wh_TR_count; // defaults to 0;
 
         private string car_type = "";
         private string car_special_type = "";
@@ -100,7 +101,7 @@ namespace TeslaLogger
         private string vin = "";
 
         private string aBRP_token = "";
-        private int aBRP_mode = 0;
+        private int aBRP_mode; // defaults to 0;
 
         private string sucBingo_user = "";
         private string sucBingo_apiKey = "";
@@ -171,19 +172,19 @@ namespace TeslaLogger
         private string captcha_String;
         private string reCaptcha_Code;
 
-        internal int LoginRetryCounter = 0;
-        private double sumkm = 0;
-        private double avgkm = 0;
-        private double kwh100km = 0;
-        private double avgsocdiff = 0;
-        private double maxkm = 0;
-        private double carVoltageAt50SOC = 0;
+        internal int LoginRetryCounter; // defaults to 0;
+        private double sumkm; // defaults to 0;
+        private double avgkm; // defaults to 0;
+        private double kwh100km; // defaults to 0;
+        private double avgsocdiff; // defaults to 0;
+        private double maxkm; // defaults to 0;
+        private double carVoltageAt50SOC; // defaults to 0;
 
         private StringBuilder passwortinfo = new StringBuilder();
-        private int year = 0;
-        private bool aWD = false;
-        private bool mIC = false;
-        private bool mIG = false;
+        private int year; // defaults to 0;
+        private bool aWD; // defaults to false;
+        private bool mIC; // defaults to false;
+        private bool mIG; // defaults to false;
         private string motor = "";
         internal bool waitForMFACode;
         internal bool waitForRecaptcha;
@@ -270,6 +271,7 @@ namespace TeslaLogger
                     Log("GetChargingHistoryV2Service initializing ...");
                     GetChargingHistoryV2Service.LoadAll(this);
                     GetChargingHistoryV2Service.SyncAll(this);
+                    GetChargingHistoryV2Service.CalculateCombinedChargeSessions(this);
                     Log($"GetChargingHistoryV2Service initialized");
                 }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
@@ -625,7 +627,7 @@ namespace TeslaLogger
         private void HandleState_Charge()
         {
             {
-                if (!webhelper.IsCharging())
+                if (!webhelper.IsCharging(false, IsHighFrequenceLoggingEnabled()))
                 {
                     SetCurrentState(TeslaState.Start);
                     webhelper.IsDriving(true);
@@ -1047,7 +1049,7 @@ namespace TeslaLogger
         }
 
 
-        private void CheckNewCredentials()
+        private static void CheckNewCredentials()
         {
             /* TODO
             try
@@ -1489,7 +1491,7 @@ namespace TeslaLogger
             ThreadJoin();
         }
 
-        private void SetCurrentState(TeslaState _newState)
+        internal void SetCurrentState(TeslaState _newState)
         {
             if (_currentState != _newState)
             {
@@ -1639,6 +1641,10 @@ namespace TeslaLogger
             {
                 return true;
             }
+            else if (GetCurrentState() == Car.TeslaState.Inactive)
+            {
+                return true;
+            }
             if (teslaAPIState.GetBool("locked", out bool locked)
                 && teslaAPIState.GetBool("is_user_present", out bool is_user_present)
                 && webhelper.GetLastShiftState().Equals("P", StringComparison.Ordinal))
@@ -1674,6 +1680,7 @@ id = @carid", con))
                         MySqlDataReader dr = SQLTracer.TraceDR(cmd);
                         if (dr.Read() && dr[0] != null && dr[0] != DBNull.Value && int.TryParse(dr[0].ToString(), out int freesuc))
                         {
+                            Tools.DebugLog($"HasFreeSuC: {freesuc == 1}");
                             return freesuc == 1;
                         }
                     }
@@ -1686,6 +1693,7 @@ id = @carid", con))
                 Tools.DebugLog($"Exception during Car.HasFreeSuC(): {ex}");
                 Logfile.ExceptionWriter(ex, "Exception during Car.HasFreeSuC()");
             }
+            Tools.DebugLog("HasFreeSuC: false");
             return false;
         }
 
@@ -1707,6 +1715,11 @@ id = @carid", con))
                 if (teslaAPIState.GetBool("sentry_mode", out bool sentry_mode) && sentry_mode)
                 {
                     reason = "sentry_mode";
+                    return false;
+                }
+                if (teslaAPIState.GetString("software_update.status", out string status) && status.Equals("installing", StringComparison.Ordinal))
+                {
+                    reason = "software_update";
                     return false;
                 }
                 if (teslaAPIState.GetInt("df", out int df) && df > 0)
