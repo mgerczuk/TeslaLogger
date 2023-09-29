@@ -345,9 +345,9 @@ namespace TeslaLogger
                     case bool _ when request.Url.LocalPath.Equals("/teslaauthtoken", System.StringComparison.Ordinal):
                         TeslaAuthGetToken(request, response);
                         break;
-                    case bool _ when request.Url.LocalPath.Equals("/osupgrade", System.StringComparison.Ordinal):
-                        OsUpgrade(request, response);
-                        break;
+                    //case bool _ when request.Url.LocalPath.Equals("/osupgrade", System.StringComparison.Ordinal):
+                    //    OsUpgrade(request, response);
+                    //    break;
                     default:
                         response.StatusCode = (int)HttpStatusCode.NotFound;
                         WriteString(response, @"URL Not Found!");
