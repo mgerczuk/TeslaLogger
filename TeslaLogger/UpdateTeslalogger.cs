@@ -159,13 +159,6 @@ namespace TeslaLogger
                 _ = Task.Factory.StartNew(() =>
                 {
                     Logfile.Log("DBIndex Update (Task) started.");
-                    if (!DBHelper.IndexExists("can_ix2", "can"))
-                    {
-                        Logfile.Log("alter table can add index can_ix2 (id,carid,datum)");
-                        AssertAlterDB();
-                        DBHelper.ExecuteSQLQuery("alter table can add index can_ix2 (id,carid,datum)", 6000);
-                    }
-
                     if (!DBHelper.IndexExists("chargingsate_ix_pos", "chargingstate"))
                     {
                         Logfile.Log("alter table chargingstate add index chargingsate_ix_pos (Pos)");
