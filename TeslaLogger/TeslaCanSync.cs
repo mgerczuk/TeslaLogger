@@ -20,7 +20,7 @@ namespace TeslaLogger
         private Thread thread;
         private bool run = true;
         private readonly Car car;
-        private readonly string url = "http://teslacan-esp.fritz.box";
+        private readonly string url = "http://teslacan-esp.lan";
 
         internal TeslaCanSync(Car c)
         {
@@ -28,7 +28,7 @@ namespace TeslaLogger
             {
                 token = c.TaskerHash;
                 car = c;
-                url = $"http://teslacan-{c.CarInDB}.fritz.box";
+                url = $"http://teslacan-{c.CarInDB}.lan";
                 c.Log($"TeslaCanSync: Connecting to {url}");
 
                 thread = new Thread(new ThreadStart(Start));

@@ -4939,7 +4939,7 @@ DESC", con))
                 
                 using (WebClient wc = new WebClient())
                 {
-                    contents = wc.DownloadString("https://gitlab.fritz.box/root/teslalogger/raw/master2/TeslaLogger/Properties/AssemblyInfo.cs");
+                    contents = wc.DownloadString("https://gitlab.lan/root/teslalogger/raw/master2/TeslaLogger/Properties/AssemblyInfo.cs");
                 }
 
                 Match m = regexAssemblyVersion.Match(contents);

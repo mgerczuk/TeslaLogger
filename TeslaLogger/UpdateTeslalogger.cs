@@ -1055,7 +1055,7 @@ PRIMARY KEY(id)
                 // download update package from github
                 bool httpDownloadSuccessful = false;
                 bool zipExtractSuccessful = false;
-                string GitHubURL = "https://gitlab.fritz.box/root/teslalogger/-/archive/master2/teslalogger-master2.zip";
+                string GitHubURL = "https://gitlab.lan/root/teslalogger/-/archive/master2/teslalogger-master2.zip";
                 string master = "master";
 
                 if (File.Exists("BRANCH"))
@@ -1063,7 +1063,7 @@ PRIMARY KEY(id)
                     var branch = File.ReadAllText("BRANCH").Trim();
                     Logfile.Log($"YOU ARE USING BRANCH: " + branch);
 
-                    GitHubURL = "https://gitlab.fritz.box/root/teslalogger/-/archive/" + branch + "/teslalogger-" + branch + ".zip";
+                    GitHubURL = "https://gitlab.lan/root/teslalogger/-/archive/" + branch + "/teslalogger-" + branch + ".zip";
                     master = branch;
                 }
 
@@ -1142,7 +1142,7 @@ PRIMARY KEY(id)
                     for (int x = 1; x < 10; x++)
                     {
                         Logfile.Log("git clone: try " + x);
-                            Tools.ExecMono("git", "clone --progress -b master2 https://gitlab.fritz.box/root/teslalogger.git /etc/teslalogger/git/", true, true);
+                        Tools.ExecMono("git", "clone --progress -b master2 https://gitlab.lan/root/teslalogger.git /etc/teslalogger/git/", true, true);
 
                         if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
                         {
