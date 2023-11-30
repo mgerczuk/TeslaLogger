@@ -64,7 +64,7 @@ namespace TeslaLogger
 
                         var lag = DateTime.Now - data.Last().Timestamp;
                         if (lag < TimeSpan.FromSeconds(Seconds))
-                            Thread.Sleep((int)(Seconds - lag.TotalSeconds + 0.5) * 1000);
+                            Thread.Sleep((int) (Seconds - lag.TotalSeconds + 0.5) * 1000);
                     }
                 }
                 catch (Exception ex)
@@ -86,10 +86,10 @@ namespace TeslaLogger
             using (var client = new HttpClient())
             {
                 var start = DateTime.UtcNow;
-                var result = await client.GetAsync(new Uri(url + "/getdata?limit=12")).ConfigureAwait(true);
+                var result = await client.GetAsync(new Uri(url+"/getdata?limit=12")).ConfigureAwait(true);
                 var resultContent = await result.Content.ReadAsStringAsync().ConfigureAwait(true);
 
-                DBHelper.AddMothershipDataToDB(url + "/getdata", start, (int)result.StatusCode);
+                DBHelper.AddMothershipDataToDB(url+"/getdata", start, (int) result.StatusCode);
 
                 try
                 {
@@ -116,7 +116,7 @@ namespace TeslaLogger
             }
         }
 
-        private void SaveCanData(Data data)
+        private void SaveData(Data data)
         {
             car.CurrentJSON.lastScanMyTeslaReceived = data.Timestamp;
             car.CurrentJSON.CreateCurrentJSON();
@@ -258,55 +258,6 @@ namespace TeslaLogger
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.Write(ex.ToString());
-            }
-        }
-
-        private void SaveData(Data data)
-        {
-            if (data.Values.All(v => int.Parse(v.Key) > 100 && int.Parse(v.Key) < 197))
-            {
-                SaveBrickData(data);
-            }
-            else
-            {
-                SaveCanData(data);
-            }
-        }
-
-        private void SaveBrickData(Data data)
-        {
-            var fields = data.Values.Select(v => $"Brick{int.Parse(v.Key) - 101}").ToList();
-            var values = data.Values.Select(v => (double)v.Value).ToList();
-            StringBuilder sb = new StringBuilder();
-            var sql = $"INSERT INTO can_battvolt(CarID,Datum,{string.Join(",", fields)}) VALUES(@CarID,@Datum,{string.Join(",", fields.Select(f => $"@{f}"))})";
-
-            using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
-            {
-                con.Open();
-
-#pragma warning disable CA2100 // SQL-Abfragen auf Sicherheitsrisiken überprüfen
-                using (MySqlCommand cmd = new MySqlCommand(sql, con))
-#pragma warning restore CA2100 // SQL-Abfragen auf Sicherheitsrisiken überprüfen
-                {
-                    cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
-                    cmd.Parameters.AddWithValue("@Datum", data.Timestamp);
-                    for (int i = 0; i < 96; i++)
-                    {
-                        cmd.Parameters.AddWithValue($"@Brick{i}", values[i]);
-                    }
-
-                    try
-                    {
-                        _ = SQLTracer.TraceNQ(cmd, out _);
-                    }
-                    catch (MySqlException ex)
-                    {
-                        if (ex.Message.Contains("Duplicate entry"))
-                            car.Log("Scanmytesla: " + ex.Message);
-                        else
-                            throw;
-                    }
-                }
             }
         }
 

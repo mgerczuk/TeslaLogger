@@ -8,7 +8,7 @@ if test -f "/tmp/teslalogger-DOCKER"; then
     mysqldump -uroot -pteslalogger -hdatabase --single-transaction --routines --triggers teslalogger | gzip -9 > /etc/teslalogger/backup/mysqldump$NOW.gz
 else
     mysqldump -uroot -pteslalogger  --single-transaction --routines --triggers teslalogger --ignore-table teslalogger.can --ignore-table teslalogger.can_battvolt | gzip -9 > /etc/teslalogger/backup/mysqldump$NOW-core.gz
-    mysqldump -uroot -pteslalogger  --single-transaction --routines --triggers teslalogger can can_battvolt | gzip -9 > /etc/teslalogger/backup/mysqldump$NOW-can.gz
+    mysqldump -uroot -pteslalogger  --single-transaction --routines --triggers teslalogger can --where "datum >= '2023-01-01'" | gzip -9 > /etc/teslalogger/backup/mysqldump$NOW-can.gz
 fi
 
 gzip -c /etc/teslalogger/geofence-private.csv > /etc/teslalogger/backup/geofence-private$NOW.gz
