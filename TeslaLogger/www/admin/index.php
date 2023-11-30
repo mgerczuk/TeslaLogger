@@ -519,7 +519,7 @@ function ShowInfo()
 	else
 		$installed = getTeslaloggerVersion("/etc/teslalogger/git/TeslaLogger/Properties/AssemblyInfo.cs");
 
-	$onlineversion = getTeslaloggerVersion("https://gitlab.fritz.box/root/teslalogger/raw/master2/TeslaLogger/Properties/AssemblyInfo.cs");
+	$onlineversion = getTeslaloggerVersion("https://gitlab.lan/root/teslalogger/raw/master2/TeslaLogger/Properties/AssemblyInfo.cs");
 
 	if ($installed != $onlineversion)
 	{
