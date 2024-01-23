@@ -618,7 +618,7 @@ namespace TeslaLogger
                 // car.ExternalLog("UpdateTeslaTokenFromRefreshToken: \r\nHTTP StatusCode: " + HttpStatusCode+ "\r\nresultContent: " + resultContent +"\r\n" + ex.ToString());
                 car.CreateExeptionlessLog("UpdateTeslaTokenFromRefreshToken", "Error getting access token", Exceptionless.Logging.LogLevel.Error).AddObject(HttpStatusCode, "HTTP StatusCode").AddObject(resultContent, "ResultContent").Submit();
                 car.CreateExceptionlessClient(ex).AddObject(HttpStatusCode, "HTTP StatusCode").AddObject(resultContent,"ResultContent").MarkAsCritical().Submit();
-                ExceptionlessClient.Default.ProcessQueue();
+                ExceptionlessClient.Default.ProcessQueueAsync();
             }
             return "";
         }
@@ -1862,59 +1862,59 @@ namespace TeslaLogger
         {
             lock (getAllVehiclesLock)
             {
-            int accountid = 0;
-            lock (vehicles2Account)
-            {
-                if (vehicles2Account.TryGetValue(car.Vin, out Account a))
+                int accountid = 0;
+                lock (vehicles2Account)
                 {
-                    accountid = a.id;
-                }
-            }
-
-            string cacheKey = accountid + "_vehicles";
-            object c = MemoryCache.Default.Get(cacheKey);
-            bool checkVehicle2Account = false;
-
-            if (c != null && accountid > 0)
-            {
-                resultContent = c as String;
-            }
-            else
-            {
-                HttpClient client = GethttpclientTeslaAPI();
-                string adresse = apiaddress + "api/1/vehicles";
-                Task<HttpResponseMessage> resultTask;
-                HttpResponseMessage result;
-                DoGetVehiclesRequest(out resultContent, client, adresse, out resultTask, out result);
-
-                if (result.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    if (throwExceptionOnUnauthorized)
-                        throw new UnauthorizedAccessException();
-
-                    if (LoginRetry(result))
+                    if (vehicles2Account.TryGetValue(car.Vin, out Account a))
                     {
-                        client = GethttpclientTeslaAPI(true);
+                        accountid = a.id;
+                    }
+                }
 
-                        DoGetVehiclesRequest(out resultContent, client, adresse, out resultTask, out result);
+                string cacheKey = accountid + "_vehicles";
+                object c = MemoryCache.Default.Get(cacheKey);
+                bool checkVehicle2Account = false;
 
-                        if (result.IsSuccessStatusCode)
+                if (c != null && accountid > 0)
+                {
+                    resultContent = c as String;
+                }
+                else
+                {
+                    HttpClient client = GethttpclientTeslaAPI();
+                    string adresse = "https://owner-api.teslamotors.com/api/1/products?orders=true";
+                    Task<HttpResponseMessage> resultTask;
+                    HttpResponseMessage result;
+                    DoGetVehiclesRequest(out resultContent, client, adresse, out resultTask, out result);
+
+                    if (result.StatusCode == HttpStatusCode.Unauthorized)
+                    {
+                        if (throwExceptionOnUnauthorized)
+                            throw new UnauthorizedAccessException();
+
+                        if (LoginRetry(result))
                         {
-                            MemoryCache.Default.Add(cacheKey, resultContent, DateTime.Now.AddSeconds(30));
-                            checkVehicle2Account = true;
+                            client = GethttpclientTeslaAPI(true);
+
+                            DoGetVehiclesRequest(out resultContent, client, adresse, out resultTask, out result);
+
+                            if (result.IsSuccessStatusCode)
+                            {
+                                MemoryCache.Default.Add(cacheKey, resultContent, DateTime.Now.AddSeconds(30));
+                                checkVehicle2Account = true;
+                            }
                         }
                     }
                 }
-            }
 
-            dynamic jsonResult = JsonConvert.DeserializeObject(resultContent);
-            vehicles = jsonResult["response"];
+                dynamic jsonResult = JsonConvert.DeserializeObject(resultContent);
+                vehicles = jsonResult["response"];
 
-            if (checkVehicle2Account)
-            {
-                InsertVehicles2AccountFromVehiclesResponse(vehicles);
+                if (checkVehicle2Account)
+                {
+                    InsertVehicles2AccountFromVehiclesResponse(vehicles);
+                }
             }
-        }
         }
 
         private void InsertVehicles2AccountFromVehiclesResponse(string resultContent)
@@ -2070,7 +2070,7 @@ namespace TeslaLogger
                 {
 
                     HttpClient client = GethttpclientTeslaAPI();
-                    string adresse = apiaddress + "api/1/vehicles";
+                    string adresse = "https://owner-api.teslamotors.com/api/1/products?orders=true";
 
                     result = await client.GetAsync(adresse);
 
@@ -2177,21 +2177,21 @@ namespace TeslaLogger
                     {
                         if (access_type == "OWNER")
                         {
-                        InsertVehicles2AccountFromVehiclesResponse(resultContent);
-                        if (accountid == 0)
-                        {
-                            lock (vehicles2Account)
+                            InsertVehicles2AccountFromVehiclesResponse(resultContent);
+                            if (accountid == 0)
                             {
-                                if (vehicles2Account.TryGetValue(car.Vin, out Account a))
+                                lock (vehicles2Account)
                                 {
-                                    accountid = a.id;
+                                    if (vehicles2Account.TryGetValue(car.Vin, out Account a))
+                                    {
+                                        accountid = a.id;
+                                    }
                                 }
-                            }
 
-                            cacheKey = accountid + "_vehicles";
+                                cacheKey = accountid + "_vehicles";
+                            }
+                            MemoryCache.Default.Add(cacheKey, resultContent, DateTime.Now.AddSeconds(20));
                         }
-                        MemoryCache.Default.Add(cacheKey, resultContent, DateTime.Now.AddSeconds(20));
-                    }
                         else
                         {
                             System.Diagnostics.Debug.WriteLine("access_type: " + access_type);
@@ -2757,7 +2757,7 @@ namespace TeslaLogger
                     return;
                 }
             }
-            
+
             /*
             if (car.Model == "MS")
             {
@@ -2986,7 +2986,8 @@ namespace TeslaLogger
                     var rc2 = GetCommand("vehicle_data?endpoints=location_data").Result;
                     if (rc2 == null)
                         return false;
-
+                    try
+                    {
                     dynamic jsonResult2 = JsonConvert.DeserializeObject(rc2);
                     dynamic r2x = jsonResult2["response"]["drive_state"];
 
@@ -2999,7 +3000,11 @@ namespace TeslaLogger
                     else
                         return false;
                 }
-                
+                    catch (Exception){
+                        resultContent = rc2;
+                        throw;
+                    }
+                }
 
                 double latitude = (double)dLatitude;
                 double longitude = (double)dLongitude;
@@ -4005,6 +4010,7 @@ ORDER BY
     Pos
 DESC", con))
                     {
+                        Tools.DebugLog(cmdBucket);
                         var bucketdr = SQLTracer.TraceDR(cmdBucket);
                         var loop = true;
 
@@ -4034,6 +4040,14 @@ DESC", con))
 
                     t = Environment.TickCount - t;
                     Logfile.Log($"UpdateAllPOIAddresses end {t}ms count:{count}");
+                }
+            }
+            catch (MySql.Data.MySqlClient.MySqlException mex)
+            {
+                Tools.DebugLog(mex.ToString());
+                Tools.DebugLog("SQLState: <" + mex.SqlState + ">");
+                foreach (var key in mex.Data.Keys) {
+                    Tools.DebugLog("SQL Data key:<" + key + "> value:<" + mex.Data[key] + ">");
                 }
             }
             catch (Exception ex)
