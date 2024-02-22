@@ -8,6 +8,8 @@ namespace TeslaLogger
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     internal class GeocodeCache
     {
+        public static bool useGeocodeCache = true;
+
         internal static void CheckSchema()
         {
             if (!DBHelper.TableExists("geocodecache"))
@@ -78,6 +80,9 @@ CREATE TABLE geocodecache(
 
         internal static string Search(double lat, double lng)
         {
+            if (!useGeocodeCache)
+                return String.Empty;
+
             try
             {
                 using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
@@ -114,6 +119,9 @@ WHERE
 
         internal static void Insert(double lat, double lng, string address)
         {
+            if (!useGeocodeCache)
+                return;
+
             try
             {
                 using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
