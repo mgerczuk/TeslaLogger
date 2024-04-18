@@ -13,11 +13,11 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web;
 
 using MySql.Data.MySqlClient;
 using Exceptionless;
 using Newtonsoft.Json;
+using System.Collections.Concurrent;
 
 namespace TeslaLogger
 {
@@ -52,7 +52,7 @@ namespace TeslaLogger
 
         public enum UpdateType { all, stable, none };
 
-        internal static Queue<Tuple<DateTime, string>> debugBuffer = new Queue<Tuple<DateTime, string>>();
+        internal static ConcurrentQueue<Tuple<DateTime, string>> debugBuffer = new ConcurrentQueue<Tuple<DateTime, string>>();
 
         public static void SetThreadEnUS()
         {
@@ -265,9 +265,9 @@ namespace TeslaLogger
             try
             {
                 debugBuffer.Enqueue(new Tuple<DateTime, string>(DateTime.Now, msg));
-                while (debugBuffer.Count > 500)
+                while (debugBuffer.Count > 1000)
                 {
-                    _ = debugBuffer.Dequeue();
+                    _ = debugBuffer.TryDequeue(out _);
                 }
             }
             // ignore failed inserts
@@ -353,7 +353,7 @@ namespace TeslaLogger
                         if (line.Contains("PRETTY_NAME"))
                         {
                             var a = line.Split('=');
-                            return a[1].Replace("\"","");
+                            return a[1].Replace("\"", "");
                         }
                     }
                 }
@@ -362,7 +362,8 @@ namespace TeslaLogger
                     return "-";
                 }
             }
-            catch (Exception ex){
+            catch (Exception ex)
+            {
                 Logfile.Log(ex.ToString());
             }
 
@@ -489,7 +490,7 @@ namespace TeslaLogger
                 switch (vin[6])
                 {
                     case 'E':
-                        if(MIC)
+                        if (MIC)
                             battery = "NMC";
                         else
                             if (vin[7] == 'S') battery = "LFP"; //Y SR MIG BYD
@@ -1470,10 +1471,58 @@ namespace TeslaLogger
 
                 CreateBackupForDocker();
 
+                CleanupLogfile();
+
                 // run housekeeping regularly:
                 // - after 24h
                 // - but only if car is asleep, otherwise wait another hour
                 CreateMemoryCacheItem(24);
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                Logfile.Log(ex.ToString());
+            }
+        }
+
+        private static void CleanupLogfile()
+        {
+            try
+            {
+                var nohup = Path.Combine(Logfile.GetExecutingPath(), "nohup.out");
+                // check if nohup.out is bigger than 10MB
+                if (new FileInfo(nohup).Length > 10000000)
+                {
+                    // check or create logs dir
+                    var LogDir = Path.Combine(Logfile.GetExecutingPath(), "logs");
+                    if (!Directory.Exists(LogDir))
+                    {
+                        Directory.CreateDirectory(Path.Combine(Logfile.GetExecutingPath(), "logs"));
+                    }
+                    var targetFile = Path.Combine(Path.Combine(Logfile.GetExecutingPath(), "logs"), $"nohup-{DateTime.UtcNow:yyyyMMddHHmmssfff}");
+                    // copy to logs dir with timestamp
+                    ExecMono("/bin/cp", nohup + " " + targetFile);
+                    // gzip copied file
+                    ExecMono("/bin/gzip", targetFile);
+                    // empty nohup.out
+                    ExecMono("/bin/sh", $"-c '/bin/echo > {nohup}'");
+                    // cleanup old logfile backups
+                    // old means older than 90 days
+                    DirectoryInfo di = new DirectoryInfo(LogDir);
+                    FileInfo[] files = di.GetFiles();
+                    if (files.Length > 0)
+                    {
+                        IOrderedEnumerable<FileInfo> ds = di.GetFiles().OrderBy(p => p.LastWriteTime);
+                        foreach (FileInfo fi in ds)
+                        {
+                            if ((DateTime.Now - fi.LastWriteTime).TotalDays > 90)
+                            {
+                                Logfile.Log("CleanupLogfile: delete " + fi.FullName + " (" + fi.Length + " bytes)");
+                                fi.Delete();
+                            }
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -1829,9 +1878,9 @@ WHERE
                         File.Decrypt(path);
                     }
                     FileInfo fileInfo = new FileInfo(path);
-                    HttpResponseMessage response = await httpClient.GetAsync(uri).ConfigureAwait(true);
+                    HttpResponseMessage response = await httpClient.GetAsync(uri).ConfigureAwait(false);
                     _ = response.EnsureSuccessStatusCode();
-                    using (Stream responseContentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(true))
+                    using (Stream responseContentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                     {
                         using (FileStream outputFileStream = File.Create(fileInfo.FullName))
                         {

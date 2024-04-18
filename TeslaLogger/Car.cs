@@ -22,6 +22,7 @@ namespace TeslaLogger
 
         private Address lastRacingPoint; // defaults to null;
         internal WebHelper webhelper;
+        internal TelemetryConnection telemetry;
 
         internal enum TeslaState
         {
@@ -166,6 +167,31 @@ namespace TeslaLogger
         public string Motor { get => motor; set => motor = value; }
         public static object InitCredentialsLock { get => initCredentialsLock; set => initCredentialsLock = value; }
         public double Sumkm { get => sumkm; set => sumkm = value; }
+        internal string Access_type
+        {
+            get => _access_type;
+            set
+            {
+                if (_access_type != value)
+                {
+                    _access_type = value;
+                    dbHelper.UpdateCarColumn("Access_Type", value);
+                }
+            }
+        }
+
+        public bool Virtual_key
+        {
+            get => _virtual_key;
+            set
+            {
+                if (_virtual_key != value)
+                {
+                    _virtual_key = value;
+                    dbHelper.UpdateCarColumn("virtualkey", value ? "1" : "0");
+                }
+            }
+        }
 
         private string mFA_Code;
         private string captcha;
@@ -192,6 +218,8 @@ namespace TeslaLogger
         private static object _syncRoot = new object();
         internal bool FleetAPI;
         internal string FleetApiAddress = "";
+        public string _access_type;
+        public bool _virtual_key;
 
         [MethodImpl(MethodImplOptions.Synchronized)]
         internal TeslaAPIState GetTeslaAPIState() { return teslaAPIState; }
@@ -205,6 +233,7 @@ namespace TeslaLogger
                 try
                 {
                     CurrentJSON = new CurrentJSON(this);
+                    CurrentJSON.FromKVS();
                     teslaAPIState = new TeslaAPIState(this);
                     this.TeslaName = TeslaName;
                     this.TeslaPasswort = TeslaPasswort;
@@ -278,6 +307,19 @@ namespace TeslaLogger
                     CheckNewCredentials();
 
                     InitStage3();
+                    if (ApplicationSettings.Default.UseTelemetryServer)
+                    {
+                        if (FleetAPI && !(CarType == "models" || CarType == "models2" || CarType == "modelx"))
+                        {
+                            telemetry = new TelemetryConnection(this);
+                            if (GetCurrentState() == TeslaState.Online || GetCurrentState() == TeslaState.Drive || GetCurrentState() == TeslaState.Charge)
+                                telemetry.StartConnection();
+                        }
+                    } 
+                    else
+                    {
+                        Log("Telemetry Connection turned off!");
+                    }
                 }
                 finally
                 {
@@ -336,6 +378,7 @@ namespace TeslaLogger
 
                             default:
                                 Log("Main loop default reached with state: " + GetCurrentState().ToString());
+                                Thread.Sleep(30000);
                                 break;
                         }
 
@@ -374,6 +417,7 @@ namespace TeslaLogger
                     Log("*** Using FLEET API ***");
                     CreateExeptionlessFeature("FleetAPI").Submit();
                 }
+                
 
                 DbHelper.GetAvgConsumption(out this.sumkm, out this.avgkm, out this.kwh100km, out this.avgsocdiff, out this.maxkm);
 
@@ -396,6 +440,8 @@ namespace TeslaLogger
 
                 if (!DbHelper.GetRegion())
                     webhelper.GetRegion();
+
+                webhelper.CheckVirtualKey();
 
                 if (webhelper.GetVehicles() == "NULL")
                 {
@@ -763,8 +809,41 @@ namespace TeslaLogger
                         SetCurrentState(TeslaState.GoSleep);
                         goSleepWithWakeup = true;
                     }
+                    else if (FleetAPI && (CarType == "model3" || CarType == "modely" || CarType == "lychee" || CarType == "tamarind"))
+                    {
+                        // Log("API not suspended!");
+                        Thread.Sleep(30000);
+                        string res = "";
+                        lock (WebHelper.isOnlineLock)
+                        {
+                            res = webhelper.IsOnline().Result;
+                        }
+                        if (res == "asleep")
+                        {
+                            SetCurrentState(TeslaState.Start);
+                            lastCarUsed = DateTime.Now;
+                        }
+
+                        var srt = webhelper.startRequestTimeout;
+                        if (srt != null && srt.Value.AddMinutes(15) < DateTime.UtcNow)
+                        {
+                            Log("Car is sleeping because of 408");
+                            SetCurrentState(TeslaState.Sleep);
+                            lastCarUsed = DateTime.Now;
+                            DbHelper.StartState("asleep");
+                        }
+                    }
                     else
                     {
+                        var srt = webhelper.startRequestTimeout;
+                        if (srt != null && srt.Value.AddMinutes(15) < DateTime.UtcNow)
+                        {
+                            Log("Car is sleeping because of 408");
+                            SetCurrentState(TeslaState.Sleep);
+                            lastCarUsed = DateTime.Now;
+                            DbHelper.StartState("asleep");
+                        }
+
                         // wenn er 15 min online war und nicht geladen oder gefahren ist, dann muss man ihn die möglichkeit geben offline zu gehen
                         TimeSpan ts = DateTime.Now - lastCarUsed;
                         if (ts.TotalMinutes > Program.KeepOnlineMinAfterUsage)
@@ -801,7 +880,7 @@ namespace TeslaLogger
                                     CurrentJSON.current_falling_asleep = true;
                                     CurrentJSON.CreateCurrentJSON();
 
-                                    for (int x = 0; x < ApplicationSettings.Default.SuspendAPIMinutes * 10; x++)
+                                    for (int x = 0; x < Program.SuspendAPIMinutes * 10; x++)
                                     {
                                         if (webhelper.DrivingOrChargingByStream)
                                         {
@@ -903,18 +982,18 @@ namespace TeslaLogger
                                 // charge_port_door_open == true?
                                 if (GetTeslaAPIState().GetBool("charge_port_door_open", out bool bcharge_port_door_open) && bcharge_port_door_open)
                                 {
-                                    Tools.DebugLog($"charge_port_door_open: {charge_port_door_open[TeslaAPIState.Key.Value]}");
+                                    //Tools.DebugLog($"charge_port_door_open: {charge_port_door_open[TeslaAPIState.Key.Value]}");
                                     long now = (long)DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalMilliseconds;
                                     // check if charge_port_door_open value True is not older than 1 minute
                                     if (long.TryParse(charge_port_door_open[TeslaAPIState.Key.ValueLastUpdate].ToString(), out long valueLastUpdate))
                                     {
-                                        Tools.DebugLog($"charge_port_door_open now {now} vlu {valueLastUpdate} diff {now - valueLastUpdate}");
+                                        //Tools.DebugLog($"charge_port_door_open now {now} vlu {valueLastUpdate} diff {now - valueLastUpdate}");
                                         if (now - valueLastUpdate < 60000)
                                         {
                                             // charge_port_door_open changed to Charging less than 1 minute ago
                                             // reduce sleepduration to 0.5 second
                                             sleepduration = 500;
-                                            Tools.DebugLog($"charge_port_door_open sleepduration: {sleepduration}");
+                                            //Tools.DebugLog($"charge_port_door_open sleepduration: {sleepduration}");
                                         }
                                     }
                                 }
@@ -1381,6 +1460,13 @@ namespace TeslaLogger
         {
             Log("change TeslaLogger state: " + _oldState.ToString() + " -> " + _newState.ToString());
             CurrentJSON.CreateCurrentJSON();
+            CurrentJSON.ToKVS();
+
+            // any -> Sleep
+            if (_oldState != TeslaState.Sleep && _newState == TeslaState.Sleep)
+            {
+                telemetry?.CloseConnection();
+            }
 
             // any -> Start
             if (_oldState != TeslaState.Start && _newState == TeslaState.Start)
@@ -1395,12 +1481,14 @@ namespace TeslaLogger
             // sleeping -> any
             if (_oldState == TeslaState.Sleep && _newState != TeslaState.Sleep)
             {
+                telemetry?.StartConnection();
                 CurrentJSON.current_falling_asleep = false;
                 CurrentJSON.CreateCurrentJSON();
             }
             // Start -> Online - Update Car Version after Update
             if (_oldState == TeslaState.Start && _newState == TeslaState.Online)
             {
+                telemetry?.StartConnection();
                 _ = webhelper.GetOdometerAsync();
                 Tools.DebugLog($"#{CarInDB}:Start -> Online SendDataToAbetterrouteplannerAsync(utc:{Tools.ToUnixTime(DateTime.UtcNow) * 1000}, soc:{CurrentJSON.current_battery_level}, speed:0, charging:false, power:0, lat:{CurrentJSON.GetLatitude()}, lon:{CurrentJSON.GetLongitude()})");
                 _ = webhelper.SendDataToAbetterrouteplannerAsync(Tools.ToUnixTime(DateTime.UtcNow) * 1000, CurrentJSON.current_battery_level, 0, false, 0, CurrentJSON.GetLatitude(), CurrentJSON.GetLongitude());
@@ -1874,6 +1962,103 @@ id = @carid", con))
             }
 
 
+            return false;
+        }
+
+        internal bool FirmwareAtLeastVersion(string fw)
+        {
+            // parse car's firmware
+            if (GetTeslaAPIState().GetString("car_version", out string carFW))
+            {
+                if (carFW.Contains(" "))
+                {
+                    carFW = carFW.Split(' ')[0];
+                }
+                int year = 0;
+                int week = 0;
+                int version = 0;
+                int patch = 0;
+                if (carFW.Split('.').Length > 0)
+                {
+                    if (carFW.Split('.').Length > 2)
+                    {
+                        year = int.Parse(carFW.Split('.')[0]);
+                        week = int.Parse(carFW.Split('.')[1]);
+                        version = int.Parse(carFW.Split('.')[2]);
+                    }
+                    if (carFW.Split('.').Length == 4)
+                    {
+                        patch = int.Parse(carFW.Split('.')[3]);
+                    }
+                }
+                //Tools.DebugLog($"#{CarInDB} carFW year:{year} week:{week} version:{version} patch:{patch}");
+                // parse firmware version to compare
+                if (fw.Split('.').Length > 0)
+                {
+                    if (int.Parse(fw.Split('.')[0]) < year)
+                    {
+                        // car's FW year is newer than reference year
+                        return true;
+                    }
+                    else if (int.Parse(fw.Split('.')[0]) > year)
+                    {
+                        // car's FW year is older than reference year
+                        return false;
+                    }
+                    else if (int.Parse(fw.Split('.')[0]) == year)
+                    {
+                        // car's FW year is equal to reference year --> compare week
+                        if (int.Parse(fw.Split('.')[1]) < week)
+                        {
+                            // car's FW week is newer than reference week
+                            return true;
+                        }
+                        else if (int.Parse(fw.Split('.')[1]) > week)
+                        {
+                            // car's FW week is older than reference week
+                            return false;
+                        }
+                        else if (int.Parse(fw.Split('.')[1]) == week)
+                        {
+                            // car's FW week is equal to reference week --> compare version
+                            if (int.Parse(fw.Split('.')[2]) < version)
+                            {
+                                // car's FW version is newer than reference version
+                                return true;
+                            }
+                            else if (int.Parse(fw.Split('.')[2]) > version)
+                            {
+                                // car's FW version is older than reference version
+                                return false;
+                            }
+                            else if (int.Parse(fw.Split('.')[2]) == version)
+                            {
+                                // car's FW version is equal to reference version --> compare patch
+                                // do we have a patch?
+                                if (fw.Split('.').Length > 3)
+                                {
+                                    if (int.Parse(fw.Split('.')[3]) <= patch)
+                                    {
+                                        // car's FW patch is newer or equal to than reference patch
+                                        return true;
+                                    }
+                                    else if (int.Parse(fw.Split('.')[3]) > patch)
+                                    {
+                                        // car's FW patch is older than reference patch
+                                        return false;
+                                    }
+                                }
+                                else
+                                {
+                                    // year, week and version are equal, so we have at least the required firmware
+                                    return true;
+                                }
+                            }
+                        }
+
+                    }
+                }
+            }
             return false;
         }
     }   

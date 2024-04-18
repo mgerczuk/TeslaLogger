@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.Caching;
 
 namespace TeslaLogger
 {
@@ -15,6 +16,7 @@ namespace TeslaLogger
         public bool current_online; // defaults to false
         public bool current_sleeping; // defaults to false
         public bool current_falling_asleep; // defaults to false
+        public bool current_plugged_in; // defaults to false
         private long timestamp; // defaults to 0
 
         public int current_speed; // defaults to 0
@@ -28,6 +30,7 @@ namespace TeslaLogger
         public int current_charger_voltage; // defaults to 0
         public int current_charger_phases; // defaults to 0
         public int current_charger_actual_current; // defaults to 0
+        public int current_charge_current_request; // defaults to 0
         public double current_charge_energy_added; // defaults to 0
         public int current_charger_power; // defaults to 0
         public double current_charge_rate_km; // defaults to 0
@@ -188,6 +191,7 @@ namespace TeslaLogger
                    { "online", current_online },
                    { "sleeping", current_sleeping },
                    { "falling_asleep", current_falling_asleep },
+                   { "plugged_in", current_plugged_in },
                    { "speed", current_speed},
                    { "power", current_power },
                    { "odometer", current_odometer },
@@ -198,6 +202,7 @@ namespace TeslaLogger
                    { "charger_voltage", current_charger_voltage},
                    { "charger_phases", current_charger_phases},
                    { "charger_actual_current", current_charger_actual_current},
+                   { "charge_current_request", current_charge_current_request},
                    { "charge_energy_added", current_charge_energy_added},
                    { "charger_power", current_charger_power},
                    { "charge_rate_km", current_charge_rate_km},
@@ -315,6 +320,19 @@ namespace TeslaLogger
         public void SetLongitude(double lng)
         {
             longitude = lng;
+        }
+
+        internal void ToKVS()
+        {
+            KVS.InsertOrUpdate($"currentJSON_{car.CarInDB}", jsonStringHolder[car.CarInDB]);
+        }
+
+        internal void FromKVS()
+        {
+            if (KVS.Get($"currentJSON_{car.CarInDB}", out string cJSON) == KVS.SUCCESS)
+            {
+                jsonStringHolder[car.CarInDB] = cJSON;
+            }
         }
     }
 }

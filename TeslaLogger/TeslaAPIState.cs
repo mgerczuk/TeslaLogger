@@ -26,6 +26,7 @@ namespace TeslaLogger
         private readonly SortedDictionary<string, Dictionary<Key, object>> storage = new SortedDictionary<string, Dictionary<Key, object>>();
         private readonly HashSet<string> unknownKeys = new HashSet<string>();
         private readonly Car car;
+        private readonly MQTT mqtt;
         private bool dumpJSON;
         private readonly object TeslaAPIStateLock = new object();
 
@@ -115,6 +116,9 @@ namespace TeslaLogger
 
         private void HandleStateChange(string name, object oldvalue, object newvalue, long oldTS, long newTS)
         {
+            
+//            mqtt.PublishMqttValue(car.Vin, name, newvalue);
+
             switch (name)
             {
                 case "car_version":
@@ -177,12 +181,20 @@ namespace TeslaLogger
                                         break;
                                 }
                             }
+                            
                         }
+                        car.CurrentJSON.current_plugged_in = true;
                     }
                     else if (newvalue.Equals("Disconnected"))
                     {
                         car.DbHelper.UpdateUnplugDate();
+                        car.CurrentJSON.current_plugged_in = false;
                     }
+                    else 
+                    {
+                        car.CurrentJSON.current_plugged_in = true;
+                    }
+                    car.CurrentJSON.CreateCurrentJSON();
                     break;
                 case "battery_level":
                     // car is idle and battery level changed -> update ABRP
@@ -434,28 +446,43 @@ namespace TeslaLogger
             }
             switch (source)
             {
-                /*
-                case "charge_state":
-                    return ParseChargeState(JSON);
-                case "climate_state":
-                    return ParseClimateState(JSON);
-                case "drive_state":
-                    return ParseDriveState(JSON);
-                case "vehicle_config":
-                    return ParseVehicleConfig(JSON);
-                case "vehicle_state":
-                    return ParseVehicleState(JSON);
-                */
+                case "vehicle_data?endpoints=vehicle_config":
+                case "vehicle_data?endpoints=vehicle_config&let_sleep=true":
+                    ParseVehicleConfig(JSON);
+                    break;
+                case "vehicle_data?endpoints=charge_state":
+                case "vehicle_data?endpoints=charge_state&let_sleep=true":
+                    ParseChargeState(JSON);
+                    break;
+                case "vehicle_data?endpoints=vehicle_state":
+                case "vehicle_data?endpoints=vehicle_state&let_sleep=true":
+                    ParseVehicleState(JSON);
+                    break;
+                case "vehicle_data?endpoints=climate_state":
+                case "vehicle_data?endpoints=climate_state&let_sleep=true":
+                    ParseClimateState(JSON);
+                    break;
+                case "vehicle_data?endpoints=drive_state":
+                case "vehicle_data?endpoints=drive_state%3Blocation_data":
+                case "vehicle_data?endpoints=drive_state&let_sleep=true":
+                case "vehicle_data?endpoints=drive_state%3Blocation_data&let_sleep=true":
+                    ParseDriveState(JSON);
+                    break;
                 case "vehicle_data":
                     ParseChargeState(JSON);
+                    ParseVehicleConfig(JSON);
                     ParseClimateState(JSON);
                     ParseDriveState(JSON);
-                    ParseVehicleConfig(JSON);
                     ParseVehicleState(JSON);
                     break;
                 case "vehicles":
                     return ParseVehicles(JSON);
                 case "vehicle_data?endpoints=location_data":
+                case "vehicle_data?endpoints=location_data&let_sleep=true":
+                    // ignore
+                    break;
+                case "nearby_charging_sites?detail=true":
+                    // ignore
                     break;
                 default:
                     Logfile.Log($"ParseAPI: unknown source {source}");
@@ -514,29 +541,31 @@ namespace TeslaLogger
                         case "timestamp":
                             break;
                         // bool
-                        case "in_service":
                         case "ble_autopair_enrolled":
                         case "calendar_enabled":
+                        case "in_service":
+                        case "release_notes_supported":
                             if (r4.TryGetValue(key, out object value))
                             {
                                 AddValue(key, "bool", value, 0, "vehicles");
                             }
                             break;
                         // string
-                        case "id":
-                        case "vehicle_id":
-                        case "vin":
-                        case "display_name":
-                        case "option_codes":
-                        case "color":
                         case "access_type":
-                        case "state":
-                        case "id_s":
                         case "backseat_token":
                         case "backseat_token_updated_at":
-                        case "vehicle_config":
-                        case "granular_access":
+                        case "cached_data":
+                        case "color":
                         case "command_signing":
+                        case "display_name":
+                        case "granular_access":
+                        case "id":
+                        case "id_s":
+                        case "option_codes":
+                        case "state":
+                        case "vehicle_config":
+                        case "vehicle_id":
+                        case "vin":
                             if (r4.TryGetValue(key, out value))
                             {
                                 AddValue(key, "string", value, 0, "vehicles");
@@ -544,6 +573,7 @@ namespace TeslaLogger
                             break;
                         // int
                         case "api_version":
+                        case "user_id":
                             if (r4.TryGetValue(key, out value))
                             {
                                 AddValue(key, "int", value, 0, "vehicles");
