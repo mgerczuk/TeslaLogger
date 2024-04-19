@@ -27,7 +27,8 @@ CREATE TABLE `TPMS` (
   `Datum` datetime NOT NULL,
   `TireId` int(11) NOT NULL,
   `Pressure` double NOT NULL,
-  PRIMARY KEY (`CarId`,`Datum`,`TireId`)
+  PRIMARY KEY (`CarId`,`Datum`,`TireId`),
+  KEY `IX_TPMS_CarId_Datum` (`CarId`,`TireId`,`Datum`,`Pressure`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -39,6 +40,90 @@ LOCK TABLES `TPMS` WRITE;
 /*!40000 ALTER TABLE `TPMS` DISABLE KEYS */;
 /*!40000 ALTER TABLE `TPMS` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Table structure for table `active_route_energy_at_arrival`
+--
+
+DROP TABLE IF EXISTS `active_route_energy_at_arrival`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `active_route_energy_at_arrival` (
+  `posID` int(11) NOT NULL,
+  `val` tinyint(4) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `alert_audiences`
+--
+
+DROP TABLE IF EXISTS `alert_audiences`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `alert_audiences` (
+  `alertsID` int(11) NOT NULL,
+  `audienceID` tinyint(4) NOT NULL,
+  PRIMARY KEY (`alertsID`,`audienceID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `alert_names`
+--
+
+DROP TABLE IF EXISTS `alert_names`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `alert_names` (
+  `ID` int(11) NOT NULL AUTO_INCREMENT,
+  `Name` varchar(255) NOT NULL,
+  PRIMARY KEY (`ID`)
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `alerts`
+--
+
+DROP TABLE IF EXISTS `alerts`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `alerts` (
+  `CarID` int(11) NOT NULL,
+  `startedAt` datetime NOT NULL,
+  `nameID` int(11) NOT NULL,
+  `endedAt` datetime DEFAULT NULL,
+  `ID` int(11) NOT NULL AUTO_INCREMENT,
+  PRIMARY KEY (`CarID`,`startedAt`,`nameID`),
+  KEY `ID` (`ID`)
+) ENGINE=InnoDB AUTO_INCREMENT=1778 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `battery`
+--
+
+DROP TABLE IF EXISTS `battery`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `battery` (
+  `CarID` int(11) NOT NULL,
+  `date` datetime NOT NULL,
+  `PackVoltage` double DEFAULT NULL,
+  `PackCurrent` double DEFAULT NULL,
+  `IsolationResistance` double DEFAULT NULL,
+  `NumBrickVoltageMax` smallint(6) DEFAULT NULL,
+  `BrickVoltageMax` double DEFAULT NULL,
+  `NumBrickVoltageMin` smallint(6) DEFAULT NULL,
+  `BrickVoltageMin` double DEFAULT NULL,
+  `ModuleTempMax` double DEFAULT NULL,
+  `ModuleTempMin` double DEFAULT NULL,
+  `LifetimeEnergyUsed` double DEFAULT NULL,
+  `LifetimeEnergyUsedDrive` double DEFAULT NULL,
+  PRIMARY KEY (`CarID`,`date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `can`
@@ -54,7 +139,7 @@ CREATE TABLE `can` (
   `CarID` int(10) unsigned DEFAULT NULL,
   PRIMARY KEY (`datum`,`id`),
   KEY `can_ix2` (`id`,`CarID`,`datum`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -129,7 +214,15 @@ CREATE TABLE `cars` (
   `meter_host` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `meter_parameter` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `wheel_type` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  `fleetAPI` tinyint(3) unsigned NOT NULL DEFAULT 0,
+  `fleetAPIaddress` varchar(200) DEFAULT NULL,
+  `oldAPIchinaCar` tinyint(3) unsigned NOT NULL DEFAULT 0,
+  `needVirtualKey` tinyint(3) unsigned NOT NULL DEFAULT 0,
+  `needCommandPermission` tinyint(3) unsigned NOT NULL DEFAULT 0,
+  `needFleetAPI` tinyint(3) unsigned NOT NULL DEFAULT 0,
+  `access_type` varchar(20) DEFAULT NULL,
+  `virtualkey` tinyint(3) unsigned DEFAULT 0,
+PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -141,6 +234,21 @@ LOCK TABLES `cars` WRITE;
 /*!40000 ALTER TABLE `cars` DISABLE KEYS */;
 /*!40000 ALTER TABLE `cars` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Temporary table structure for view `celltemperature`
+--
+
+DROP TABLE IF EXISTS `celltemperature`;
+/*!50001 DROP VIEW IF EXISTS `celltemperature`*/;
+SET @saved_cs_client     = @@character_set_client;
+SET character_set_client = utf8;
+/*!50001 CREATE VIEW `celltemperature` AS SELECT
+ 1 AS `carid`,
+  1 AS `date`,
+  1 AS `CellTemperature`,
+  1 AS `source` */;
+SET character_set_client = @saved_cs_client;
 
 --
 -- Table structure for table `charging`
@@ -220,6 +328,8 @@ CREATE TABLE `chargingstate` (
   `co2_g_kWh` int(11) DEFAULT NULL,
   `country` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `export` tinyint(1) DEFAULT NULL,
+  `cost_freesuc_savings_total` double DEFAULT NULL,
+  `sessionId` varchar(40) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `chargingsate_ix_pos` (`Pos`),
   KEY `ixAnalyzeChargingStates1` (`id`,`CarID`,`StartChargingID`,`EndChargingID`)
@@ -234,6 +344,21 @@ LOCK TABLES `chargingstate` WRITE;
 /*!40000 ALTER TABLE `chargingstate` DISABLE KEYS */;
 /*!40000 ALTER TABLE `chargingstate` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Table structure for table `cruisestate`
+--
+
+DROP TABLE IF EXISTS `cruisestate`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `cruisestate` (
+  `CarID` int(11) NOT NULL,
+  `date` datetime NOT NULL,
+  `state` tinyint(4) DEFAULT NULL,
+  PRIMARY KEY (`CarID`,`date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `drivestate`
@@ -263,6 +388,13 @@ CREATE TABLE `drivestate` (
   `CarID` int(10) unsigned DEFAULT NULL,
   `wheel_type` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `export` tinyint(1) DEFAULT NULL,
+  `wheel_type` varchar(40) DEFAULT NULL,
+  `AP_sec_sum` int(11) DEFAULT NULL,
+  `AP_sec_max` int(11) DEFAULT NULL,
+  `TPMS_FL` double DEFAULT NULL,
+  `TPMS_FR` double DEFAULT NULL,
+  `TPMS_RL` double DEFAULT NULL,
+  `TPMS_RR` double DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `ix_startpos` (`StartPos`),
   KEY `ix_endpos2` (`EndPos`)
@@ -277,6 +409,22 @@ LOCK TABLES `drivestate` WRITE;
 /*!40000 ALTER TABLE `drivestate` DISABLE KEYS */;
 /*!40000 ALTER TABLE `drivestate` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Table structure for table `geocodecache`
+--
+
+DROP TABLE IF EXISTS `geocodecache`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `geocodecache` (
+  `lat` double NOT NULL,
+  `lng` double NOT NULL,
+  `lastUpdate` date NOT NULL,
+  `address` longtext DEFAULT NULL,
+  UNIQUE KEY `ix_key` (`lat`,`lng`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `httpcodes`
@@ -331,6 +479,24 @@ LOCK TABLES `journeys` WRITE;
 /*!40000 ALTER TABLE `journeys` DISABLE KEYS */;
 /*!40000 ALTER TABLE `journeys` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Table structure for table `kvs`
+--
+
+DROP TABLE IF EXISTS `kvs`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `kvs` (
+  `id` varchar(64) NOT NULL,
+  `ivalue` int(11) DEFAULT NULL,
+  `dvalue` double DEFAULT NULL,
+  `bvalue` tinyint(1) DEFAULT NULL,
+  `ts` date DEFAULT NULL,
+  `JSON` longtext DEFAULT NULL,
+  UNIQUE KEY `ix_key` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `mothership`
@@ -410,6 +576,7 @@ CREATE TABLE `pos` (
   `sentry_mode` tinyint(1) DEFAULT NULL,
   `battery_range_km` double DEFAULT NULL,
   `CarID` int(10) unsigned DEFAULT NULL,
+  `AP` tinyint(1) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_pos_CarID_id` (`CarID`,`id`),
   KEY `idx_pos_CarID_datum` (`CarID`,`Datum`)
@@ -531,6 +698,23 @@ LOCK TABLES `superchargerstate` WRITE;
 UNLOCK TABLES;
 
 --
+-- Table structure for table `teslacharging`
+--
+
+DROP TABLE IF EXISTS `teslacharging`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `teslacharging` (
+  `sessionId` varchar(40) NOT NULL,
+  `chargeStartDateTime` datetime NOT NULL,
+  `siteLocationName` varchar(128) NOT NULL,
+  `VIN` varchar(20) NOT NULL,
+  `json` longtext NOT NULL,
+  UNIQUE KEY `ix_sessionId` (`sessionId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Temporary table structure for view `trip`
 --
 
@@ -563,12 +747,36 @@ SET character_set_client = utf8;
   1 AS `power_min`,
   1 AS `power_avg`,
   1 AS `CarID`,
-  1 AS `wheel_type` */;
+  1 AS `wheel_type`,
+  1 AS `AP_sec_sum`,
+  1 AS `AP_sec_max`,
+  1 AS `TPMS_FL`,
+  1 AS `TPMS_FR`,
+  1 AS `TPMS_RL`,
+  1 AS `TPMS_RR` */;
 SET character_set_client = @saved_cs_client;
 
 --
 -- Dumping routines for database 'teslalogger'
 --
+
+--
+-- Final view structure for view `celltemperature`
+--
+
+/*!50001 DROP VIEW IF EXISTS `celltemperature`*/;
+/*!50001 SET @saved_cs_client          = @@character_set_client */;
+/*!50001 SET @saved_cs_results         = @@character_set_results */;
+/*!50001 SET @saved_col_connection     = @@collation_connection */;
+/*!50001 SET character_set_client      = utf8mb4 */;
+/*!50001 SET character_set_results     = utf8mb4 */;
+/*!50001 SET collation_connection      = utf8mb4_general_ci */;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `celltemperature` AS select `can`.`CarID` AS `carid`,`can`.`datum` AS `date`,`can`.`val` AS `CellTemperature`,1 AS `source` from `can` where `can`.`id` = 3 union select `battery`.`CarID` AS `carid`,`battery`.`date` AS `datum`,`battery`.`ModuleTempMin` AS `CellTemperature`,2 AS `source` from `battery` where `battery`.`ModuleTempMin` is not null */;
+/*!50001 SET character_set_client      = @saved_cs_client */;
+/*!50001 SET character_set_results     = @saved_cs_results */;
+/*!50001 SET collation_connection      = @saved_col_connection */;
 
 --
 -- Final view structure for view `trip`
@@ -597,4 +805,4 @@ SET character_set_client = @saved_cs_client;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2023-02-18 22:06:01
+-- Dump completed on 2024-04-19 10:41:42
