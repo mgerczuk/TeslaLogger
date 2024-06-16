@@ -1,5 +1,18 @@
-# Version 1.57.12
-- Bugfixes
+# Version 1.58.1
+- Using Telemetry Server even with old Tesla API. Require Virtual Key
+- New update client
+- MQTT: active cars only
+- Calculated Power/Current/Phases in Admin-Panel and MQTT
+
+# Version 1.58.0
+- New stable version
+- Encryption file is protected against grafana, apache and mariadb 
+
+# Version 1.57.14
+- Tesla access token and refresh token are stored encryted
+
+# Version 1.57.13
+- Use Guest NearbySuCService to complete Supercharger usage map
 
 # Version 1.57.11
 - Rollback code to 1.57.9

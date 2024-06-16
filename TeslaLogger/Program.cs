@@ -6,6 +6,7 @@ using System.Net;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 
 namespace TeslaLogger
 {
@@ -29,7 +30,7 @@ namespace TeslaLogger
         private static WebServer webServer;
         private static bool OVMSStarted; // defaults to false;
 
-        private static void Main(string[] args)
+        private static void Main(string[] _)
         {
             try
             {
@@ -117,14 +118,18 @@ namespace TeslaLogger
             {
                 if(KVS.Get("MQTTSettings", out string mqttSettings) == KVS.SUCCESS)
                 {
-                    Thread mqttThread = new Thread(() =>
+                    dynamic settings = JsonConvert.DeserializeObject(mqttSettings);
+                    if (settings["mqtt_host"] > 0)
                     {
+                        Thread mqttThread = new Thread(() =>
+                        {
                         MQTT.GetSingleton().RunMqtt();
-                    })
-                    {
-                        Name = "MqttThread"
-                    };
-                    mqttThread.Start();
+                        })
+                        {
+                            Name = "MqttThread"
+                        };
+                        mqttThread.Start();
+                    }
                 }
                 else
                 {
@@ -325,6 +330,8 @@ namespace TeslaLogger
 
         private static void InitStage2()
         {
+            TestEncryption();
+
             KeepOnlineMinAfterUsage = Tools.GetSettingsInt("KeepOnlineMinAfterUsage", ApplicationSettings.Default.KeepOnlineMinAfterUsage);
             SuspendAPIMinutes = Tools.GetSettingsInt("SuspendAPIMinutes", ApplicationSettings.Default.SuspendAPIMinutes);
 
@@ -410,6 +417,25 @@ namespace TeslaLogger
             }
 
             Logfile.Log("OS: " + Tools.GetOsRelease());
+        }
+
+        static void TestEncryption()
+        {
+            try
+            {
+                var body = "jfsdoifjhoiwejgfüp9034eu7trfß90834ugf0ß9834uejpf90guj43pü09tgfuj45p90t8ugjedlkfgjd";
+                var pass = StringCipher.GetPassPhrase();
+                var encrypted = StringCipher.Encrypt(body);
+                var decrypted = StringCipher.Decrypt(encrypted);
+                if (body != decrypted)
+                    Logfile.Log("Encryption doesn't work!!!");
+
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().Submit();
+                Logfile.Log(ex.ToString());
+            }
         }
 
         private static void InitConnectToDB()
