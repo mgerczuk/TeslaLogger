@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Linq;
 using MySql.Data.MySqlClient;
 using System.Reflection;
+using System.IO;
 
 namespace TeslaLogger
 {
@@ -21,7 +22,73 @@ namespace TeslaLogger
 
         String lastCruiseState = "";
 
-        bool connect = false;
+        bool connect;
+
+        private bool driving;
+        private bool charging;
+
+        public DateTime lastDriving = DateTime.MinValue;
+        public DateTime lastMessageReceived = DateTime.MinValue;
+
+        void Log(string message)
+        {
+            car.Log("*** FT: " +  message);
+        }
+
+        public bool Driving
+        {
+            get
+            {
+                if (driving)
+                {
+                    var ts = DateTime.Now - lastDriving;
+                    if (ts.TotalMinutes > 15)
+                    {
+                        driving = false;
+                        Log("Parking time: " + lastDriving.ToString());
+                        return false;
+                    }
+
+                    return true;
+                }
+
+                return false;
+
+            }
+            set {
+                driving = value;
+            }
+        }
+
+        public bool Charging { get => charging; 
+            set { 
+                if (charging != value)
+                    Log("Driving = " +  value);
+
+                charging = value;
+            } 
+        }
+
+        public bool isOnline()
+        {
+            if (!Driving && !Charging)
+            {
+                if (OnlineTimeout())
+                    return false;
+            }
+
+            return true;
+        }
+
+        public bool OnlineTimeout()
+        {
+            var ts = DateTime.UtcNow - lastMessageReceived;
+            if (ts.TotalMinutes > 10)
+                return true;
+
+            return false;
+        }
+            
 
         public TelemetryConnection(Car car)
         {
@@ -35,7 +102,10 @@ namespace TeslaLogger
         {
             try
             {
-                car.Log("Telemetry Server close connection!");
+                if (car.FleetAPI)
+                    return;
+
+                Log("Telemetry Server close connection!");
                 connect = false;
                 cts.Cancel();
 
@@ -52,13 +122,13 @@ namespace TeslaLogger
                 if (connect)
                     return;
 
-                car.Log("Telemetry Server start connection");
+                Log("Telemetry Server start connection");
                 cts = new CancellationTokenSource();
                 connect = true;
             }
             catch (Exception ex)
             {
-                car.Log("Telemetry StartConnection " + ex.Message);
+                Log("Telemetry StartConnection " + ex.Message);
             }
         }
 
@@ -89,7 +159,7 @@ namespace TeslaLogger
                     if (!connect && ex.InnerException is TaskCanceledException)
                         System.Diagnostics.Debug.WriteLine("Telemetry Cancel OK");
                     else
-                        car.Log("Telemetry Exception: " + ex.ToString());                    
+                        Log("Telemetry Exception: " + ex.ToString());                    
 
                     var s = r.Next(30000, 60000);
                     Thread.Sleep(s);
@@ -111,9 +181,14 @@ namespace TeslaLogger
 
                     if (car.Vin.Equals(vin, StringComparison.OrdinalIgnoreCase))
                     {
-                        car.Log("Telemetry Server Data");
+                        Log("Telemetry Server Data");
+                        if (OnlineTimeout())
+                            Log("Car Online!");
+
+                        lastMessageReceived = DateTime.UtcNow;
                         InsertBatteryTable(jData, d, resultContent);
                         InsertCruiseStateTable(jData, d, resultContent);
+                        handleStatemachine(jData, d, resultContent);
                     }
                 }
                 else if (j.ContainsKey("alerts"))
@@ -124,7 +199,7 @@ namespace TeslaLogger
 
                     if (car.Vin.Equals(vin, StringComparison.OrdinalIgnoreCase))
                     {
-                        car.Log("Telemetry Server Alerts");
+                        Log("Telemetry Server Alerts");
 
                         foreach (dynamic ji in jData)
                         {
@@ -132,15 +207,55 @@ namespace TeslaLogger
                         }
                     }
                 }
+                else if (j.ContainsKey("Teslalogger"))
+                {
+                    String cmd = j["Teslalogger"];
+                    switch (cmd) 
+                    {
+                        case "LoginRespone":
+                            handleLoginResponse(j);
+                            break;
+                        default:
+                            Log("Unhandled Teslalogger MSG: " + resultContent);
+                            break;
+                    }
+                }
                 else
                 {
-                    car.Log("Unhandled: " + resultContent);
+                    Log("Unhandled: " + resultContent);
+
+                    CheckDriving();
+                    driving = false;
+                    charging = false;
+                    Log("Sleep");
+                    lastMessageReceived = DateTime.MinValue;
                 }
 
             }
             catch (Exception ex)
             {
-                car.Log(ex.ToString()+ "\n" + resultContent);
+                Log(ex.ToString()+ "\n" + resultContent);
+            }
+        }
+
+        private void handleLoginResponse(dynamic j)
+        {
+            try
+            {
+                dynamic response = j["Response"];
+                dynamic updated_vehicles = response["updated_vehicles"];
+                if (updated_vehicles == "1")
+                    Log("LoginRespone: OK");
+                else
+                {
+                    Log("LoginRespone ERROR: " + response);
+                    car.CurrentJSON.FatalError = "Telemetry Login Error!!! Check Logfile!";
+                    car.CurrentJSON.CreateCurrentJSON();
+                }
+            }
+            catch (Exception ex)
+            {
+                Log(ex.ToString());
             }
         }
 
@@ -217,7 +332,7 @@ namespace TeslaLogger
                             case "Service": aid = 2; break;
                             default:
                                 car.CreateExeptionlessLog("Telemetry audience unknown", s, Exceptionless.Logging.LogLevel.Error).Submit();
-                                car.Log("Audience unknown: " + s);
+                                Log("Audience unknown: " + s);
                                 break;
                         }
 
@@ -297,7 +412,7 @@ namespace TeslaLogger
                                         break;
                                     default:
                                         state = -99;
-                                        car.Log("Unhandled Cruise State: " + v1);
+                                        Log("Unhandled Cruise State: " + v1);
                                         car.CreateExeptionlessLog("CruiseStateUnhandled", v1, Exceptionless.Logging.LogLevel.Warn).Submit();
                                         break;
                                 }
@@ -314,7 +429,7 @@ namespace TeslaLogger
                                         cmd.Parameters.AddWithValue("@state", state);
                                         cmd.ExecuteNonQuery();
 
-                                        car.Log("Telemetry Server: Cruise State");
+                                        Log("Telemetry Server: Cruise State");
                                     }
                                 }
                             }
@@ -323,7 +438,7 @@ namespace TeslaLogger
                 }
             }
             catch (Exception ex) { 
-                car.Log(ex.ToString());
+                Log(ex.ToString());
                 car.CreateExceptionlessClient(ex).AddObject(resultContent, "ResultContent").Submit();
             }
         }
@@ -427,14 +542,135 @@ namespace TeslaLogger
                 }
             } catch (Exception ex)
             {
-                car.Log("Telemetry Error: " + ex.ToString());
+                Log("Telemetry Error: " + ex.ToString());
                 car.CreateExceptionlessClient(ex).AddObject(resultContent, "ResultContent").Submit();
+            }
+        }
+
+        void handleStatemachine(dynamic j, DateTime date, string resultContent)
+        {
+            try
+            {
+                var cols = new string[] { "ChargeState", "Gear", "VehicleSpeed" };
+
+                foreach (dynamic jj in j)
+                {
+                    string key = jj["key"];
+                    if (cols.Any(key.Contains))
+                    {
+                        dynamic value = jj["value"];
+                        if (value.ContainsKey("stringValue"))
+                        {
+                            string v1 = value["stringValue"];
+
+                            if (key == "ChargeState")
+                            {
+                                if (v1 == "Enable")
+                                {
+                                    if (Driving)
+                                    {
+                                        Log("Parking -> Charging ***");
+                                        Driving = false;
+                                    }
+
+                                    if (!Charging)
+                                    {
+                                        Log("Charging ***");
+                                        Charging = true;
+                                    }
+                                }
+                                else if (v1 == "Idle")
+                                {
+                                    if (Charging)
+                                    {
+                                        Log("Stop Charging ***");
+                                        Charging = false;
+                                    }
+                                }
+                                else
+                                {
+                                    Log("unknown ChargeState: " + v1);
+                                }
+
+                            }
+                            else if (key == "Gear")
+                            {
+                                if (v1 == "P")
+                                {
+                                    if (Driving)
+                                    {
+                                        Log("Parking ***");
+                                        Driving = false;
+                                    }
+                                }
+                                else if (v1.Length > 0)
+                                {
+                                    lastDriving = DateTime.Now;
+
+                                    if (!Driving)
+                                    {
+                                        Log("Driving ***");
+                                        Driving = true;
+                                    }
+                                }
+
+                                Log("Gear: " + v1);
+                            }
+                            else if (key == "VehicleSpeed")
+                            {
+                                if (Double.TryParse(v1, out double speed))
+                                {
+                                    if (speed > 0)
+                                    {
+                                        if (Charging)
+                                        {
+                                            Log("Stop Charging by speed ***");
+                                            Charging = false;
+                                        }
+
+                                        lastDriving = DateTime.Now;
+
+                                        if (!Driving)
+                                        {
+                                            Log("Driving by speed ***");
+                                            Driving = true;
+                                        }
+                                    }
+
+                                    Log("Speed: " + v1);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                CheckDriving();
+
+            }
+            catch (Exception ex)
+            {
+                Log("Telemetry Error: " + ex.ToString());
+                car.CreateExceptionlessClient(ex).AddObject(resultContent, "ResultContent").Submit();
+            }
+
+        }
+
+        private void CheckDriving()
+        {
+            if (Driving)
+            {
+                var ts = DateTime.Now - lastDriving;
+                if (ts.TotalMinutes > 5)
+                {
+                    Log("Driving stop by speed " + lastDriving.ToString());
+                    Driving = false;
+                }
             }
         }
 
         private void ConnectToServer()
         {
-            car.Log("Connect to Telemetry Server");
+            Log("Connect to Telemetry Server");
 
             if (ws != null)
                 ws.Dispose();
@@ -453,13 +689,13 @@ namespace TeslaLogger
             {
                 if (ex is AggregateException ex2)
                 {
-                    car.Log("Connect to Telemetry Server Error: " + ex2.InnerException.Message);
+                    Log("Connect to Telemetry Server Error: " + ex2.InnerException.Message);
                     car.CreateExceptionlessClient(ex2).Submit();
                     Thread.Sleep(60000);
                 }
                 else
                 {
-                    car.Log("Connect to Telemetry Server Error: " + ex.Message);
+                    Log("Connect to Telemetry Server Error: " + ex.Message);
                     car.CreateExceptionlessClient(ex).Submit();
                     Thread.Sleep(60000);
                 }
@@ -468,7 +704,12 @@ namespace TeslaLogger
 
         private void Login()
         {
-            car.Log("Login to Telemetry Server");
+            
+            string configname = "";
+            if (car.FleetAPI)
+                configname = "free";
+
+            Log("Login to Telemetry Server / config: " + configname);
 
             Dictionary<string, object> login = new Dictionary<string, object>{
                     { "msg_type", "login"},
@@ -476,6 +717,7 @@ namespace TeslaLogger
                     { "token", car.TaskerHash},
                     { "accesstoken", car.Tesla_Token},
                     { "regionurl", car.webhelper.apiaddress},
+                    { "config", configname},
                     { "version", Assembly.GetExecutingAssembly().GetName().Version.ToString()}
                 };
 

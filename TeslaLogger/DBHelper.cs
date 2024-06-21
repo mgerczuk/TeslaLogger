@@ -228,20 +228,23 @@ VALUES(
             }
         }
 
-        public static void AddMothershipDataToDB(string command, DateTime start, int httpcode)
-        {
-            DateTime end = DateTime.UtcNow;
-            TimeSpan ts = end - start;
-            double duration = ts.TotalSeconds;
-            AddMothershipDataToDB(command, duration, httpcode);
-        }
-
-        public static void AddMothershipDataToDB(string command, double duration, int httpcode)
+        public static void AddMothershipDataToDB(string command, DateTime start, int httpcode, int carid)
         {
             if (mothershipEnabled == false)
             {
                 return;
             }
+
+            DateTime end = DateTime.UtcNow;
+            TimeSpan ts = end - start;
+            double duration = ts.TotalSeconds;
+            AddMothershipDataToDB(command, duration, httpcode, carid);
+        }
+
+        public static void AddMothershipDataToDB(string command, double duration, int httpcode, int carid)
+        {
+            if (command.Contains(WebHelper.vehicle_data_everything))
+                command = command.Replace(WebHelper.vehicle_data_everything, "vehicle_data_everything");
 
             if (!mothershipCommands.ContainsKey(command))
             {
@@ -257,19 +260,25 @@ INSERT
         ts,
         commandid,
         duration,
-        httpcode
+        httpcode,
+        carid
     )
 VALUES(
     @ts,
     @commandid,
     @duration,
-    @httpcode
+    @httpcode,
+    @carid
 )", con))
                 {
                     cmd.Parameters.AddWithValue("@ts", DateTime.Now);
                     cmd.Parameters.AddWithValue("@commandid", mothershipCommands[command]);
                     cmd.Parameters.AddWithValue("@duration", duration);
                     cmd.Parameters.AddWithValue("@httpcode", httpcode);
+                    if (carid == 0)
+                        cmd.Parameters.AddWithValue("@carid", null);
+                    else
+                        cmd.Parameters.AddWithValue("@carid", carid);
                     _ = SQLTracer.TraceNQ(cmd, out _);
                 }
             }

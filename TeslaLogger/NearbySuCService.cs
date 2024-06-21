@@ -47,8 +47,8 @@ namespace TeslaLogger
                         GetNextSuperchargerToCalculate();
                     }
 
-                    // sleep 5 Minutes
-                    Thread.Sleep(300000);
+                    // sleep 10 Minutes
+                    Thread.Sleep(600000);
                 }
             }
             catch (Exception ex)
@@ -346,7 +346,7 @@ namespace TeslaLogger
 
                         HttpResponseMessage result = client.PostAsync(new Uri("http://teslalogger.de/share_supercharger2.php" + suffix), content).Result;
                         string r = result.Content.ReadAsStringAsync().Result;
-                        DBHelper.AddMothershipDataToDB("teslalogger.de/share_supercharger.php", start, (int)result.StatusCode);
+                        DBHelper.AddMothershipDataToDB("teslalogger.de/share_supercharger.php", start, (int)result.StatusCode, 0);
 
                         Tools.DebugLog("ShareSuc: " + Environment.NewLine + r);
 

@@ -311,7 +311,9 @@ namespace TeslaLogger
                         if (Virtual_key && !(CarType == "models" || CarType == "models2" || CarType == "modelx"))
                         {
                             telemetry = new TelemetryConnection(this);
-                            if (GetCurrentState() == TeslaState.Online || GetCurrentState() == TeslaState.Drive || GetCurrentState() == TeslaState.Charge)
+                            if (FleetAPI)
+                                telemetry.StartConnection();
+                            else if (GetCurrentState() == TeslaState.Online || GetCurrentState() == TeslaState.Drive || GetCurrentState() == TeslaState.Charge)
                                 telemetry.StartConnection();
                         }
                     } 
@@ -610,7 +612,13 @@ namespace TeslaLogger
             if (webhelper.IsDriving())
             {
                 lastCarUsed = DateTime.Now;
-                t = ApplicationSettings.Default.SleepPosition - 1000 - (Environment.TickCount - t);
+                int SleepPosition = ApplicationSettings.Default.SleepPosition;
+                if (FleetAPI)
+                    SleepPosition = Math.Max(30000, SleepPosition);
+                else
+                    SleepPosition = Math.Max(20000, SleepPosition);
+
+                t = SleepPosition - 1000 - (Environment.TickCount - t);
 
                 if (t > 0)
                 {
@@ -694,7 +702,17 @@ namespace TeslaLogger
             }
             else
             {
-                Thread.Sleep(ApplicationSettings.Default.SleepInStateSleep); // 10000
+                int sleep = ApplicationSettings.Default.SleepInStateSleep / 250;
+                for (int x = 0; x < sleep; x++)
+                {
+                    Thread.Sleep(250);
+                    if (FleetAPI && telemetry?.isOnline() == true)
+                    {
+                        Log("skip sleep because of telemetry is online");
+                        break;
+                    }
+                }
+
                 UpdateTeslalogger.CheckForNewVersion();
             }
         }
@@ -718,6 +736,35 @@ namespace TeslaLogger
                     else
                     {
                         Thread.Sleep(10000); // 10000
+
+                        if (FleetAPI)
+                        {
+                            int minutes = 1;
+                            if (currentJSON.current_charger_power < 23)
+                                minutes = 5;
+
+                            for (int m = 0; m < minutes; m++)
+                            {
+                                for (int p = 0; p < 60; p++)
+                                {
+                                    if (telemetry?.Charging == false)
+                                        break;
+
+                                    Thread.Sleep(1000);
+                                }
+
+                                if (telemetry?.Charging == false)
+                                    break;
+                            }
+                        }
+                        else
+                        {
+                            if (currentJSON.current_charger_power < 12)
+                                Thread.Sleep(50000);
+                            else
+                                Thread.Sleep(20000);
+
+                        }
                     }
 
                     //wh.GetCachedRollupData();
@@ -737,7 +784,9 @@ namespace TeslaLogger
                 if (webhelper.IsDriving()
                     && (webhelper.GetLastShiftState().Equals("R", StringComparison.Ordinal)
                         || webhelper.GetLastShiftState().Equals("N", StringComparison.Ordinal)
-                        || webhelper.GetLastShiftState().Equals("D", StringComparison.Ordinal)))
+                        || webhelper.GetLastShiftState().Equals("D", StringComparison.Ordinal)
+                        || FleetAPI
+                        ))
                 {
                     webhelper.ResetLastChargingState();
                     lastCarUsed = DateTime.Now;
@@ -791,8 +840,12 @@ namespace TeslaLogger
                     RefreshToken();
                     UpdateTeslalogger.CheckForNewVersion();
 
-                    // check sentry mode state
-                    _ = webhelper.GetOdometerAsync().Result;
+                    if (!FleetAPI)
+                    {
+                        // check sentry mode state
+                        _ = webhelper.GetOdometerAsync().Result;
+                    }
+
                     Tools.StartSleeping(out int startSleepHour, out int startSleepMinute);
                     bool doSleep = true;
 
@@ -811,7 +864,7 @@ namespace TeslaLogger
                     else if (FleetAPI && (CarType == "model3" || CarType == "modely" || CarType == "lychee" || CarType == "tamarind"))
                     {
                         // Log("API not suspended!");
-                        Thread.Sleep(30000);
+                        Thread.Sleep(1000);
                         string res = "";
                         lock (WebHelper.isOnlineLock)
                         {
@@ -821,6 +874,7 @@ namespace TeslaLogger
                         {
                             SetCurrentState(TeslaState.Start);
                             lastCarUsed = DateTime.Now;
+                            doSleep = false;
                         }
 
                         var srt = webhelper.startRequestTimeout;
@@ -881,6 +935,13 @@ namespace TeslaLogger
 
                                     for (int x = 0; x < Program.SuspendAPIMinutes * 10; x++)
                                     {
+                                        if (FleetAPI)
+                                        {
+                                            lastCarUsed = DateTime.Now;
+                                            doSleep = false;
+                                            break;
+                                        }
+
                                         if (webhelper.DrivingOrChargingByStream)
                                         {
                                             Log("StreamAPI prevents car to get sleep.");
@@ -957,6 +1018,11 @@ namespace TeslaLogger
                     if (doSleep)
                     {
                         int sleepduration = ApplicationSettings.Default.SleepInStateOnline; // 5000
+                        if (FleetAPI)
+                            sleepduration = 1000;
+                        else
+                            sleepduration = Math.Max(30000, sleepduration);
+
                         // if charging is starting just now, decrease sleepduration to 0.5 second
                         try
                         {
@@ -1014,7 +1080,16 @@ namespace TeslaLogger
 
                             Tools.DebugLog("Exception sleepduration", ex);
                         }
-                        Thread.Sleep(sleepduration);
+
+                        for (int s = 0; s < sleepduration / 500; s++)
+                        {
+                            Thread.Sleep(500);
+                            if (webhelper.DrivingOrChargingByStream)
+                            {
+                                Log("Stop sleep by DrivingOrChargingByStream");
+                                break;
+                            }
+                        }
                     }
                     else
                     {
@@ -1256,6 +1331,10 @@ namespace TeslaLogger
         public void HandleShiftStateChange(string oldState, string newState)
         {
             Log("ShiftStateChange: " + oldState + " -> " + newState);
+
+            if (FleetAPI && telemetry != null)
+                telemetry.Driving = false;
+
             lastCarUsed = DateTime.Now;
             Address addr = Geofence.GetInstance().GetPOI(CurrentJSON.GetLatitude(), CurrentJSON.GetLongitude(), false);
             // process special flags for POI

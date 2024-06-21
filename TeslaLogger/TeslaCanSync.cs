@@ -89,7 +89,7 @@ namespace TeslaLogger
                 var result = await client.GetAsync(new Uri(url+"/getdata?limit=12")).ConfigureAwait(true);
                 var resultContent = await result.Content.ReadAsStringAsync().ConfigureAwait(true);
 
-                DBHelper.AddMothershipDataToDB(url+"/getdata", start, (int) result.StatusCode);
+                DBHelper.AddMothershipDataToDB(url+"/getdata", start, (int) result.StatusCode, car.CarInDB);
 
                 try
                 {
