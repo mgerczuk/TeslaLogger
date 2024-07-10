@@ -112,7 +112,11 @@ namespace TeslaLogger
         DateTime lastRefreshToken = DateTime.MinValue;
         DateTime nextTeslaTokenFromRefreshToken = DateTime.MaxValue;
 
-        int commandCounter = 0;
+        internal int commandCounter = 0;
+        internal int commandCounterDrive = 0;
+        internal int commandCounterCharging = 0;
+        internal int commandcounterOnline = 0;
+        int commandCounterDay = DateTime.UtcNow.Day;
 
         protected virtual void Dispose(bool disposing)
         {
@@ -163,6 +167,24 @@ namespace TeslaLogger
         internal WebHelper(Car car)
         {
             this.car = car;
+
+            if (KVS.Get($"commandCounter_{car.CarInDB}", out commandCounter) == KVS.NOT_FOUND)
+                commandCounter = 0;
+
+            if (KVS.Get($"commandCounterDrive_{car.CarInDB}", out commandCounterDrive) == KVS.NOT_FOUND)
+                commandCounterDrive = 0;
+
+            if (KVS.Get($"commandCounterCharging_{car.CarInDB}", out commandCounterCharging) == KVS.NOT_FOUND)
+                commandCounterCharging = 0;
+
+            if (KVS.Get($"commandCounterOnline_{car.CarInDB}", out commandcounterOnline) == KVS.NOT_FOUND)
+                commandcounterOnline = 0;
+
+            if (KVS.Get($"commandCounterDay{car.CarInDB}", out commandCounterDay) == KVS.NOT_FOUND)
+                commandCounterDay = DateTime.UtcNow.Day;
+
+            ResetCommandCounterEveryDay();
+
 
             httpclient_teslalogger_de.DefaultRequestHeaders.ConnectionClose = true;
             ProductInfoHeaderValue userAgent = new ProductInfoHeaderValue("Teslalogger", Assembly.GetExecutingAssembly().GetName().Version.ToString());
@@ -1586,7 +1608,7 @@ namespace TeslaLogger
         internal bool IsCharging(bool justCheck = false, bool noMemcache = false)
         {
             if (car.FleetAPI && justCheck) {
-                return car.telemetry?.Charging ?? false;    
+                return car.telemetry?.IsCharging ?? false;    
             }   
 
             string resultContent = "";
@@ -2295,7 +2317,7 @@ namespace TeslaLogger
 
                     if (car.FleetAPI)
                     {
-                        if (car.telemetry?.isOnline() == true)
+                        if (car.telemetry?.IsOnline() == true)
                             return "online";
                         else
                             return "asleep";
@@ -3397,6 +3419,12 @@ namespace TeslaLogger
                     }
 
                     _ = SendDataToAbetterrouteplannerAsync(ts, battery_level, speed, false, power, (double)dLatitude, (double)dLongitude);
+
+                    if (car.FleetAPI && !justinsertdb)
+                    {
+                        latitude = 0;
+                        longitude = 0;
+                    }
 
                     car.DbHelper.InsertPos(ts.ToString(), latitude, longitude, speed, power, odometer.Result, ideal_battery_range_km, battery_range_km, battery_level, outside_temp, elevation);
 
@@ -4843,7 +4871,26 @@ DESC", con))
                             Log("ratelimit-remaining: " + v2.First());
                         */
 
+                        ResetCommandCounterEveryDay();
+
                         commandCounter++;
+                        KVS.InsertOrUpdate($"commandCounter_{car.CarInDB}", commandCounter);
+
+                        switch (car.GetCurrentState())
+                        {
+                            case TeslaState.Drive:
+                                commandCounterDrive++;
+                                KVS.InsertOrUpdate($"commandCounterDrive_{car.CarInDB}", commandCounterDrive);
+                                break;
+                            case TeslaState.Charge:
+                                commandCounterCharging++;
+                                KVS.InsertOrUpdate($"commandCounterCharging_{car.CarInDB}", commandCounterCharging);
+                                break;
+                            default:
+                                commandcounterOnline++;
+                                KVS.InsertOrUpdate($"commandCounterOnline_{car.CarInDB}", commandcounterOnline);
+                                break;
+                        }
 
                         if (commandCounter % 100 == 0)
                             Log("Command counter: " + commandCounter);
@@ -4916,6 +4963,8 @@ DESC", con))
 
                         l += ", sleep till: "+ DateTime.Now.AddMilliseconds(sleep).ToString(Tools.ciDeDE);
 
+                        l += $", CommandCounter: {commandCounter} Drive: {commandCounterDrive} Charge: {commandCounterCharging} Online: {commandcounterOnline}";
+
                         if (car.FleetAPI)
                             l += ", FleetAPI";
                         else
@@ -4947,6 +4996,24 @@ DESC", con))
             }
 
             return "NULL";
+        }
+
+        private void ResetCommandCounterEveryDay()
+        {
+            if (DateTime.UtcNow.Day != commandCounterDay)
+            {
+                commandCounterDay = DateTime.UtcNow.Day;
+                Log($"Total Commands Today: {commandCounter} Drive: {commandCounterDrive} Charge: {commandCounterCharging} Online: {commandcounterOnline}");
+                commandCounter = 0;
+                commandCounterDrive = 0;
+                commandCounterCharging = 0;
+                commandcounterOnline = 0;
+                KVS.InsertOrUpdate($"commandCounter_{car.CarInDB}", commandCounter);
+                KVS.InsertOrUpdate($"commandCounterDrive_{car.CarInDB}", commandCounterDrive);
+                KVS.InsertOrUpdate($"commandCounterCharging_{car.CarInDB}", commandCounterCharging);
+                KVS.InsertOrUpdate($"commandCounterOnline_{car.CarInDB}", commandcounterOnline);
+                KVS.InsertOrUpdate($"commandCounterDay{car.CarInDB}", commandCounterDay);
+            }
         }
 
         public bool LoginRetry(HttpResponseMessage result)
@@ -5764,7 +5831,7 @@ DESC", con))
             return null;
         }
 
-        internal static bool BranchExists(string branch)
+        internal static bool BranchExists(string branch, out HttpStatusCode statusCode)
         {
             try
             {
@@ -5775,6 +5842,7 @@ DESC", con))
                 client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("(00000000; " + Thread.CurrentThread.ManagedThreadId + ")"));
 
                 var g = client.GetAsync("https://api.github.com/repos/bassmaster187/TeslaLogger/branches/" + branch).Result;
+                statusCode = g.StatusCode;
                 if (g.IsSuccessStatusCode)
                 {
                     string res = g.Content.ReadAsStringAsync().Result;
@@ -5790,7 +5858,7 @@ DESC", con))
                 ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
             }
-
+            statusCode = 0;
             return false;
         }
 
