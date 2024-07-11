@@ -693,7 +693,8 @@ namespace TeslaLogger
                 }
 
                 HttpClient httpClientTeslaAPI = GetHttpClientTeslaAPI();
-                using (var request = new HttpRequestMessage(HttpMethod.Get, new Uri("https://teslalogger.de:4444/api/1/users/region"))) {
+                using (var request = new HttpRequestMessage(HttpMethod.Get, new Uri("https://teslalogger.de:4444/api/1/users/region")))
+                {
                     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Tesla_token);
                     Tools.DebugLog($"GetRegion #{car.CarInDB} request: {request.RequestUri}");
                     HttpResponseMessage response = httpClientTeslaAPI.SendAsync(request).Result;
@@ -1607,9 +1608,10 @@ namespace TeslaLogger
 
         internal bool IsCharging(bool justCheck = false, bool noMemcache = false)
         {
-            if (car.FleetAPI && justCheck) {
-                return car.telemetry?.IsCharging ?? false;    
-            }   
+            if (car.FleetAPI && justCheck)
+            {
+                return car.telemetry?.IsCharging ?? false;
+            }
 
             string resultContent = "";
             try
@@ -2477,14 +2479,13 @@ namespace TeslaLogger
                 }
 
                 string state = r4["state"].ToString();
-                string temp_Tesla_Streamingtoken = r4["tokens"][0].ToString();
-
-                if (temp_Tesla_Streamingtoken != Tesla_Streamingtoken)
+                if (r4.ContainsKey("tokens") && r4["tokens"] != null)
                 {
-                    Tesla_Streamingtoken = temp_Tesla_Streamingtoken;
-                    //Log("Streamingtoken changed (IsOnline): " + Tools.ObfuscateString(Tesla_Streamingtoken));
-
-                    // can be ignored, is not used at the moment car.Log("Tesla_Streamingtoken changed!");
+                    string temp_Tesla_Streamingtoken = r4["tokens"][0].ToString();
+                    if (temp_Tesla_Streamingtoken != Tesla_Streamingtoken)
+                    {
+                        Tesla_Streamingtoken = temp_Tesla_Streamingtoken;
+                    }
                 }
 
                 try
@@ -3261,8 +3262,8 @@ namespace TeslaLogger
             if (car.FleetAPI && !justinsertdb)
             {
                 if (car.telemetry?.Driving == false)
-                { 
-                    return false; 
+                {
+                    return false;
                 }
             }
 
@@ -4945,7 +4946,7 @@ DESC", con))
                         {
                             sleep = sleep * 1000;
                         }
-                        else 
+                        else
                         {
                             sleep = (random.Next(5000) + 60000) * 1000;
                         }
@@ -4961,7 +4962,7 @@ DESC", con))
                         if (result.Headers.TryGetValues("ratelimit-reset", out var v3))
                             l += ", ratelimit-reset: " + v3.First();
 
-                        l += ", sleep till: "+ DateTime.Now.AddMilliseconds(sleep).ToString(Tools.ciDeDE);
+                        l += ", sleep till: " + DateTime.Now.AddMilliseconds(sleep).ToString(Tools.ciDeDE);
 
                         l += $", CommandCounter: {commandCounter} Drive: {commandCounterDrive} Charge: {commandCounterCharging} Online: {commandcounterOnline}";
 
@@ -4972,7 +4973,7 @@ DESC", con))
 
                         car.CreateExeptionlessLog("TooManyRequests", l, LogLevel.Warn).Submit();
 
-                        Log(l1+l);
+                        Log(l1 + l);
                         car.CurrentJSON.FatalError += " TooManyRequests";
                         car.CurrentJSON.CreateCurrentJSON();
                         Thread.Sleep(sleep);
@@ -5851,7 +5852,7 @@ DESC", con))
                 else if (g.StatusCode == HttpStatusCode.NotFound)
                 {
                     return false;
-                }    
+                }
             }
             catch (Exception ex)
             {
