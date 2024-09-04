@@ -1,3 +1,12 @@
+# Version 1.59.5
+- BF: Fleet API detecting DC charging on newer Tesla firmware
+- 
+# Version 1.59.4
+- BF: Fleet API detecting AC charging on newer Tesla firmware
+
+# Version 1.59.3
+- Support for new FW 2024.26 with Fleet API
+
 # Version 1.59.0
 - Tesla API has been changed!
 

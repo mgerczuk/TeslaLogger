@@ -4468,17 +4468,24 @@ WHERE
             if (posID == 0)
                 posID = GetMaxPosid();
 
-            using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+            try
             {
-                con.Open();
-                using (MySqlCommand cmd = new MySqlCommand("insert drivestate (StartDate, StartPos, CarID, wheel_type) values (@StartDate, @Pos, @CarID, @wheel_type)", con))
+                using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
                 {
-                    cmd.Parameters.AddWithValue("@StartDate", now);
-                    cmd.Parameters.AddWithValue("@Pos", posID);
-                    cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
-                    cmd.Parameters.AddWithValue("@wheel_type", car.wheel_type);
-                    _ = SQLTracer.TraceNQ(cmd, out _);
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand("insert drivestate (StartDate, StartPos, CarID, wheel_type) values (@StartDate, @Pos, @CarID, @wheel_type)", con))
+                    {
+                        cmd.Parameters.AddWithValue("@StartDate", now);
+                        cmd.Parameters.AddWithValue("@Pos", posID);
+                        cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
+                        cmd.Parameters.AddWithValue("@wheel_type", car.wheel_type);
+                        _ = SQLTracer.TraceNQ(cmd, out _);
+                    }
                 }
+            } catch (Exception ex)
+            {
+                car.Log(ex.ToString());
+                car.SendException2Exceptionless(ex);
             }
 
             Insert_active_route_energy_at_arrival(posID, true);
@@ -4581,7 +4588,7 @@ VALUES(
                     cmd.Parameters.AddWithValue("@Datum", UnixToDateTime(long.Parse(timestamp, Tools.ciEnUS)));
                     cmd.Parameters.AddWithValue("@lat", latitude);
                     cmd.Parameters.AddWithValue("@lng", longitude);
-                    cmd.Parameters.AddWithValue("@speed", (int)MphToKmhRounded(speed));
+                    cmd.Parameters.AddWithValue("@speed", (int)Tools.MphToKmhRounded(speed));
                     
                     if (power == null)
                         cmd.Parameters.AddWithValue("@power", DBNull.Value);
@@ -5340,17 +5347,26 @@ WHERE
         [SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities")]
         public static bool ColumnExists(string table, string column)
         {
-            using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+            try
             {
-                con.Open();
-                using (MySqlCommand cmd = new MySqlCommand("SHOW COLUMNS FROM `" + table + "` LIKE '" + column + "';", con))
+                using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
                 {
-                    MySqlDataReader dr = SQLTracer.TraceDR(cmd);
-                    if (dr.Read())
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand("SHOW COLUMNS FROM `" + table + "` LIKE '" + column + "';", con))
                     {
-                        return true;
+                        MySqlDataReader dr = SQLTracer.TraceDR(cmd);
+                        if (dr.Read())
+                        {
+                            return true;
+                        }
                     }
                 }
+            } catch (MySqlException ex)
+            {
+                if (ex.Number == 1146)  // Table doesn't exist
+                    return false;
+
+                throw;
             }
 
             return false;
@@ -6236,23 +6252,6 @@ CHANGE {columnname} {columnname} {columntype} CHARACTER SET utf8mb4 COLLATE utf8
             }
         }
 
-        internal static double MphToKmhRounded(double speed_mph)
-        {
-            int speed_floor = (int)(speed_mph * 1.609344);
-            // handle special speed_floor as Math.Round is off by +1
-            if (
-                speed_floor == 30
-                || speed_floor == 33
-                || speed_floor == 83
-                || speed_floor == 123
-                || speed_floor == 133
-                )
-            {
-                return speed_floor;
-            }
-            return Math.Round(speed_mph / 0.62137119223733);
-        }
-
         internal static void MigrateFloorRound()
         {
             string migrationstatusfile = "migrate_floor_round.txt";
@@ -6315,7 +6314,7 @@ FROM
                     for (int speed_mph = (int)Math.Round(maxspeed_kmh * 0.62137119223733) + 1; speed_mph > 0; speed_mph--)
                     {
                         int speed_floor = (int)(speed_mph * 1.609344); // old conversion
-                        int speed_round = (int)MphToKmhRounded(speed_mph); // new conversion
+                        int speed_round = (int)Tools.MphToKmhRounded(speed_mph); // new conversion
                         if (speed_floor != speed_round)
                         {
                             DateTime start = DateTime.Now;
