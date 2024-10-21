@@ -2345,13 +2345,6 @@ PRIMARY KEY(id)
                 || GrafanaVersion == "8.5.22"
                 )
             {
-                if (!Tools.GetOsRelease().Contains("buster"))
-                {
-                    Logfile.Log("Grafana update suspended because of old OS:" + Tools.GetOsRelease());
-                    ExceptionlessClient.Default.CreateFeatureUsage("Grafana update suspended").FirstCarUserID().Submit();
-                    return;
-                }
-
                 Thread threadGrafanaUpdate = new Thread(() =>
                 {
                     string GrafanaFilename = $"grafana_{newversion}_armhf.deb";
