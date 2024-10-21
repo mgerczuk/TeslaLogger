@@ -15,8 +15,6 @@ using Exceptionless;
 using Newtonsoft.Json;
 using System.Diagnostics;
 using System.Data.Common;
-using System.Runtime.InteropServices.ComTypes;
-using Microsoft.VisualBasic.Logging;
 
 namespace TeslaLogger
 {
@@ -28,6 +26,8 @@ namespace TeslaLogger
         private static bool mothershipEnabled; // defaults to false
         private Car car;
         bool CleanPasswortDone; // defaults to false
+
+        private static Random random = new Random();
 
         internal static string Database = "teslalogger";
         internal static string User = "root";
@@ -1830,14 +1830,18 @@ HAVING
                 {
                     _ = Task.Factory.StartNew(() =>
                     {
-                        Thread.Sleep(600000); // sleep 10 minutes so that the invoice is ready
-                        GetChargingHistoryV2Service.LoadLatest(car);
-                        if (GetChargingHistoryV2Service.SyncAll(car) == 0)
+                        Thread.Sleep(600000 + random.Next(1000, 5000)); // sleep 10+rand minutes so that the invoice is ready
+                        if (GetChargingHistoryV2Service.LoadLatest(car))
                         {
-                            // invoice not ready yet
-                            Thread.Sleep(3600000); // sleep 60 minutes so that the invoice is ready
-                            GetChargingHistoryV2Service.LoadLatest(car);
-                            _ = GetChargingHistoryV2Service.SyncAll(car);
+                            if (GetChargingHistoryV2Service.SyncAll(car) == 0)
+                            {
+                                // invoice not ready yet
+                                Thread.Sleep(3600000 + random.Next(1000, 5000)); // sleep 60+rand minutes so that the invoice is ready
+                                if (GetChargingHistoryV2Service.LoadLatest(car))
+                                {
+                                    _ = GetChargingHistoryV2Service.SyncAll(car);
+                                }
+                            }
                         }
                     }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
                 }
@@ -4454,7 +4458,7 @@ WHERE
             // driving means that charging must be over
             UpdateUnplugDate();
             int posID = 0;
-            
+
             if (car.FleetAPI) // maxpos in Fleetapi is useless because lat & lng = 0
             {
                 posID = car.telemetry.lastposid;
@@ -4467,25 +4471,13 @@ WHERE
 
             if (posID == 0)
                 posID = GetMaxPosid();
-
-            try
+            
+            if (!InsertDrivestate(now, posID)) // if starting a drive state is failing because of duplicate startposid, the pos will be duplicated and retry
             {
-                using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
-                {
-                    con.Open();
-                    using (MySqlCommand cmd = new MySqlCommand("insert drivestate (StartDate, StartPos, CarID, wheel_type) values (@StartDate, @Pos, @CarID, @wheel_type)", con))
-                    {
-                        cmd.Parameters.AddWithValue("@StartDate", now);
-                        cmd.Parameters.AddWithValue("@Pos", posID);
-                        cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
-                        cmd.Parameters.AddWithValue("@wheel_type", car.wheel_type);
-                        _ = SQLTracer.TraceNQ(cmd, out _);
-                    }
-                }
-            } catch (Exception ex)
-            {
-                car.Log(ex.ToString());
-                car.SendException2Exceptionless(ex);
+                posID = (int)DBHelper.DuplicatePos(posID);
+                car.Log("DuplicatePos: " + posID);
+                if (posID > 0)
+                    InsertDrivestate(now, posID);
             }
 
             Insert_active_route_energy_at_arrival(posID, true);
@@ -4502,6 +4494,38 @@ WHERE
             car.CurrentJSON.current_trip_end_range = 0;
 
             car.CurrentJSON.CreateCurrentJSON();
+        }
+
+        private bool InsertDrivestate(DateTime now, int posID)
+        {
+            try
+            {
+                using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+                {
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand("insert drivestate (StartDate, StartPos, CarID, wheel_type) values (@StartDate, @Pos, @CarID, @wheel_type)", con))
+                    {
+                        cmd.Parameters.AddWithValue("@StartDate", now);
+                        cmd.Parameters.AddWithValue("@Pos", posID);
+                        cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
+                        cmd.Parameters.AddWithValue("@wheel_type", car.wheel_type);
+                        _ = SQLTracer.TraceNQ(cmd, out _);
+                        return true;
+                    }
+                }
+            }
+            catch (MySqlException ex)
+            {
+                if (ex.ErrorCode == -2147467259) // Duplicate entry
+                {
+                    car.Log(ex.Message);
+                    return false;
+                }
+
+                car.Log(ex.ToString());
+                car.SendException2Exceptionless(ex);
+            }
+            return false;
         }
 
         private void UpdatePosFromCurrentJSON(int posID)
@@ -7244,6 +7268,26 @@ ORDER BY startdate", con))
                 Logfile.Log(ex.ToString());
                 ex.ToExceptionless().FirstCarUserID().Submit();
             }
+        }
+
+        internal static long DuplicatePos(int id)
+        {
+             string sql = @"INSERT INTO `pos` (`Datum`,`lat`,`lng`,`speed`,`power`,`odometer`,`ideal_battery_range_km`,`address`,`outside_temp`,`altitude`,`battery_level`,`inside_temp`,`battery_heater`,`is_preconditioning`,`sentry_mode`,`battery_range_km`,`CarID`,`AP`) 
+                select now() ,`lat`,`lng`,`speed`,`power`,`odometer`,`ideal_battery_range_km`,`address`,`outside_temp`,`altitude`,`battery_level`,`inside_temp`,`battery_heater`,`is_preconditioning`,`sentry_mode`,`battery_range_km`,`CarID`,`AP`
+                from pos
+                where id = " + id;
+
+            using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
+            {
+                con.Open();
+                using (MySqlCommand cmd = new MySqlCommand(sql, con))
+                {
+                    cmd.ExecuteNonQuery();
+                    return cmd.LastInsertedId;
+                }
+            }
+
+            return 0;
         }
     }
 }
