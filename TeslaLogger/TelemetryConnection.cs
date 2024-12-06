@@ -40,12 +40,23 @@ namespace TeslaLogger
         public DateTime lastVehicleSpeedDate = DateTime.MinValue;
         public double lastVehicleSpeed = 0.0;
 
+        public DateTime lastSocDate = DateTime.MinValue;
+        public double lastSoc = 0.0;
+
+        public double lastChargingPower = 0.0;
+
         public String lastChargeState = "";
 
         public bool lastFastChargerPresent = false;
 
         public int lastposid = 0;
-        
+        private double lastIdealBatteryRange;
+        private double? lastOdometer;
+        private double? lastOutsideTemp;
+
+        double lastLatitude = 0;
+        double lastLongitude = 0;
+        private double lastRatedRange;
 
         void Log(string message)
         {
@@ -109,6 +120,11 @@ namespace TeslaLogger
             this.car = car;
             if (car == null)
                 return;
+
+            lastIdealBatteryRange = car.CurrentJSON.current_ideal_battery_range_km;
+            lastSoc = car.CurrentJSON.current_battery_level;
+            lastOdometer = car.CurrentJSON.current_odometer;
+            lastRatedRange = car.CurrentJSON.current_battery_range_km;
 
             t = new Thread(() => { Run(); });
             t.Start();
@@ -195,6 +211,8 @@ namespace TeslaLogger
 
                 if (j.ContainsKey("data"))
                 {
+                    Log(resultContent);
+
                     dynamic jData = j["data"];
                     string vin = j["vin"];
                     DateTime d = j["createdAt"];
@@ -210,6 +228,8 @@ namespace TeslaLogger
                         InsertCruiseStateTable(jData, d, resultContent);
                         handleStatemachine(jData, d, resultContent);
                         InsertLocation(jData, d, resultContent);
+                        InsertCharging(jData, d, resultContent);
+                        InsertStates(jData, d, resultContent);
                     }
                 }
                 else if (j.ContainsKey("alerts"))
@@ -260,6 +280,261 @@ namespace TeslaLogger
             }
         }
 
+        private void InsertStates(dynamic j, DateTime d, string resultContent)
+        {
+            using (MySqlCommand cmd = new MySqlCommand())
+            {
+                foreach (dynamic jj in j)
+                {
+                    string key = jj["key"];
+                    dynamic value = jj["value"];
+
+                    if (key == "SentryMode")
+                    {
+                        string v = value["stringValue"];
+                        if (v == "Armed")
+                        {
+                            car.webhelper.is_sentry_mode = true;
+                            car.CurrentJSON.current_is_sentry_mode = true;
+                            car.CurrentJSON.CreateCurrentJSON();
+                        }
+                        else
+                        {
+                            car.webhelper.is_sentry_mode = false;
+                            car.CurrentJSON.current_is_sentry_mode = false;
+                            car.CurrentJSON.CreateCurrentJSON();
+                        }
+                        car.CurrentJSON.CreateCurrentJSON();
+                    }
+                    else if (key == "PreconditioningEnabled")
+                    {
+                        bool preconditioning = false;
+
+                        string v = value["stringValue"];
+                        if (v == "True")
+                            preconditioning = true;
+
+                        car.CurrentJSON.current_is_preconditioning = preconditioning;
+                        Log("Preconditioning: " + preconditioning);
+                        car.CurrentJSON.CreateCurrentJSON();
+                    }
+                    else if (key == "OutsideTemp")
+                    {
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, out double OutsideTemp))
+                        {
+                            lastOutsideTemp = OutsideTemp;
+                            car.CurrentJSON.current_outside_temperature = OutsideTemp;
+                            car.CurrentJSON.CreateCurrentJSON();
+                        }
+                    }
+                    else if (key == "TimeToFullCharge")
+                    {
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, out double TimeToFullCharge))
+                        {
+                            car.CurrentJSON.current_time_to_full_charge = TimeToFullCharge;
+                            car.CurrentJSON.CreateCurrentJSON();
+                        }
+                    }
+                    else if (key == "ChargeLimitSoc")
+                    {
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, out double ChargeLimitSoc))
+                        {
+                            car.CurrentJSON.charge_limit_soc = (int)ChargeLimitSoc;
+                            car.CurrentJSON.CreateCurrentJSON();
+                        }
+                    }
+                    else if (key == "DestinationName")
+                    {
+                        string v = value["stringValue"];
+                        
+                        car.CurrentJSON.active_route_destination = v;
+                        car.CurrentJSON.CreateCurrentJSON();
+                        
+                    }
+                    else if (key == "MinutesToArrival")
+                    {
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, out double MinutesToArrival))
+                        {
+                            car.CurrentJSON.active_route_minutes_to_arrival = (int)MinutesToArrival;
+                            car.CurrentJSON.CreateCurrentJSON();
+                        }
+                    }
+                    else if (key == "MilesToArrival")
+                    {
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, out double MilesToArrival))
+                        {
+                            car.CurrentJSON.active_route_km_to_arrival = (long)(MilesToArrival * 1.609344);
+                            car.CurrentJSON.CreateCurrentJSON();
+                        }
+                    }
+                    else if (key == "BatteryHeaterOn")
+                    {
+                        /*
+                        string v = value["stringValue"];
+                        if (bool.TryParse(v, out bool BatteryHeaterOn))
+                        {
+                            car.CurrentJSON.current_battery_heater = BatteryHeaterOn;
+                            car.CurrentJSON.CreateCurrentJSON();
+                        }
+                        */
+                    }
+                }
+            }
+        }
+
+        private void InsertCharging(dynamic j, DateTime d, string resultContent)
+        {
+            double ChargingEnergyIn = double.NaN;
+            bool changed = false;
+
+            using (MySqlCommand cmd = new MySqlCommand())
+            {
+                foreach (dynamic jj in j)
+                {
+                    string key = jj["key"];
+                    dynamic value = jj["value"];
+
+                    if (key == "ACChargingEnergyIn" && acCharging)
+                    {
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, out ChargingEnergyIn))
+                        {
+                            ChargingEnergyIn = Math.Round(ChargingEnergyIn, 2);
+                            cmd.Parameters.AddWithValue("@charge_energy_added", ChargingEnergyIn);
+                            car.CurrentJSON.current_charge_energy_added = ChargingEnergyIn;
+                            changed = true;
+                        }
+
+                    }
+                    else if (key == "DCChargingEnergyIn" && dcCharging)
+                    {
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, out ChargingEnergyIn))
+                        {
+                            ChargingEnergyIn = Math.Round(ChargingEnergyIn, 2);
+                            cmd.Parameters.AddWithValue("@charge_energy_added", ChargingEnergyIn);
+                            car.CurrentJSON.current_charge_energy_added = ChargingEnergyIn;
+                            changed = true;
+                        }
+                    }
+                    else if (key == "Soc")
+                    {
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, out double Soc))
+                        {
+                            Soc = Math.Round(Soc, 1);
+                            lastSoc = Soc;
+                            lastSocDate = d;
+
+                            car.CurrentJSON.current_battery_level = (int)lastSoc;
+                            changed = true;
+                        }
+                    }
+                    else if (key == "ACChargingPower" && acCharging)
+                    {
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, out double ChargingPower))
+                        {
+                            lastChargingPower = ChargingPower;
+                            car.CurrentJSON.current_charger_power = Math.Round(ChargingPower, 2);
+                            changed = true;
+                        }
+                    }
+                    else if (key == "DCChargingPower" && dcCharging)
+                    {
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, out double ChargingPower))
+                        {
+                            lastChargingPower = ChargingPower;
+                            car.CurrentJSON.current_charger_power = Math.Round(ChargingPower, 2);
+                            changed = true;
+                        }
+                    }
+                    else if (key == "IdealBatteryRange")
+                    {
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, out double IdealBatteryRange))
+                        {
+                            lastIdealBatteryRange = IdealBatteryRange * 1.609344;
+                            car.CurrentJSON.current_ideal_battery_range_km = lastIdealBatteryRange;
+                            changed = true;
+                        }
+                    }
+                    else if (key == "RatedRange")
+                    {
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, out double RatedRange))
+                        {
+                            lastRatedRange = RatedRange * 1.609344;
+                            car.CurrentJSON.current_battery_range_km = lastRatedRange;
+                            changed = true;
+                        }
+                    }
+                }
+
+                if (changed)
+                {
+                    car.CurrentJSON.CreateCurrentJSON();
+                }
+
+                if (cmd.Parameters.Count > 0 && IsCharging)
+                {
+                    InsertCharging(d, cmd);
+                }
+            }
+        }
+
+        private void InsertCharging(DateTime d, MySqlCommand cmd)
+        {
+            cmd.Parameters.AddWithValue("@battery_level", lastSoc);
+
+            cmd.Parameters.AddWithValue("@charger_power", lastChargingPower);
+            cmd.Parameters.AddWithValue("@ideal_battery_range_km", lastIdealBatteryRange);
+            cmd.Parameters.AddWithValue("@battery_range_km", lastRatedRange);
+            cmd.Parameters.AddWithValue("@outside_temp", lastOutsideTemp);
+            cmd.Parameters.AddWithValue("@battery_heater", car.CurrentJSON.current_battery_heater);
+
+            cmd.Parameters.AddWithValue("@CarID", car.CarInDB);
+            cmd.Parameters.AddWithValue("@Datum", d);
+
+            var sb = new StringBuilder("insert into charging (");
+            var sbc = new StringBuilder(") values (");
+            var names = cmd.Parameters.Cast<MySqlParameter>()
+                .Select(p => p.ParameterName.Substring(1))
+                .ToArray();
+            sb.Append(string.Join(", ", names));
+
+            var values = cmd.Parameters.Cast<MySqlParameter>()
+                .Select(p => p.ParameterName)
+                .ToArray();
+            sbc.Append(string.Join(", ", values));
+            sbc.Append(")");
+
+            sb.Append(sbc);
+
+            sb.Append("\n ON DUPLICATE KEY UPDATE ");
+            var update = cmd.Parameters.Cast<MySqlParameter>()
+                .Where(w => w.ParameterName != "@CarID" && w.ParameterName != "@Datum")
+                .Select(p => p.ParameterName.Substring(1) + "=" + p.ParameterName)
+                .ToArray();
+
+            sb.Append(string.Join(", ", update));
+            cmd.CommandText = sb.ToString();
+
+            using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+            {
+                con.Open();
+                cmd.Connection = con;
+                cmd.ExecuteNonQuery();
+                Log($"Insert Charging TR: {lastIdealBatteryRange}km");
+            }
+        }
+
         public void InsertLocation(dynamic j, DateTime d, string resultContent, bool force = false)
         {
             try
@@ -275,9 +550,17 @@ namespace TeslaLogger
                 {
                     string key = jj["key"];
                     dynamic value = jj["value"];
-
-                    if (key == "Location")
-                    {    
+                    if (key == "Odometer")
+                    {
+                        string v = value["stringValue"];
+                        if (v != null)
+                        {
+                            if (double.TryParse(v, out double Odometer))
+                                lastOdometer = Odometer * 1.609344;
+                        }
+                    }
+                    else if (key == "Location")
+                    {
                         dynamic locationValue = value["locationValue"];
                         if (locationValue != null)
                         {
@@ -313,9 +596,24 @@ namespace TeslaLogger
                                         longitude = -longitude;
                                     }
                                 }
-
                             }
                         }
+
+                        if (lastLatitude != latitude || lastLongitude != longitude)
+                        {
+                            if (latitude != null && longitude != null)
+                            {
+                                if (lastLatitude != 0 && lastLongitude != 0)
+                                {
+                                    double bearing = Tools.CalculateBearing(lastLatitude, lastLongitude, latitude.Value, longitude.Value);
+                                    car.CurrentJSON.heading = (int)bearing;
+                                }
+
+                                lastLatitude = latitude.Value;
+                                lastLongitude = longitude.Value;
+                            }
+                        }
+
                     }
                     else if (key == "VehicleSpeed")
                     {
@@ -344,7 +642,7 @@ namespace TeslaLogger
 
                     long ts= (long)(d.ToUniversalTime().Subtract(new DateTime(1970, 1, 1))).TotalSeconds*1000;
                     Log("Insert Location" + (force ? " Force" : ""));
-                    lastposid = car.DbHelper.InsertPos(ts.ToString(), latitude.Value, longitude.Value, (int)speed.Value, null, null, -1, -1, -1, null, "");
+                    lastposid = car.DbHelper.InsertPos(ts.ToString(), latitude.Value, longitude.Value, (int)speed.Value, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, (int)lastSoc, lastOutsideTemp, "");
                 }
             }
             catch (Exception ex)
@@ -627,6 +925,7 @@ namespace TeslaLogger
                                         if (current > 2)
                                         {
                                             Log($"AC Charging  {current}A ***");
+                                            InsertFirstCharging(date);
                                             InsertLocation(j, date, resultContent, true);
                                             acCharging = true;
                                         }
@@ -640,7 +939,7 @@ namespace TeslaLogger
                                         if (current > 5)
                                         {
                                             Log($"DC Charging ***");
-
+                                            InsertFirstCharging(date);
                                             InsertLocation(j, date, resultContent, true);
                                             dcCharging = true;
                                         }
@@ -699,6 +998,17 @@ namespace TeslaLogger
             {
                 Log("Telemetry Error: " + ex.ToString());
                 car.CreateExceptionlessClient(ex).AddObject(resultContent, "ResultContent").Submit();
+            }
+        }
+
+        private void InsertFirstCharging(DateTime date)
+        {
+            Log("InsertFirstCharging " + date.ToString());
+
+            using (MySqlCommand cmd = new MySqlCommand())
+            {
+                cmd.Parameters.AddWithValue("@charge_energy_added", 0);
+                InsertCharging(date, cmd);
             }
         }
 
@@ -772,7 +1082,7 @@ namespace TeslaLogger
                                     if (Driving)
                                     {
                                         Log("Parking ***");
-                                        Driving = false;
+                                        driving = false;
                                     }
                                 }
                                 else if (v1.Length > 0)
@@ -782,6 +1092,7 @@ namespace TeslaLogger
                                     if (!Driving)
                                     {
                                         Log("Driving ***");
+                                        InsertFirstPos(date, 0);
                                         Driving = true;
                                     }
                                 }
@@ -796,6 +1107,7 @@ namespace TeslaLogger
                                     {
                                         lastVehicleSpeed = speed;
                                         lastVehicleSpeedDate = date;
+                                        car.webhelper.lastIsDriveTimestamp = DateTime.Now;
 
                                         if (acCharging)
                                         {
@@ -814,13 +1126,15 @@ namespace TeslaLogger
                                         if (!Driving)
                                         {
                                             Log("Driving by speed ***");
+                                            InsertFirstPos(date, (int)speed);
                                             Driving = true;
                                         }
                                     }
 
                                     Log("Speed: " + v1);
                                 }
-                            } else if (key == "FastChargerPresent")
+                            }
+                            else if (key == "FastChargerPresent")
                             {
                                 if (v1 == "true")
                                 {
@@ -841,7 +1155,8 @@ namespace TeslaLogger
                                         var current = PackCurrent(j, date);
                                         Log($"FastChargerPresent {current}A ***");
 
-                                        if (current > 5) {
+                                        if (current > 5)
+                                        {
                                             Log($"DC Charging ***");
 
                                             InsertLocation(j, date, resultContent, true);
@@ -865,6 +1180,18 @@ namespace TeslaLogger
                                 Log($"Key: {key} / Value: {v1}");
                             }
                         }
+                        else
+                        {
+                            if (key == "Gear")
+                            {
+                                if (Driving)
+                                {
+                                    Log("Parking *** -> Gear Value = empty");
+                                    driving = false;
+                                }
+
+                            }
+                        }
                     }
                 }
 
@@ -877,6 +1204,14 @@ namespace TeslaLogger
                 car.CreateExceptionlessClient(ex).AddObject(resultContent, "ResultContent").Submit();
             }
 
+        }
+
+        private void InsertFirstPos(DateTime date, int speed)
+        {
+            long ts = (long)(date.ToUniversalTime().Subtract(new DateTime(1970, 1, 1))).TotalSeconds * 1000;
+            
+            lastposid = car.DbHelper.InsertPos(ts.ToString(), lastLatitude, lastLongitude, speed, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, (int)lastSoc, lastOutsideTemp, "");
+            Log($"InsertFirstPos {date} ID: {lastposid}");
         }
 
         internal double? PackCurrent(dynamic o, DateTime date)
@@ -981,17 +1316,20 @@ namespace TeslaLogger
             
             string configname = "";
             if (car.FleetAPI)
-                configname = "free2";
+                configname = "paid";
 
             Log("Login to Telemetry Server / config: " + configname);
             string vin = car.Vin;
             // vin = "LRW3E7EK6NC483045"; // xxx
+            string fw = car.CurrentJSON.current_car_version;
+            if (fw?.Contains(" ") == true)
+                fw = fw.Substring(0, fw.IndexOf(" ")).Trim();
 
             Dictionary<string, object> login = new Dictionary<string, object>{
                     { "msg_type", "login"},
                     { "vin", vin},
                     { "token", car.TaskerHash},
-                    { "FW", car.CurrentJSON.current_car_version.Substring(0, car.CurrentJSON.current_car_version.IndexOf(" ")).Trim()},
+                    { "FW", fw},
                     { "accesstoken", car.Tesla_Token},
                     { "regionurl", car.webhelper.apiaddress},
                     { "config", configname},

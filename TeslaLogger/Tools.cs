@@ -1234,6 +1234,32 @@ namespace TeslaLogger
             return false;
         }
 
+        public static bool IsDotnet8()
+        {
+            return Environment.Version?.ToString()?.StartsWith("8.0") == true;
+        }
+
+        public static bool IsDockerNET8()
+        {
+            try
+            {
+                string filename = "/tmp/teslalogger-dockernet8";
+
+                if (File.Exists(filename))
+                {
+                    return true;
+                }
+
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                Logfile.ExceptionWriter(ex, "IsDockerNET8");
+            }
+
+            return false;
+        }
+
         public static bool IsShareData()
         {
             try
@@ -1309,6 +1335,33 @@ namespace TeslaLogger
 
             _OSVersion = ret;
             return ret;
+        }
+
+
+        public static double CalculateBearing(double lat1, double lon1, double lat2, double lon2)
+        {
+            double dLon = ToRadians(lon2 - lon1);
+            double lat1Rad = ToRadians(lat1);
+            double lat2Rad = ToRadians(lat2);
+
+            double y = Math.Sin(dLon) * Math.Cos(lat2Rad);
+            double x = Math.Cos(lat1Rad) * Math.Sin(lat2Rad) - Math.Sin(lat1Rad) * Math.Cos(lat2Rad) * Math.Cos(dLon);
+
+            double bearing = Math.Atan2(y, x);
+            bearing = ToDegrees(bearing);
+            bearing = (bearing + 360) % 360; // Normalize to 0-360
+
+            return bearing;
+        }
+
+        private static double ToRadians(double degrees)
+        {
+            return degrees * (Math.PI / 180);
+        }
+
+        private static double ToDegrees(double radians)
+        {
+            return radians * (180 / Math.PI);
         }
 
         // source: https://www.limilabs.com/blog/json-net-formatter

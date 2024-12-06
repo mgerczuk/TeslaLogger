@@ -1614,7 +1614,7 @@ namespace TeslaLogger
 
         internal bool IsCharging(bool justCheck = false, bool noMemcache = false)
         {
-            if (car.FleetAPI && justCheck)
+            if (car.FleetAPI)
             {
                 return car.telemetry?.IsCharging ?? false;
             }
@@ -1673,9 +1673,9 @@ namespace TeslaLogger
                 car.CurrentJSON.current_ideal_battery_range_km = (double)ideal_battery_range * 1.609344;
 
                 string battery_level = charge_state["battery_level"].ToString();
-                if (battery_level != null && Convert.ToInt32(battery_level) != car.CurrentJSON.current_battery_level)
+                if (battery_level != null && Convert.ToDouble(battery_level) != car.CurrentJSON.current_battery_level)
                 {
-                    car.CurrentJSON.current_battery_level = Convert.ToInt32(battery_level);
+                    car.CurrentJSON.current_battery_level = Convert.ToDouble(battery_level);
                     car.CurrentJSON.CreateCurrentJSON();
                 }
                 string charger_power = "";
@@ -2539,8 +2539,10 @@ namespace TeslaLogger
 
                         if (unknownStateCounter == 0)
                         {
+                            /*
                             string r = Wakeup().Result;
                             Log("WakupResult: " + r);
+                            */
                         }
                         else
                         {
@@ -2710,6 +2712,11 @@ namespace TeslaLogger
                     WriteCarSettings("0.147", "M3 LR P 2024");
                     return;
                 }
+                if (car.TrimBadging == "74d" && year >= 2024)
+                {
+                    WriteCarSettings("0.141", "M3 LR 2024");
+                    return;
+                }
                 if (car.TrimBadging == "p74d" && year >= 2021)
                 {
                     WriteCarSettings("0.158", "M3 LR P 2021");
@@ -2756,6 +2763,11 @@ namespace TeslaLogger
                         else if (motor == "3 dual performance highland" && year >= 2024)
                         {
                             WriteCarSettings("0.147", "M3 LR P 2024");
+                            return;
+                        }
+                        else if (car.DBWhTR >= 0.135 && car.DBWhTR <= 0.142 && AWD && year >= 2024)
+                        {
+                            WriteCarSettings("0.141", "M3 LR 2024");
                             return;
                         }
                         else if (car.DBWhTR >= 0.135 && car.DBWhTR <= 0.142 && AWD)
@@ -3275,11 +3287,18 @@ namespace TeslaLogger
 
         public bool IsDriving(bool justinsertdb = false)
         {
-            if (car.FleetAPI && !justinsertdb)
+            if (car.FleetAPI)
             {
                 if (car.telemetry?.Driving == false)
                 {
                     return false;
+                }
+                else
+                {
+                    if (car.telemetry != null)
+                        return car.telemetry.Driving == true;
+                    else
+                        return false;
                 }
             }
 
@@ -4618,7 +4637,7 @@ DESC", con))
 
                 if (r2["battery_level"] != null)
                 {
-                    battery_level = Convert.ToInt32(r2["battery_level"]);
+                    battery_level = Convert.ToDouble(r2["battery_level"]);
                     car.CurrentJSON.current_battery_level = battery_level;
                 }
                 battery_range2ideal_battery_range = (double)ideal_battery_range / Convert.ToDouble(r2["battery_range"]);
@@ -5561,7 +5580,7 @@ DESC", con))
             car.Log(text);
         }
 
-        internal async Task SendDataToAbetterrouteplannerAsync(long utc, int soc, double speed_mph, bool is_charging, double power, double lat, double lon)
+        internal async Task SendDataToAbetterrouteplannerAsync(long utc, double soc, double speed_mph, bool is_charging, double power, double lat, double lon)
         {
             try
             {
