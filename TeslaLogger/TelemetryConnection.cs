@@ -12,6 +12,7 @@ using System.IO;
 using Exceptionless;
 using Newtonsoft.Json.Linq;
 using System.Globalization;
+using Google.Protobuf.WellKnownTypes;
 
 namespace TeslaLogger
 {
@@ -29,7 +30,20 @@ namespace TeslaLogger
 
         private bool driving;
         private bool _acCharging;
-        private bool dcCharging;
+        internal bool dcCharging
+        {
+            get => _dcCharging;
+            set
+            {
+                if (_dcCharging != value)
+                {
+                    car.CurrentJSON.current_fast_charger_present = value;
+                    car.CurrentJSON.CreateCurrentJSON();
+                }
+                _dcCharging = value;
+            }
+        }
+        private bool _dcCharging;
 
         public DateTime lastDriving = DateTime.MinValue;
         public DateTime lastMessageReceived = DateTime.MinValue;
@@ -70,8 +84,9 @@ namespace TeslaLogger
                 if (driving)
                 {
                     var ts = DateTime.Now - lastDriving;
-                    if (ts.TotalMinutes > 10)
+                    if (ts.TotalMinutes > 30)
                     {
+                        Log("Stop Driving by timeout 30 minutes ***");
                         driving = false;
                         Log("Parking time: " + lastDriving.ToString());
                         return false;
@@ -193,9 +208,18 @@ namespace TeslaLogger
                     else if (ex.InnerException?.InnerException is System.Net.Sockets.SocketException se)
                     {
                         Log(se.Message);
+                        car.CreateExceptionlessClient(ex.InnerException).Submit();
+                    }
+                    else if (ex.InnerException?.InnerException != null)
+                    {
+                        Log(ex.InnerException.Message);
+                        car.CreateExceptionlessClient(ex.InnerException).Submit();
                     }
                     else
-                        Log("Telemetry Exception: " + ex.ToString());                    
+                    {
+                        Log("Telemetry Exception: " + ex.ToString());
+                        car.CreateExceptionlessClient(ex).Submit();
+                    }
 
                     var s = r.Next(30000, 60000);
                     Thread.Sleep(s);
@@ -383,6 +407,183 @@ namespace TeslaLogger
                         }
                         */
                     }
+                    else if (key.StartsWith("TpmsPressure"))
+                    {
+                        string suffix = key.Substring(key.Length - 2);
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, out double pressure))
+                        {
+                            pressure = Math.Round(pressure, 2);
+                            switch (suffix)
+                            {
+                                case "Fl":
+                                    car.DbHelper.InsertTPMS(1, pressure, d);
+                                    break;
+                                case "Fr":
+                                    car.DbHelper.InsertTPMS(2, pressure, d);
+                                    break;
+                                case "Rl":
+                                    car.DbHelper.InsertTPMS(3, pressure, d);
+                                    break;
+                                case "Rr":
+                                    car.DbHelper.InsertTPMS(4, pressure, d);
+                                    break;
+                            }
+                        }
+                    }
+                    else if (key == "VehicleName")
+                    {
+                        string v = value["stringValue"];
+                        if (!String.IsNullOrEmpty(v))
+                        {
+                            if (car.DisplayName != v)
+                            {
+                                Log("DisplayName: " + v);
+                                car.DisplayName = v;
+                                car.DbHelper.WriteCarSettings();
+                            }
+                        }
+                    }
+                    else if (key == "Trim")
+                    {
+                        string v = value["stringValue"];
+                        if (!String.IsNullOrEmpty(v))
+                        {
+                            v = v.ToLower();
+                            if (car.TrimBadging != v)
+                            {
+                                Log("Trim: " + v);
+                                car.TrimBadging = v;
+                                car.DbHelper.WriteCarSettings();
+                                car.webhelper.UpdateEfficiency();
+
+                                Log("Car Model Name: " + car.ModelName);
+                            }
+                        }
+                    }
+                    else if (key == "ServiceMode")
+                    {
+                        string v = value["stringValue"];
+                        if (bool.TryParse(v, out bool serviceMode))
+                        {
+                            //TODO : Implement ServiceMode
+                        }
+                    }
+                    else if (key == "CarType")
+                    {
+                        string v = value["stringValue"];
+                        if (!String.IsNullOrEmpty(v))
+                        {
+                            v = v.ToLower();
+
+                            if (car.CarType != v)
+                            {
+                                Log("CarType: " + v);
+                                car.CarType = v;
+                                car.CarSpecialType = "base";
+                                car.DbHelper.WriteCarSettings();
+                                car.webhelper.UpdateEfficiency();
+
+                                Log("Car Model Name: " + car.ModelName);
+                            }
+                        }
+                    }
+                    else if (key == "Version")
+                    { 
+                        string car_version = value["stringValue"];
+                        if (!String.IsNullOrEmpty(car_version))
+                        {
+                            if (car.CurrentJSON.current_car_version != car_version)
+                            {
+                                Log("Car Version: " + car_version);
+                                car.CurrentJSON.current_car_version = car_version;
+                                car.CurrentJSON.CreateCurrentJSON();
+
+                                car.DbHelper.SetCarVersion(car_version);
+
+                                car.webhelper.TaskerWakeupfile(true);
+                            }
+                            
+                        }
+                    }
+                    else if (key == "DoorState")
+                    {
+                        string DoorState = value["stringValue"];
+                        if (!String.IsNullOrEmpty(DoorState))
+                        {
+                            if (DoorState.Contains("DriverFront"))
+                                car.teslaAPIState.AddValue("df", "int", 1, Tools.ToUnixTime(d), "vehicle_state");
+                            else
+                                car.teslaAPIState.AddValue("df", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+
+                            if (DoorState.Contains("DriverRear"))
+                                car.teslaAPIState.AddValue("dr", "int", 1, Tools.ToUnixTime(d), "vehicle_state");
+                            else
+                                car.teslaAPIState.AddValue("dr", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+
+                            if (DoorState.Contains("PassengerFront"))
+                                car.teslaAPIState.AddValue("pf", "int", 1, Tools.ToUnixTime(d), "vehicle_state");
+                            else
+                                car.teslaAPIState.AddValue("pf", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+
+                            if (DoorState.Contains("PassengerRear"))
+                                car.teslaAPIState.AddValue("pr", "int", 1, Tools.ToUnixTime(d), "vehicle_state");
+                            else
+                                car.teslaAPIState.AddValue("pr", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+
+                            if (DoorState.Contains("TrunkFront"))
+                                car.teslaAPIState.AddValue("ft", "int", 1, Tools.ToUnixTime(d), "vehicle_state");
+                            else
+                                car.teslaAPIState.AddValue("ft", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+
+                            if (DoorState.Contains("TrunkRear"))
+                                car.teslaAPIState.AddValue("rt", "int", 1, Tools.ToUnixTime(d), "vehicle_state");
+                            else
+                                car.teslaAPIState.AddValue("rt", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+                        }
+                        else
+                        {
+                            car.teslaAPIState.AddValue("df", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+                            car.teslaAPIState.AddValue("dr", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+                            car.teslaAPIState.AddValue("pf", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+                            car.teslaAPIState.AddValue("pr", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+                            car.teslaAPIState.AddValue("ft", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+                            car.teslaAPIState.AddValue("rt", "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+                        }
+
+                        Log("XXXX DoorState:" + DoorState);
+                        car.CurrentJSON.CreateCurrentJSON();
+
+                    }
+                    else if (key == "Locked")
+                    {
+                        string Locked = value["stringValue"];
+                        if (bool.TryParse(Locked, out bool l))
+                        {
+                            car.teslaAPIState.AddValue("locked", "bool", l, Tools.ToUnixTime(d), "vehicle_state");
+                            car.CurrentJSON.CreateCurrentJSON();
+
+                        }
+                    }
+                    else if (key.EndsWith("Window"))
+                    {
+                        string apistatekey = key.ToLower().Insert(2, "_");
+                        string Window = value["stringValue"];
+
+                        Log("Window: " + key + " / " + Window);
+                        if (!String.IsNullOrEmpty(Window))
+                        {
+                            int apistatevalue = 0;
+                            if (Window.Contains("Open"))
+                                apistatevalue = 1;
+
+                            car.teslaAPIState.AddValue(apistatekey, "int", apistatevalue, Tools.ToUnixTime(d), "vehicle_state");
+                        }
+                        else
+                            car.teslaAPIState.AddValue(apistatekey, "int", 0, Tools.ToUnixTime(d), "vehicle_state");
+
+                        car.CurrentJSON.CreateCurrentJSON();
+                    }
                 }
             }
         }
@@ -431,7 +632,9 @@ namespace TeslaLogger
                             lastSoc = Soc;
                             lastSocDate = d;
 
-                            car.CurrentJSON.current_battery_level = (int)lastSoc;
+                            car.teslaAPIState.AddValue("battery_level", "int", Soc, Tools.ToUnixTime(d), "charge_state");
+
+                            car.CurrentJSON.current_battery_level = lastSoc;
                             changed = true;
                         }
                     }
@@ -460,7 +663,7 @@ namespace TeslaLogger
                         string v1 = value["stringValue"];
                         if (double.TryParse(v1, out double IdealBatteryRange))
                         {
-                            lastIdealBatteryRange = IdealBatteryRange * 1.609344;
+                            lastIdealBatteryRange = Tools.MlToKm(IdealBatteryRange, 1);
                             car.CurrentJSON.current_ideal_battery_range_km = lastIdealBatteryRange;
                             changed = true;
                         }
@@ -470,7 +673,7 @@ namespace TeslaLogger
                         string v1 = value["stringValue"];
                         if (double.TryParse(v1, out double RatedRange))
                         {
-                            lastRatedRange = RatedRange * 1.609344;
+                            lastRatedRange = Tools.MlToKm(RatedRange, 1);
                             car.CurrentJSON.current_battery_range_km = lastRatedRange;
                             changed = true;
                         }
@@ -556,7 +759,7 @@ namespace TeslaLogger
                         if (v != null)
                         {
                             if (double.TryParse(v, out double Odometer))
-                                lastOdometer = Odometer * 1.609344;
+                                lastOdometer = Tools.MlToKm(Odometer, 3);
                         }
                     }
                     else if (key == "Location")
@@ -642,7 +845,7 @@ namespace TeslaLogger
 
                     long ts= (long)(d.ToUniversalTime().Subtract(new DateTime(1970, 1, 1))).TotalSeconds*1000;
                     Log("Insert Location" + (force ? " Force" : ""));
-                    lastposid = car.DbHelper.InsertPos(ts.ToString(), latitude.Value, longitude.Value, (int)speed.Value, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, (int)lastSoc, lastOutsideTemp, "");
+                    lastposid = car.DbHelper.InsertPos(ts.ToString(), latitude.Value, longitude.Value, (int)speed.Value, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, lastSoc, lastOutsideTemp, "");
                 }
             }
             catch (Exception ex)
@@ -669,6 +872,11 @@ namespace TeslaLogger
                     if (response.ToString().Contains("not_found"))
                     {
                         Thread.Sleep(10 * 60 * 1000);
+                    }
+                    else if (response.ToString().Contains("token expired"))
+                    {
+                        Log("Login Error: token expired!");
+                        car.webhelper.GetToken();
                     }
                 }
             }
@@ -1210,7 +1418,7 @@ namespace TeslaLogger
         {
             long ts = (long)(date.ToUniversalTime().Subtract(new DateTime(1970, 1, 1))).TotalSeconds * 1000;
             
-            lastposid = car.DbHelper.InsertPos(ts.ToString(), lastLatitude, lastLongitude, speed, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, (int)lastSoc, lastOutsideTemp, "");
+            lastposid = car.DbHelper.InsertPos(ts.ToString(), lastLatitude, lastLongitude, speed, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, lastSoc, lastOutsideTemp, "");
             Log($"InsertFirstPos {date} ID: {lastposid}");
         }
 
@@ -1299,7 +1507,11 @@ namespace TeslaLogger
                 if (ex is AggregateException ex2)
                 {
                     Log("Connect to Telemetry Server Error: " + ex2.InnerException.Message);
-                    car.CreateExceptionlessClient(ex2).Submit();
+                    if (ex.InnerException != null)
+                        car.CreateExceptionlessClient(ex2.InnerException).Submit();
+                    else
+                        car.CreateExceptionlessClient(ex2).Submit();
+
                     Thread.Sleep(60000);
                 }
                 else

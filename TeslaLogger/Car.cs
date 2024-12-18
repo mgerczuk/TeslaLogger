@@ -98,6 +98,7 @@ namespace TeslaLogger
 
         private string taskerHash = "";
         private string vin = "";
+        private string car_name = "";
 
         private string aBRP_token = "";
         private int aBRP_mode; // defaults to 0;
@@ -111,7 +112,7 @@ namespace TeslaLogger
 
         private DBHelper dbHelper;
 
-        private readonly TeslaAPIState teslaAPIState;
+        internal readonly TeslaAPIState teslaAPIState;
 
         private bool useTaskerToken = true;
         internal string wheel_type = "";
@@ -141,6 +142,7 @@ namespace TeslaLogger
         public string DisplayName { get => display_name; set => display_name = value; }
         public string TaskerHash { get => taskerHash; set => taskerHash = value; }
         public string Vin { get => vin; set => vin = value; }
+        public string CarName { get => car_name; set => car_name = value; }
         public string ABRPToken { get => aBRP_token; set => aBRP_token = value; }
         public int ABRPMode { get => aBRP_mode; set => aBRP_mode = value; }
         public string SuCBingoUser { get => sucBingo_user; set => sucBingo_user = value; }
@@ -306,27 +308,39 @@ namespace TeslaLogger
                     CheckNewCredentials();
 
                     InitStage3();
+
                     if (ApplicationSettings.Default.UseTelemetryServer)
                     {
-                        if (Virtual_key && !(CarType == "models" || CarType == "models2" || CarType == "modelx"))
+                        if (FleetAPI)
                         {
-                            telemetry = new TelemetryConnection(this);
-                            /*
+                            bool supportedByFleetTelemetry = SupportedByFleetTelemetry();
+                            if (supportedByFleetTelemetry)
+                            {
+                                telemetry = new TelemetryConnection(this);
+                                /*
 
-                            string resultContent = "{\"data\":[{\"key\":\"VehicleSpeed\",\"value\":{\"stringValue\":\"25.476\"}},{\"key\":\"CruiseState\",\"value\":{\"stringValue\":\"Standby\"}},{\"key\":\"Location\",\"value\":{\"locationValue\":{\"latitude\":48.18759,\"longitude\":9.899887}}}],\"createdAt\":\"2024-06-20T22:00:30.129139612Z\",\"vin\":\"xxx\"}";
-                            dynamic j = JsonConvert.DeserializeObject(resultContent);
-                            DateTime d = j["createdAt"];
-                            dynamic jData = j["data"];
-                            
-                            telemetry.InsertLocation(jData, d, resultContent);
-                            */
+                                string resultContent = "{\"data\":[{\"key\":\"VehicleSpeed\",\"value\":{\"stringValue\":\"25.476\"}},{\"key\":\"CruiseState\",\"value\":{\"stringValue\":\"Standby\"}},{\"key\":\"Location\",\"value\":{\"locationValue\":{\"latitude\":48.18759,\"longitude\":9.899887}}}],\"createdAt\":\"2024-06-20T22:00:30.129139612Z\",\"vin\":\"xxx\"}";
+                                dynamic j = JsonConvert.DeserializeObject(resultContent);
+                                DateTime d = j["createdAt"];
+                                dynamic jData = j["data"];
 
-                            if (FleetAPI)
-                                telemetry.StartConnection();
-                            else if (GetCurrentState() == TeslaState.Online || GetCurrentState() == TeslaState.Drive || GetCurrentState() == TeslaState.Charge)
-                                telemetry.StartConnection();
+                                telemetry.InsertLocation(jData, d, resultContent);
+                                */
+
+                                if (FleetAPI)
+                                    telemetry.StartConnection();
+                                else if (GetCurrentState() == TeslaState.Online || GetCurrentState() == TeslaState.Drive || GetCurrentState() == TeslaState.Charge)
+                                    telemetry.StartConnection();
+                            }
+                            else
+                            {
+                                Log("Car not supported by Fleet Telemetry!!! " + Tools.VINDecoder(vin, out _, out _, out _, out _, out _, out _, out _).ToString() + " /  VIN: " + vin);
+                                currentJSON.FatalError = "Car not supported by Fleet API!!!";
+                                currentJSON.CreateCurrentJSON();
+                                thread.Abort();
+                            }
                         }
-                    } 
+                    }
                     else
                     {
                         Log("Telemetry Connection turned off!");
@@ -421,6 +435,20 @@ namespace TeslaLogger
             }
         }
 
+        internal bool SupportedByFleetTelemetry()
+        {
+            string vindecoder = Tools.VINDecoder(vin, out int y, out string carType, out _, out _, out _, out _, out _).ToString();
+            if (y >= 2021) // all cars from 2021 are supported
+                return true;
+
+            if ((carType == "Model S" || carType == "Model X") & y < 2021) 
+            {
+                return false;
+            }
+
+            return true;
+        }
+
         private void InitStage3()
         {
             try
@@ -454,7 +482,8 @@ namespace TeslaLogger
                 if (!DbHelper.GetRegion())
                     webhelper.GetRegion();
 
-                webhelper.CheckVirtualKey();
+                if (!dbHelper.CheckVirtualKey())
+                    webhelper.CheckVirtualKey();
 
                 if (webhelper.GetVehicles() == "NULL")
                 {
@@ -895,7 +924,7 @@ namespace TeslaLogger
                             lastCarUsed = DateTime.Now;
                             doSleep = false;
                         }
-
+                        /* Bug switch between sleep and online all the time
                         var srt = webhelper.startRequestTimeout;
                         if (srt != null && srt.Value.AddMinutes(15) < DateTime.UtcNow)
                         {
@@ -903,7 +932,7 @@ namespace TeslaLogger
                             SetCurrentState(TeslaState.Sleep);
                             lastCarUsed = DateTime.Now;
                             DbHelper.StartState("asleep");
-                        }
+                        }*/
                     }
                     else
                     {
@@ -1600,7 +1629,9 @@ namespace TeslaLogger
             if (_oldState == TeslaState.Start && _newState == TeslaState.Online)
             {
                 telemetry?.StartConnection();
-                _ = webhelper.GetOdometerAsync();
+                if (!FleetAPI)
+                    _ = webhelper.GetOdometerAsync();
+
                 Tools.DebugLog($"#{CarInDB}:Start -> Online SendDataToAbetterrouteplannerAsync(utc:{Tools.ToUnixTime(DateTime.UtcNow) * 1000}, soc:{CurrentJSON.current_battery_level}, speed:0, charging:false, power:0, lat:{CurrentJSON.GetLatitude()}, lon:{CurrentJSON.GetLongitude()})");
                 _ = webhelper.SendDataToAbetterrouteplannerAsync(Tools.ToUnixTime(DateTime.UtcNow) * 1000, CurrentJSON.current_battery_level, 0, false, 0, CurrentJSON.GetLatitude(), CurrentJSON.GetLongitude());
             }

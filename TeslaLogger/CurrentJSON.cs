@@ -40,7 +40,7 @@ namespace TeslaLogger
         public double current_time_to_full_charge; // defaults to 0
         public bool current_charge_port_door_open; // defaults to false
         public string current_charger_brand = "";
-        public bool current_charger_present; // defaults to false
+        public bool current_fast_charger_present; // defaults to false
 
         public string current_car_version = "";
 
@@ -217,16 +217,16 @@ namespace TeslaLogger
                    { "charge_port_door_open", current_charge_port_door_open },
                    { "time_to_full_charge", current_time_to_full_charge},
                    { "fast_charger_brand", current_charger_brand},
-                   { "fast_charger_present", current_charger_present},
+                   { "fast_charger_present", current_fast_charger_present},
                    { "car_version", current_car_version },
                    { "trip_start", current_trip_start.ToString("t",Tools.ciDeDE) },
                    { "trip_start_dt", current_trip_start.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", Tools.ciEnUS) },
                    { "trip_max_speed", current_trip_max_speed },
                    { "trip_max_power", current_trip_max_power },
                    { "trip_duration_sec", duration },
-                   { "trip_kwh", Math.Round(trip_kwh, 3) },
+                   { "trip_kwh", Math.Round(trip_kwh, 1) },
                    { "trip_avg_kwh", Math.Round(trip_avg_wh, 1) },
-                   { "trip_distance", Math.Round(distance, 3) },
+                   { "trip_distance", Math.Round(distance, 1) },
                    { "ts", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", Tools.ciEnUS)},
                    { "latitude", latitude },
                    { "longitude", longitude },

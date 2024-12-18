@@ -262,6 +262,11 @@ BA_CopyUrl="Copy the resulting URL as shown"
 BA_Paste="Paste the resulting URL into the box and click "_QQ_"Get Tokens"_QQ_" Button:"
 BA_FLEETAPI="Tesla Fleet API"
 Get Tokens=Get Tokens
+Subscription="Subscription"
+Subscribe="Subscribe"
+SubscribeManage="Manage"
+SubscriptionRequired="Subscription Required!"
+FleetAPIRequired="Fleet API Required!"
 
 #password_fleet.php
 PF_LOGOUT="Log out from your Tesla account if logged in already"
@@ -271,7 +276,13 @@ PF_HELP=Help video
 PF_PERMISSION=Info, which permissions are used and why
 PF_OLDSX=If you have a pre-2021 Tesla Model S/X, you're done and can go back to the main page
 PF_HERE=here
-PF_VKEY=Otherwise set Up Third-Party Virtual Key
+PF_VKEY="Set Up Third-Party Virtual Key"
+PF_SUBSCRIPTION="Subscribe to receive data from Tesla"
+
+#changecarname.php
+CarNameTitle=Change car name
+TextCarName=You can change car name here
+CarName=New Name
 
 #settings.php
 Please choose your vehicle=Please choose your vehicle

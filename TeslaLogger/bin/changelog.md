@@ -1,3 +1,38 @@
+# Version 1.62.4
+- Better support for new Tesla Model S/X 2021 
+
+# Version 1.62.3
+- Fleet API: Doors, Windows, Trunk, Frunk and Locked status will be send to Admin Panel and MQTT
+
+# Version 1.62.1
+- BF: Supoort for new Tesla Model S/X 2021 - Tesla identified the new Model S/X as pre face lift Model S/X.
+
+# Version 1.62.0
+- Update = none is no longer supported. Tesla may force me to update a version so "none" is now "stable"
+
+# Version 1.61.0
+- Simplified the switch to Fleet API. 
+- Infos if you need to switch to Fleet API in the admin panel. 
+- Info if you need a subscription in the admin panel.
+- Info screen about Fleet API and subscription won't be shown anymore if you have a subscription and Fleet API is enabled.
+- Direct link to subscription in the My Tesla Credentials settings if you need to switch to Fleet API.
+- Don't show the subscription info if you are using the old Tesla API. (old Model S/X)
+
+# Version 1.60.6
+- Fleet API: TPMS, VehicleName, Trim, CarType, Version now available
+
+# Version 1.60.3
+- don't use data commands at all for fleet api cars
+
+# Version 1.60.2
+- don't use nearby_charging_sites anymore in fleet api because it is a paid feature
+
+# Version 1.60.1
+- You can rename your cars in the admin panel / settings / my Tesla Credentials. Useful if Tesla API has overwritten an empty name or for old cars without access anymore. The name will be used in the Grafana dashboards and in the MQTT topics.
+
+# Version 1.60.0
+- Stable version
+
 # Version 1.59.12
 - Daily info on admin panel about the need to migrate to Fleet API and the subscription model
 - Bugfixes for charging state detection with Fleet API / more signals

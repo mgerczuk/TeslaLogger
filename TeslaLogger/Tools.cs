@@ -976,7 +976,7 @@ namespace TeslaLogger
                     }
                     else if (j["update"] == "none")
                     {
-                        return UpdateType.none;
+                        return UpdateType.stable;
                     }
                 }
             }
@@ -2166,9 +2166,9 @@ WHERE
             return Math.Round(speed_mph / 0.62137119223733);
         }
 
-        internal static double MlToKm(double miles)
+        internal static double MlToKm(double miles, int decimals = 3)
         {
-            return miles / 0.62137119223733;
+            return Math.Round(miles * 1.609344, decimals);
         }
     }
 
