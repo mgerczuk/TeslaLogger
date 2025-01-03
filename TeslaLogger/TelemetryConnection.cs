@@ -140,7 +140,10 @@ namespace TeslaLogger
             lastSoc = car.CurrentJSON.current_battery_level;
             lastOdometer = car.CurrentJSON.current_odometer;
             lastRatedRange = car.CurrentJSON.current_battery_range_km;
+        }
 
+        public virtual void Start()
+        {
             t = new Thread(() => { Run(); });
             t.Start();
         }

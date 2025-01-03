@@ -548,6 +548,9 @@ namespace TeslaLogger
         {
             car.CreateExeptionlessLog("Tesla Token", "UpdateTeslaTokenFromRefreshToken", Exceptionless.Logging.LogLevel.Info).Submit();
 
+            if (car.UseTelemetryMQTT)
+                return "";
+
             string refresh_token = car.DbHelper.GetRefreshToken(out string tesla_token);
 
             if (car.FleetAPI)
@@ -2057,7 +2060,6 @@ namespace TeslaLogger
                         { }
                         */
 
-                        scanMyTesla = new ScanMyTesla(car);
 
                         /*
                         dynamic jsonResult = JsonConvert.DeserializeObject(resultContent);
@@ -2350,6 +2352,9 @@ namespace TeslaLogger
                 else
                 {
                     CheckRefreshToken();
+
+                    if (car.UseTelemetryMQTT)
+                        return "asleep";
 
                     if (car.FleetAPI)
                     {
@@ -3630,6 +3635,9 @@ namespace TeslaLogger
         public void StartStreamThread()
         {
             if (File.Exists("DONTUSESTREAMINGAPI"))
+                return;
+
+            if (car.UseTelemetryMQTT)
                 return;
 
             if (car.FleetAPI) // Fleet API doesn't support streaming now
