@@ -170,6 +170,7 @@
     <Compile Include="TeslaCanSync.cs" />
     <Compile Include="ShareData.cs" />
     <Compile Include="TelemetryConnection.cs" />
+    <Compile Include="TelemetryConnectionMqtt.cs" />
     <Compile Include="TelemetryParser.cs" />
     <Compile Include="TeslaAuth.cs" />
     <Compile Include="UpdateTeslalogger.cs" />
