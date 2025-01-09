@@ -230,14 +230,5 @@ namespace TeslaLogger {
                 return ((bool)(this["UseTelemetryServer"]));
             }
         }
-        
-        [global::System.Configuration.ApplicationScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("True")]
-        public bool UseTelemetryMQTT {
-            get {
-                return ((bool)(this["UseTelemetryMQTT"]));
-            }
-        }
     }
 }

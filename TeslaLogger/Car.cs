@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Exceptionless;
 using MySql.Data.MySqlClient;
+using Newtonsoft.Json;
 
 namespace TeslaLogger
 {
@@ -21,7 +22,7 @@ namespace TeslaLogger
 
         private Address lastRacingPoint; // defaults to null;
         internal WebHelper webhelper;
-        internal TelemetryConnection telemetry;
+        internal TelemetryConnectionMqtt telemetry;
         internal TelemetryParser telemetryParser;
 
         internal enum TeslaState
@@ -232,7 +233,6 @@ namespace TeslaLogger
 
         public Car(int CarInDB, string TeslaName, string TeslaPasswort, int CarInAccount, string TeslaToken, DateTime TeslaTokenExpire, string ModelName, string cartype, string carspecialtype, string cartrimbadging, string displayname, string vin, string TaskerHash, double? WhTR, bool fleetAPI, bool useMqttTelemetry = false, TeslaState currentState = TeslaState.Start, string wheel_type = "")
         {
-            UseTelemetryMQTT = useMqttTelemetry;
             lock (_syncRoot)
             {
                 try
@@ -257,6 +257,7 @@ namespace TeslaLogger
                     this._currentState = currentState;
                     this.wheel_type = wheel_type;
                     this.FleetAPI = fleetAPI;
+                    UseTelemetryMQTT = useMqttTelemetry;
 
                     // Despite Tesla's docs (https://developer.tesla.com/docs/fleet-api/authentication/third-party-tokens#refresh-tokens) mention
                     // a refresh token lifetime of 24h, we observed that refresh tokens can be used up to 3 weeks to get new access tokens
@@ -326,7 +327,13 @@ namespace TeslaLogger
                             bool supportedByFleetTelemetry = SupportedByFleetTelemetry();
                             if (supportedByFleetTelemetry)
                             {
-                                telemetry = new TelemetryConnection(this, "teslalogger.lan");
+                                var config = JsonConvert.DeserializeObject<TelemetryConnectionMqtt.Config>(File.ReadAllText("fleet-telemetry-mqtt.json"));
+                                if (config == null)
+                                {
+                                    throw new Exception("Invalid fleet-telemetry-mqtt.json file!");
+                                }
+
+                                telemetry = new TelemetryConnectionMqtt(this, config);
                                 telemetryParser = telemetry.parser;
                                 /*
 
