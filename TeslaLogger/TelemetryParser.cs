@@ -842,10 +842,10 @@ namespace TeslaLogger
         private void InsertAlert(dynamic ji, string resultContent)
         {
             string name = ji["name"];
-            DateTime startedAt = ji["startedAt"];
+            DateTime startedAt = ji["started_at"];
             DateTime? endedAt = null;
-            if (ji.ContainsKey("endedAt"))
-                endedAt = ji["endedAt"];
+            if (ji.ContainsKey("ended_at"))
+                endedAt = ji["ended_at"];
 
             dynamic audiences = ji["audiences"];
 
