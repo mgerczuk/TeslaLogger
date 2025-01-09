@@ -22,6 +22,7 @@ namespace TeslaLogger
         private Address lastRacingPoint; // defaults to null;
         internal WebHelper webhelper;
         internal TelemetryConnection telemetry;
+        internal TelemetryParser telemetryParser;
 
         internal enum TeslaState
         {
@@ -254,14 +255,20 @@ namespace TeslaLogger
                     this.wheel_type = wheel_type;
                     this.FleetAPI = fleetAPI;
 
-                    if (CarInDB > 0)
+                    // Despite Tesla's docs (https://developer.tesla.com/docs/fleet-api/authentication/third-party-tokens#refresh-tokens) mention
+                    // a refresh token lifetime of 24h, we observed that refresh tokens can be used up to 3 weeks to get new access tokens
+                    // => replaced AddHours(-24) with AddDays(-21)
+                    var manualTokenRefreshNeeded = TeslaTokenExpire > DateTime.MinValue && TeslaTokenExpire < DateTime.UtcNow.AddDays(-21);
+
+                    // if we cannot refresh the token automatically, because the refresh token is expired, treat car as inactive.
+                    if (CarInDB > 0 && !manualTokenRefreshNeeded)
                     {
                         Allcars.Add(this);
                     }
                     DbHelper = new DBHelper(this);
                     webhelper = new WebHelper(this);
 
-                    if (CarInDB > 0)
+                    if (CarInDB > 0 && !manualTokenRefreshNeeded)
                     {
                         thread = new Thread(Loop)
                         {
@@ -317,6 +324,7 @@ namespace TeslaLogger
                             if (supportedByFleetTelemetry)
                             {
                                 telemetry = new TelemetryConnection(this);
+                                telemetryParser = telemetry.parser;
                                 /*
 
                                 string resultContent = "{\"data\":[{\"key\":\"VehicleSpeed\",\"value\":{\"stringValue\":\"25.476\"}},{\"key\":\"CruiseState\",\"value\":{\"stringValue\":\"Standby\"}},{\"key\":\"Location\",\"value\":{\"locationValue\":{\"latitude\":48.18759,\"longitude\":9.899887}}}],\"createdAt\":\"2024-06-20T22:00:30.129139612Z\",\"vin\":\"xxx\"}";
@@ -337,7 +345,7 @@ namespace TeslaLogger
                                 Log("Car not supported by Fleet Telemetry!!! " + Tools.VINDecoder(vin, out _, out _, out _, out _, out _, out _, out _).ToString() + " /  VIN: " + vin);
                                 currentJSON.FatalError = "Car not supported by Fleet API!!!";
                                 currentJSON.CreateCurrentJSON();
-                                thread.Abort();
+                                ExitCarThread("Car not supported by Fleet Telemetry");
                             }
                         }
                     }
@@ -406,6 +414,8 @@ namespace TeslaLogger
                                 Thread.Sleep(30000);
                                 break;
                         }
+
+                        webhelper.CheckRefreshToken();
 
                     }
                     catch (Exception ex)
@@ -569,11 +579,13 @@ namespace TeslaLogger
         {
             Log("ExitCarThread: " + v);
             run = false;
-            thread.Abort();
+            
             Allcars.Remove(this);
 
             if (VIN2DBCarID.ContainsKey(vin))
                 VIN2DBCarID.Remove(vin);
+
+            thread.Abort();
         }
 
         public void ThreadJoin()
@@ -669,7 +681,7 @@ namespace TeslaLogger
                     for (int x = 0; x < t; x++)
                     {
                         Thread.Sleep(100);
-                        if (FleetAPI && telemetry?.IsCharging == true)
+                        if (FleetAPI && telemetryParser?.IsCharging == true)
                         {
                             Log("skip sleep because of telemetry is charging");
                             break;
@@ -758,7 +770,7 @@ namespace TeslaLogger
                 for (int x = 0; x < sleep; x++)
                 {
                     Thread.Sleep(250);
-                    if (FleetAPI && telemetry?.IsOnline() == true)
+                    if (FleetAPI && telemetryParser?.IsOnline() == true)
                     {
                         Log("skip sleep because of telemetry is online");
                         break;
@@ -799,7 +811,7 @@ namespace TeslaLogger
 
                             for (int p = 0; p < seconds; p++)
                             {
-                                if (telemetry?.IsCharging == false)
+                                if (telemetryParser?.IsCharging == false)
                                     break;
 
                                 Thread.Sleep(1000);
@@ -1137,7 +1149,7 @@ namespace TeslaLogger
                                 Log("Stop sleep by DrivingOrChargingByStream");
                                 break;
                             }
-                            if (FleetAPI && (telemetry?.Driving == true || telemetry?.IsCharging == true))
+                            if (FleetAPI && (telemetryParser?.Driving == true || telemetryParser?.IsCharging == true))
                             {
                                 Log("Stop sleep by telemetry");
                                 break;
@@ -1385,7 +1397,7 @@ namespace TeslaLogger
             Log("ShiftStateChange: " + oldState + " -> " + newState);
 
             if (FleetAPI && telemetry != null)
-                telemetry.Driving = false;
+                telemetryParser.Driving = false;
 
             lastCarUsed = DateTime.Now;
             Address addr = Geofence.GetInstance().GetPOI(CurrentJSON.GetLatitude(), CurrentJSON.GetLongitude(), false);

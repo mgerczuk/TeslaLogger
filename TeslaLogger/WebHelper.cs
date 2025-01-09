@@ -748,8 +748,14 @@ namespace TeslaLogger
                     }
                     else
                     {
+                        if (result.Contains("token expired"))
+                        {
+                            car.Log("Token expired");
+                            UpdateTeslaTokenFromRefreshToken();
+                        }
+
                         car.CreateExeptionlessLog("GetRegion", "Error", LogLevel.Fatal).AddObject((int)response.StatusCode + " / " + response.StatusCode.ToString(), "StatusCode").Submit();
-                        Log("Error getting Region: " + (int)response.StatusCode + " / " + response.StatusCode.ToString());
+                        Log("Error getting Region: " + (int)response.StatusCode + " / " + response.StatusCode.ToString() + " result: " + result);
                         return "";
                     }
                 }
@@ -1636,7 +1642,7 @@ namespace TeslaLogger
         {
             if (car.FleetAPI)
             {
-                return car.telemetry?.IsCharging ?? false;
+                return car.telemetryParser?.IsCharging ?? false;
             }
 
             string resultContent = "";
@@ -2346,15 +2352,11 @@ namespace TeslaLogger
                 }
                 else
                 {
-                    if (nextTeslaTokenFromRefreshToken < DateTime.UtcNow)
-                    {
-                        nextTeslaTokenFromRefreshToken = DateTime.UtcNow.AddMinutes(5);
-                        UpdateTeslaTokenFromRefreshToken();
-                    }
+                    CheckRefreshToken();
 
                     if (car.FleetAPI)
                     {
-                        if (car.telemetry?.IsOnline() == true)
+                        if (car.telemetryParser?.IsOnline() == true)
                             return "online";
                         else
                             return "asleep";
@@ -2634,10 +2636,20 @@ namespace TeslaLogger
             return "NULL";
         }
 
+        internal void CheckRefreshToken()
+        {
+            if (nextTeslaTokenFromRefreshToken < DateTime.UtcNow)
+            {
+                nextTeslaTokenFromRefreshToken = DateTime.UtcNow.AddMinutes(5);
+                UpdateTeslaTokenFromRefreshToken();
+            }
+        }
+
         void CheckVehicleConfig()
         {
             if (car.FleetAPI)
             {
+                UpdateEfficiency();
                 lastUpdateEfficiency = DateTime.Now;
                 return;
             }
@@ -3096,6 +3108,11 @@ namespace TeslaLogger
                     WriteCarSettings("0.142", "Y SR+");
                     return;
                 }
+                else if (car.TrimBadging == "74")
+                {
+                    WriteCarSettings("0.149", "Y LR RWD");
+                    return;
+                }
             }
             else if (car.CarType == "tamarind" && car.CarSpecialType == "base")
             {
@@ -3351,14 +3368,14 @@ namespace TeslaLogger
         {
             if (car.FleetAPI)
             {
-                if (car.telemetry?.Driving == false)
+                if (car.telemetryParser?.Driving == false)
                 {
                     return false;
                 }
                 else
                 {
                     if (car.telemetry != null)
-                        return car.telemetry.Driving == true;
+                        return car.telemetryParser.Driving == true;
                     else
                         return false;
                 }
