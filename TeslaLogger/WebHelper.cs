@@ -2354,10 +2354,7 @@ namespace TeslaLogger
                 {
                     CheckRefreshToken();
 
-                    if (car.UseTelemetryMQTT)
-                        return "asleep";
-
-                    if (car.FleetAPI)
+                    if (car.UseTelemetryMQTT || car.FleetAPI)
                     {
                         if (car.telemetryParser?.IsOnline() == true)
                             return "online";

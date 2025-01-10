@@ -1,11 +1,12 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 using uPLibrary.Networking.M2Mqtt;
-using uPLibrary.Networking.M2Mqtt.Exceptions;
 using uPLibrary.Networking.M2Mqtt.Messages;
 
 namespace TeslaLogger
@@ -73,11 +74,62 @@ namespace TeslaLogger
             car.Log("*** FTMQTT: " + message);
         }
 
+        /// <summary>
+        ///     Convert a JSON string from snake case to camel case
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="msg">The input JSON string</param>
+        /// <returns>The output JSON string</returns>
+        private static string TransformNamingStrategy<T>(string msg)
+        {
+            var obj = JsonConvert.DeserializeObject<T>(msg, new JsonSerializerSettings
+            {
+                ContractResolver = new DefaultContractResolver
+                {
+                    NamingStrategy = new SnakeCaseNamingStrategy()
+                }
+            });
+
+            var json = JsonConvert.SerializeObject(obj, new JsonSerializerSettings
+            {
+                ContractResolver = new DefaultContractResolver
+                {
+                    NamingStrategy = new CamelCaseNamingStrategy(true, true)
+                }
+            });
+
+            return json;
+        }
+
         private void MqttClient_MqttMsgPublishReceived(object sender, MqttMsgPublishEventArgs e)
         {
-            var topic = e.Topic;
+            var topic = e.Topic.Split('/');
             var msg = Encoding.UTF8.GetString(e.Message);
-            parser.handleMessage(msg);
+
+            switch (topic[2])
+            {
+                case "v":
+                    parser.handleMessage(TransformNamingStrategy<Payload>(msg));
+                    break;
+
+                case "alerts":
+                    parser.handleMessage(TransformNamingStrategy<VehicleAlerts>(msg));
+                    break;
+
+                case "connectivity":
+                    // ignore
+                    TransformNamingStrategy<ConnectivityEvent>(msg);
+                    break;
+
+                case "errors":
+                    // ignore
+                    TransformNamingStrategy<VehicleErrors>(msg);
+                    break;
+
+                default:
+                    Logfile.Log($"MQTT: unhandled topic '{e.Topic}' msg='{msg}'");
+                    break;
+            }
         }
 
         private void MqttClient_ConnectionClosed(object sender, EventArgs e)
@@ -138,5 +190,91 @@ namespace TeslaLogger
             [JsonProperty("topic")] public string Topic;
             [JsonProperty("user")] public string User;
         }
+
+        #region JSON Classes for connectivity
+
+        public class ConnectivityEvent
+        {
+            public string ConnectionId;
+            public DateTime CreatedAt;
+            public string NetworkInterface;
+            public string Status;
+            public string Vin;
+        }
+
+        #endregion
+
+        #region JSON Classes for v
+
+        public class Datum
+        {
+            public string Key;
+            public Value Value;
+        }
+
+        public class LocationValue
+        {
+            public double Latitude;
+            public double Longitude;
+        }
+
+        public class Payload
+        {
+            public List<Datum> Data;
+            public DateTime CreatedAt;
+            public string Vin;
+        }
+
+        public class Value
+        {
+            [JsonProperty("Invalid", NullValueHandling = NullValueHandling.Ignore)]
+            public bool? Invalid;
+
+            [JsonProperty("LocationValue", NullValueHandling = NullValueHandling.Ignore)]
+            public LocationValue LocationValue;
+
+            [JsonProperty("StringValue", NullValueHandling = NullValueHandling.Ignore)]
+            public string StringValue;
+        }
+
+        #endregion
+
+        #region JSON Classes for alerts
+
+        public class VehicleAlert
+        {
+            public string Name;
+            public List<int?> Audiences;
+            public DateTime? StartedAt;
+            public DateTime? EndedAt;
+        }
+
+        public class VehicleAlerts
+        {
+            public List<VehicleAlert> Alerts;
+            public DateTime CreatedAt;
+            public string Vin;
+        }
+
+        #endregion
+
+        #region JSON Classes for errors
+
+        public class VehicleError
+        {
+            //map<string, string> tags = 3;
+            public string Body;
+            public string CreatedAt;
+            public string Name;
+        }
+
+        public class VehicleErrors
+        {
+            public DateTime CreatedAt;
+            public List<VehicleError> Errors;
+            public string Vin;
+        }
+
+        #endregion
     }
 }

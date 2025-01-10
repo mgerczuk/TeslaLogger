@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 
 namespace TeslaLogger
 {
-    internal class TelemetryParser
+    public class TelemetryParser
     {
         private readonly Car car;
 
@@ -45,11 +45,16 @@ namespace TeslaLogger
         double lastLongitude = 0;
         private double lastRatedRange;
 
-        double? charge_energy_added = null;
+        internal double? charge_energy_added = null;
+        double? ACChargingPower = null;
 
         String lastCruiseState = "";
 
-        public TelemetryParser(Car c)
+        public bool databaseCalls = true;
+
+        public event EventHandler handleACChargeChange;
+
+        internal TelemetryParser(Car c)
         {
             car = c;
 
@@ -108,13 +113,17 @@ namespace TeslaLogger
             }
         }
 
-        bool acCharging
+        internal bool acCharging
         {
             get => _acCharging;
             set
             {
                 if (_acCharging != value)
+                {
                     Log("ACCharging = " + value);
+                    _acCharging = value;
+                    handleACChargeChange?.Invoke(this, EventArgs.Empty);
+                }
 
                 _acCharging = value;
             }
@@ -156,11 +165,11 @@ namespace TeslaLogger
 
                     dynamic jData = j["data"];
                     string vin = j["vin"];
-                    DateTime d = j["created_at"];
+                    DateTime d = j["createdAt"];
 
                     if (car.Vin.Equals(vin, StringComparison.OrdinalIgnoreCase))
                     {
-                        Log("Telemetry Server Data");
+                        // Log("Telemetry Server Data");
                         if (OnlineTimeout())
                             Log("Car Online!");
 
@@ -177,7 +186,7 @@ namespace TeslaLogger
                 {
                     dynamic jData = j["alerts"];
                     string vin = j["vin"];
-                    DateTime d = j["created_at"];
+                    DateTime d = j["createdAt"];
 
                     if (car.Vin.Equals(vin, StringComparison.OrdinalIgnoreCase))
                     {
@@ -196,6 +205,10 @@ namespace TeslaLogger
                     {
                         case "LoginRespone":
                             handleLoginResponse(j);
+                            break;
+                        case "ConfigAlreadySent":
+                            string Config = j["Config"];
+                            Log("Config Already Sent: " + Config);
                             break;
                         default:
                             Log("Unhandled Teslalogger MSG: " + resultContent);
@@ -234,7 +247,7 @@ namespace TeslaLogger
 
                     if (key == "SentryMode")
                     {
-                        string v = value["StringValue"];
+                        string v = value["stringValue"];
                         if (v == "Armed")
                         {
                             car.webhelper.is_sentry_mode = true;
@@ -253,7 +266,7 @@ namespace TeslaLogger
                     {
                         bool preconditioning = false;
 
-                        string v = value["StringValue"];
+                        string v = value["stringValue"];
                         if (v == "True")
                             preconditioning = true;
 
@@ -263,8 +276,8 @@ namespace TeslaLogger
                     }
                     else if (key == "OutsideTemp")
                     {
-                        string v = value["StringValue"];
-                        if (double.TryParse(v, out double OutsideTemp))
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, NumberStyles.Any, CultureInfo.InvariantCulture, out double OutsideTemp))
                         {
                             lastOutsideTemp = OutsideTemp;
                             car.CurrentJSON.current_outside_temperature = OutsideTemp;
@@ -273,8 +286,8 @@ namespace TeslaLogger
                     }
                     else if (key == "TimeToFullCharge")
                     {
-                        string v = value["StringValue"];
-                        if (double.TryParse(v, out double TimeToFullCharge))
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, NumberStyles.Any, CultureInfo.InvariantCulture, out double TimeToFullCharge))
                         {
                             car.CurrentJSON.current_time_to_full_charge = TimeToFullCharge;
                             car.CurrentJSON.CreateCurrentJSON();
@@ -282,8 +295,8 @@ namespace TeslaLogger
                     }
                     else if (key == "ChargeLimitSoc")
                     {
-                        string v = value["StringValue"];
-                        if (double.TryParse(v, out double ChargeLimitSoc))
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, NumberStyles.Any, CultureInfo.InvariantCulture, out double ChargeLimitSoc))
                         {
                             car.CurrentJSON.charge_limit_soc = (int)ChargeLimitSoc;
                             car.CurrentJSON.CreateCurrentJSON();
@@ -291,7 +304,7 @@ namespace TeslaLogger
                     }
                     else if (key == "DestinationName")
                     {
-                        string v = value["StringValue"];
+                        string v = value["stringValue"];
 
                         car.CurrentJSON.active_route_destination = v;
                         car.CurrentJSON.CreateCurrentJSON();
@@ -299,8 +312,8 @@ namespace TeslaLogger
                     }
                     else if (key == "MinutesToArrival")
                     {
-                        string v = value["StringValue"];
-                        if (double.TryParse(v, out double MinutesToArrival))
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, NumberStyles.Any, CultureInfo.InvariantCulture, out double MinutesToArrival))
                         {
                             car.CurrentJSON.active_route_minutes_to_arrival = (int)MinutesToArrival;
                             car.CurrentJSON.CreateCurrentJSON();
@@ -308,8 +321,8 @@ namespace TeslaLogger
                     }
                     else if (key == "MilesToArrival")
                     {
-                        string v = value["StringValue"];
-                        if (double.TryParse(v, out double MilesToArrival))
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, NumberStyles.Any, CultureInfo.InvariantCulture, out double MilesToArrival))
                         {
                             car.CurrentJSON.active_route_km_to_arrival = (long)(MilesToArrival * 1.609344);
                             car.CurrentJSON.CreateCurrentJSON();
@@ -318,7 +331,7 @@ namespace TeslaLogger
                     else if (key == "BatteryHeaterOn")
                     {
                         /*
-                        string v = value["StringValue"];
+                        string v = value["stringValue"];
                         if (bool.TryParse(v, out bool BatteryHeaterOn))
                         {
                             car.CurrentJSON.current_battery_heater = BatteryHeaterOn;
@@ -329,8 +342,8 @@ namespace TeslaLogger
                     else if (key.StartsWith("TpmsPressure"))
                     {
                         string suffix = key.Substring(key.Length - 2);
-                        string v = value["StringValue"];
-                        if (double.TryParse(v, out double pressure))
+                        string v = value["stringValue"];
+                        if (double.TryParse(v, NumberStyles.Any, CultureInfo.InvariantCulture, out double pressure))
                         {
                             pressure = Math.Round(pressure, 2);
                             switch (suffix)
@@ -352,7 +365,7 @@ namespace TeslaLogger
                     }
                     else if (key == "VehicleName")
                     {
-                        string v = value["StringValue"];
+                        string v = value["stringValue"];
                         if (!String.IsNullOrEmpty(v))
                         {
                             if (car.DisplayName != v)
@@ -365,7 +378,7 @@ namespace TeslaLogger
                     }
                     else if (key == "Trim")
                     {
-                        string v = value["StringValue"];
+                        string v = value["stringValue"];
                         if (!String.IsNullOrEmpty(v))
                         {
                             v = v.ToLower();
@@ -382,7 +395,7 @@ namespace TeslaLogger
                     }
                     else if (key == "ServiceMode")
                     {
-                        string v = value["StringValue"];
+                        string v = value["stringValue"];
                         if (bool.TryParse(v, out bool serviceMode))
                         {
                             //TODO : Implement ServiceMode
@@ -390,7 +403,7 @@ namespace TeslaLogger
                     }
                     else if (key == "CarType")
                     {
-                        string v = value["StringValue"];
+                        string v = value["stringValue"];
                         if (!String.IsNullOrEmpty(v))
                         {
                             v = v.ToLower();
@@ -409,7 +422,7 @@ namespace TeslaLogger
                     }
                     else if (key == "Version")
                     {
-                        string car_version = value["StringValue"];
+                        string car_version = value["stringValue"];
                         if (!String.IsNullOrEmpty(car_version))
                         {
                             if (car.CurrentJSON.current_car_version != car_version)
@@ -427,7 +440,7 @@ namespace TeslaLogger
                     }
                     else if (key == "DoorState")
                     {
-                        string DoorState = value["StringValue"];
+                        string DoorState = value["stringValue"];
                         if (!String.IsNullOrEmpty(DoorState))
                         {
                             if (DoorState.Contains("DriverFront"))
@@ -476,7 +489,7 @@ namespace TeslaLogger
                     }
                     else if (key == "Locked")
                     {
-                        string Locked = value["StringValue"];
+                        string Locked = value["stringValue"];
                         if (bool.TryParse(Locked, out bool l))
                         {
                             car.teslaAPIState.AddValue("locked", "bool", l, Tools.ToUnixTime(d), "vehicle_state");
@@ -487,7 +500,7 @@ namespace TeslaLogger
                     else if (key.EndsWith("Window"))
                     {
                         string apistatekey = key.ToLower().Insert(2, "_");
-                        string Window = value["StringValue"];
+                        string Window = value["stringValue"];
 
                         Log("Window: " + key + " / " + Window);
                         if (!String.IsNullOrEmpty(Window))
@@ -521,8 +534,8 @@ namespace TeslaLogger
 
                     if (key == "ACChargingEnergyIn" && charge_energy_added == null)
                     {
-                        string v1 = value["StringValue"];
-                        if (double.TryParse(v1, out ChargingEnergyIn))
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out ChargingEnergyIn))
                         {
                             ChargingEnergyIn = Math.Round(ChargingEnergyIn, 2);
                             Log("charge_energy_added: " + charge_energy_added);
@@ -530,10 +543,25 @@ namespace TeslaLogger
                         }
                     }
 
+                    if (key == "ACChargingPower")
+                    {
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out double v2))
+                        {
+                            ACChargingPower = Math.Round(v2, 2); 
+
+                            if (!acCharging && lastChargeState == "Enable" && ACChargingPower > 0.1)
+                            {
+                                Log("*** Start AC Charging - ACChargingPower: " + ACChargingPower);
+                                StartACCharging(d);
+                            }
+                        }
+                    }
+
                     if (key == "ACChargingEnergyIn" && acCharging)
                     {
-                        string v1 = value["StringValue"];
-                        if (double.TryParse(v1, out ChargingEnergyIn))
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out ChargingEnergyIn))
                         {
                             ChargingEnergyIn = Math.Round(ChargingEnergyIn, 2);
                             charge_energy_added = ChargingEnergyIn;
@@ -545,8 +573,8 @@ namespace TeslaLogger
                     }
                     else if (key == "DCChargingEnergyIn" && dcCharging)
                     {
-                        string v1 = value["StringValue"];
-                        if (double.TryParse(v1, out ChargingEnergyIn))
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out ChargingEnergyIn))
                         {
                             ChargingEnergyIn = Math.Round(ChargingEnergyIn, 2);
                             charge_energy_added = ChargingEnergyIn;
@@ -557,8 +585,8 @@ namespace TeslaLogger
                     }
                     else if (key == "Soc")
                     {
-                        string v1 = value["StringValue"];
-                        if (double.TryParse(v1, out double Soc))
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out double Soc))
                         {
                             Soc = Math.Round(Soc, 1);
                             lastSoc = Soc;
@@ -572,8 +600,8 @@ namespace TeslaLogger
                     }
                     else if (key == "ACChargingPower" && acCharging)
                     {
-                        string v1 = value["StringValue"];
-                        if (double.TryParse(v1, out double ChargingPower))
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out double ChargingPower))
                         {
                             lastChargingPower = ChargingPower;
                             car.CurrentJSON.current_charger_power = Math.Round(ChargingPower, 2);
@@ -582,7 +610,7 @@ namespace TeslaLogger
                     }
                     else if (key == "DCChargingPower" && dcCharging)
                     {
-                        string v1 = value["StringValue"];
+                        string v1 = value["stringValue"];
                         if (double.TryParse(v1, out double ChargingPower))
                         {
                             lastChargingPower = ChargingPower;
@@ -592,8 +620,8 @@ namespace TeslaLogger
                     }
                     else if (key == "IdealBatteryRange")
                     {
-                        string v1 = value["StringValue"];
-                        if (double.TryParse(v1, out double IdealBatteryRange))
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out double IdealBatteryRange))
                         {
                             lastIdealBatteryRange = Tools.MlToKm(IdealBatteryRange, 1);
                             car.CurrentJSON.current_ideal_battery_range_km = lastIdealBatteryRange;
@@ -602,8 +630,8 @@ namespace TeslaLogger
                     }
                     else if (key == "RatedRange")
                     {
-                        string v1 = value["StringValue"];
-                        if (double.TryParse(v1, out double RatedRange))
+                        string v1 = value["stringValue"];
+                        if (double.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out double RatedRange))
                         {
                             lastRatedRange = Tools.MlToKm(RatedRange, 1);
                             car.CurrentJSON.current_battery_range_km = lastRatedRange;
@@ -661,13 +689,17 @@ namespace TeslaLogger
             sb.Append(string.Join(", ", update));
             cmd.CommandText = sb.ToString();
 
-            using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+            if (databaseCalls)
             {
-                con.Open();
-                cmd.Connection = con;
-                cmd.ExecuteNonQuery();
-                Log($"Insert Charging TR: {lastIdealBatteryRange}km");
+                using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+                {
+                    con.Open();
+                    cmd.Connection = con;
+                    cmd.ExecuteNonQuery();
+                    
+                }
             }
+            Log($"Insert Charging TR: {lastIdealBatteryRange}km");
         }
 
         public void InsertLocation(dynamic j, DateTime d, string resultContent, bool force = false)
@@ -687,16 +719,16 @@ namespace TeslaLogger
                     dynamic value = jj["value"];
                     if (key == "Odometer")
                     {
-                        string v = value["StringValue"];
+                        string v = value["stringValue"];
                         if (v != null)
                         {
-                            if (double.TryParse(v, out double Odometer))
+                            if (double.TryParse(v, NumberStyles.Any, CultureInfo.InvariantCulture, out double Odometer))
                                 lastOdometer = Tools.MlToKm(Odometer, 3);
                         }
                     }
                     else if (key == "Location")
                     {
-                        dynamic locationValue = value["LocationValue"];
+                        dynamic locationValue = value["locationValue"];
                         if (locationValue != null)
                         {
                             latitude = locationValue["latitude"];
@@ -704,7 +736,7 @@ namespace TeslaLogger
                         }
                         else
                         {
-                            string v = value["StringValue"];
+                            string v = value["stringValue"];
                             if (v != null)
                             {
                                 v = v.Replace("(", "").Replace(")", "");
@@ -752,11 +784,11 @@ namespace TeslaLogger
                     }
                     else if (key == "VehicleSpeed")
                     {
-                        string v1 = value["StringValue"];
+                        string v1 = value["stringValue"];
                         if (v1 != null)
                         {
                             v1 = v1.Replace("\"", "");
-                            if (Double.TryParse(v1, out double s))
+                            if (Double.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out double s))
                                 speed = s;
                         }
                     }
@@ -772,8 +804,7 @@ namespace TeslaLogger
                 {
                     if (force && speed == null)
                         speed = 0;
-
-                    long ts = (long)(d.ToUniversalTime().Subtract(new DateTime(1970, 1, 1))).TotalSeconds * 1000;
+                    long ts = DateTimeToUTC_UnixTimestamp(d);
                     Log("Insert Location" + (force ? " Force" : ""));
                     lastposid = car.DbHelper.InsertPos(ts.ToString(), latitude.Value, longitude.Value, (int)speed.Value, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, lastSoc, lastOutsideTemp, "");
                 }
@@ -785,13 +816,18 @@ namespace TeslaLogger
             }
         }
 
+        public static long DateTimeToUTC_UnixTimestamp(DateTime d)
+        {
+            return (long)(d.ToUniversalTime().Subtract(new DateTime(1970, 1, 1))).TotalSeconds * 1000;
+        }
+
         void InsertLastLocation(DateTime d)
         {
             try
             {
                 if (lastLatitude != 0 && lastLongitude != 0)
                 {
-                    long ts = (long)(d.ToUniversalTime().Subtract(new DateTime(1970, 1, 1))).TotalSeconds * 1000;
+                    long ts = DateTimeToUTC_UnixTimestamp(d);
                     lastposid = car.DbHelper.InsertPos(ts.ToString(), lastLatitude, lastLongitude, 0, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, lastSoc, lastOutsideTemp, "");
 
                     Log("Insert Last Location ID: " + lastposid);
@@ -842,10 +878,10 @@ namespace TeslaLogger
         private void InsertAlert(dynamic ji, string resultContent)
         {
             string name = ji["name"];
-            DateTime startedAt = ji["started_at"];
+            DateTime startedAt = ji["startedAt"];
             DateTime? endedAt = null;
-            if (ji.ContainsKey("ended_at"))
-                endedAt = ji["ended_at"];
+            if (ji.ContainsKey("endedAt"))
+                endedAt = ji["endedAt"];
 
             dynamic audiences = ji["audiences"];
 
@@ -938,9 +974,9 @@ namespace TeslaLogger
                     if (key == "CruiseState")
                     {
                         dynamic value = jj["value"];
-                        if (value.ContainsKey("StringValue"))
+                        if (value.ContainsKey("stringValue"))
                         {
-                            string v1 = value["StringValue"];
+                            string v1 = value["stringValue"];
                             v1 = v1.Replace("\"", "");
 
                             if (v1 != lastCruiseState)
@@ -1018,11 +1054,12 @@ namespace TeslaLogger
                         if (cols.Any(key.Contains))
                         {
                             dynamic value = jj["value"];
-                            if (value.ContainsKey("StringValue"))
+                            if (value.ContainsKey("stringValue"))
                             {
-                                string v1 = value["StringValue"];
+                                string v1 = value["stringValue"];
                                 v1 = v1.Replace("\"", "");
                                 double d = double.Parse(v1, Tools.ciEnUS);
+
                                 cmd.Parameters.AddWithValue("@" + key, d);
 
                                 if (key == "ModuleTempMin")
@@ -1058,12 +1095,10 @@ namespace TeslaLogger
                                     {
                                         var current = PackCurrent(j, date);
 
-                                        if (current > 2)
+                                        if (current > 1)
                                         {
                                             Log($"AC Charging  {current}A ***");
-                                            InsertFirstCharging(date);
-                                            InsertLastLocation(date);
-                                            acCharging = true;
+                                            StartACCharging(date);
                                         }
                                     }
 
@@ -1075,9 +1110,7 @@ namespace TeslaLogger
                                         if (current > 5)
                                         {
                                             Log($"DC Charging ***");
-                                            InsertFirstCharging(date);
-                                            InsertLastLocation(date);
-                                            dcCharging = true;
+                                            StartDCCharging(date);
                                         }
                                     }
                                 }
@@ -1122,11 +1155,14 @@ namespace TeslaLogger
                         sb.Append(string.Join(", ", update));
                         cmd.CommandText = sb.ToString();
 
-                        using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+                        if (databaseCalls)
                         {
-                            con.Open();
-                            cmd.Connection = con;
-                            cmd.ExecuteNonQuery();
+                            using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+                            {
+                                con.Open();
+                                cmd.Connection = con;
+                                cmd.ExecuteNonQuery();
+                            }
                         }
                     }
                 }
@@ -1136,6 +1172,20 @@ namespace TeslaLogger
                 Log("Telemetry Error: " + ex.ToString());
                 car.CreateExceptionlessClient(ex).AddObject(resultContent, "ResultContent").Submit();
             }
+        }
+
+        private void StartDCCharging(DateTime date)
+        {
+            InsertFirstCharging(date);
+            InsertLastLocation(date);
+            dcCharging = true;
+        }
+
+        private void StartACCharging(DateTime date)
+        {
+            InsertFirstCharging(date);
+            InsertLastLocation(date);
+            acCharging = true;
         }
 
         private void InsertFirstCharging(DateTime date)
@@ -1156,7 +1206,7 @@ namespace TeslaLogger
         {
             try
             {
-                var cols = new string[] { "ChargeState", "Gear", "VehicleSpeed", "Location", "FastChargerPresent" };
+                var cols = new string[] { "ChargeState", "Gear", "VehicleSpeed", "Location", "FastChargerPresent", "DCChargingPower" };
 
                 foreach (dynamic jj in j)
                 {
@@ -1164,9 +1214,9 @@ namespace TeslaLogger
                     if (cols.Any(key.Contains))
                     {
                         dynamic value = jj["value"];
-                        if (value.ContainsKey("StringValue"))
+                        if (value.ContainsKey("stringValue"))
                         {
-                            string v1 = value["StringValue"];
+                            string v1 = value["stringValue"];
                             v1 = v1.Replace("\"", "");
 
                             if (key == "ChargeState")
@@ -1209,6 +1259,10 @@ namespace TeslaLogger
                                 {
 
                                 }
+                                else if (v1 == "Startup")
+                                {
+
+                                }
                                 else
                                 {
                                     Log("unknown ChargeState: " + v1);
@@ -1241,7 +1295,7 @@ namespace TeslaLogger
                             }
                             else if (key == "VehicleSpeed")
                             {
-                                if (Double.TryParse(v1, out double speed))
+                                if (Double.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out double speed))
                                 {
                                     if (speed > 0)
                                     {
@@ -1299,8 +1353,7 @@ namespace TeslaLogger
                                         {
                                             Log($"DC Charging ***");
 
-                                            InsertLastLocation(date);
-                                            dcCharging = true;
+                                            StartDCCharging(date);
                                         }
                                     }
                                 }
@@ -1312,6 +1365,21 @@ namespace TeslaLogger
                                     {
                                         Log("stop DC Charging ***");
                                         dcCharging = false;
+                                    }
+                                }
+                            }
+                            else if (key == "DCChargingPower")
+                            {
+                                if (!dcCharging && lastFastChargerPresent)
+                                {
+                                    v1 = v1.Replace("\"", "");
+                                    double d = double.Parse(v1, Tools.ciEnUS);
+
+                                    Log($"FastChargerPresent DCChargingPower " + d);
+                                    if (d > 5)
+                                    {
+                                        Log($"DC Charging ***");
+                                        StartDCCharging(date);
                                     }
                                 }
                             }
@@ -1348,9 +1416,11 @@ namespace TeslaLogger
 
         private void InsertFirstPos(DateTime date, int speed)
         {
-            long ts = (long)(date.ToUniversalTime().Subtract(new DateTime(1970, 1, 1))).TotalSeconds * 1000;
+            long ts = DateTimeToUTC_UnixTimestamp(date);
 
-            lastposid = car.DbHelper.InsertPos(ts.ToString(), lastLatitude, lastLongitude, speed, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, lastSoc, lastOutsideTemp, "");
+            if (databaseCalls)
+                lastposid = car.DbHelper.InsertPos(ts.ToString(), lastLatitude, lastLongitude, speed, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, lastSoc, lastOutsideTemp, "");
+
             Log($"InsertFirstPos {date} ID: {lastposid}");
         }
 
