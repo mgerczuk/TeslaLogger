@@ -5959,12 +5959,12 @@ DESC", con))
                 client.DefaultRequestHeaders.UserAgent.Add(userAgent);
                 client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("(00000000; " + Thread.CurrentThread.ManagedThreadId + ")"));
 
-                var g = client.GetAsync("https://api.github.com/repos/bassmaster187/TeslaLogger/branches/" + branch).Result;
+                var g = client.GetAsync("https://gitlab.lan/api/v4/projects/root%2FTeslaLogger/repository/branches/" + branch).Result;
                 statusCode = g.StatusCode;
                 if (g.IsSuccessStatusCode)
                 {
                     string res = g.Content.ReadAsStringAsync().Result;
-                    return res.Contains("signature");
+                    return res.Contains("\"commit\"");
                 }
                 else if (g.StatusCode == HttpStatusCode.NotFound)
                 {
