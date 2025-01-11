@@ -5218,6 +5218,9 @@ DESC", con))
 
         public async Task<string> GetChargingHistoryV2(int pageNumber = 1)
         {
+            if (car.UseTelemetryMQTT)
+                return "{}";
+
             string resultContent = "";
             try
             {
