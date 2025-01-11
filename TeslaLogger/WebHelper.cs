@@ -710,7 +710,7 @@ namespace TeslaLogger
         {
             try
             {
-                if (!car.FleetAPI)
+                if (car.UseTelemetryMQTT || !car.FleetAPI)
                 {
                     return "";
                 }
@@ -5878,7 +5878,7 @@ DESC", con))
         {
             try
             {
-                if (!car.FleetAPI)
+                if (car.UseTelemetryMQTT || !car.FleetAPI)
                 {
                     return false;
                 }
