@@ -256,8 +256,8 @@ namespace TeslaLogger
                     this.WhTR = WhTR ?? 0.190;
                     this._currentState = currentState;
                     this.wheel_type = wheel_type;
-                    this.FleetAPI = fleetAPI;
-                    UseTelemetryMQTT = useMqttTelemetry;
+                    this.UseTelemetryMQTT = useMqttTelemetry;
+                    this.FleetAPI = fleetAPI || useMqttTelemetry;
 
                     // Despite Tesla's docs (https://developer.tesla.com/docs/fleet-api/authentication/third-party-tokens#refresh-tokens) mention
                     // a refresh token lifetime of 24h, we observed that refresh tokens can be used up to 3 weeks to get new access tokens

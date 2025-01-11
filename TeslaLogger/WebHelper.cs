@@ -1643,7 +1643,7 @@ namespace TeslaLogger
 
         internal bool IsCharging(bool justCheck = false, bool noMemcache = false)
         {
-            if (car.FleetAPI || car.UseTelemetryMQTT)
+            if (car.FleetAPI)
             {
                 return car.telemetryParser?.IsCharging ?? false;
             }
@@ -3641,9 +3641,6 @@ namespace TeslaLogger
         public void StartStreamThread()
         {
             if (File.Exists("DONTUSESTREAMINGAPI"))
-                return;
-
-            if (car.UseTelemetryMQTT)
                 return;
 
             if (car.FleetAPI) // Fleet API doesn't support streaming now
