@@ -1643,7 +1643,7 @@ namespace TeslaLogger
 
         internal bool IsCharging(bool justCheck = false, bool noMemcache = false)
         {
-            if (car.FleetAPI)
+            if (car.FleetAPI || car.UseTelemetryMQTT)
             {
                 return car.telemetryParser?.IsCharging ?? false;
             }
