@@ -2326,6 +2326,14 @@ namespace TeslaLogger
 
         public async Task<string> IsOnline(bool returnOnUnauthorized = false)
         {
+            if (car.UseTelemetryMQTT)
+            {
+                if (car.telemetryParser?.IsOnline() == true)
+                    return "online";
+                else
+                    return "asleep";
+            }
+
             string resultContent = "";
             try
             {
@@ -2354,7 +2362,7 @@ namespace TeslaLogger
                 {
                     CheckRefreshToken();
 
-                    if (car.UseTelemetryMQTT || car.FleetAPI)
+                    if (car.FleetAPI)
                     {
                         if (car.telemetryParser?.IsOnline() == true)
                             return "online";
