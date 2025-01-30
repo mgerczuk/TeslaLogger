@@ -1491,7 +1491,7 @@ namespace TeslaLogger
 
                     if (car.FleetAPI)
                     {
-                        adresse = ApplicationSettings.Default.TeslaHttpProxyURL + "/api/1/vehicles";
+                        adresse = apiaddress + "api/1/vehicles";
                     }
 
                     Task<HttpResponseMessage> resultTask;

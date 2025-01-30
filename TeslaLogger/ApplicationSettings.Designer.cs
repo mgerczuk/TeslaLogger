@@ -251,7 +251,7 @@ namespace TeslaLogger {
         
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("69cbdfa0-600b-4b1b-abf3-3e6c6d00a717")]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
         public string TelemetryClientID {
             get {
                 return ((string)(this["TelemetryClientID"]));
