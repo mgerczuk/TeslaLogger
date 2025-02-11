@@ -262,7 +262,7 @@ namespace TeslaLogger
                     // Despite Tesla's docs (https://developer.tesla.com/docs/fleet-api/authentication/third-party-tokens#refresh-tokens) mention
                     // a refresh token lifetime of 24h, we observed that refresh tokens can be used up to 3 weeks to get new access tokens
                     // => replaced AddHours(-24) with AddDays(-21)
-                    var manualTokenRefreshNeeded = TeslaTokenExpire > DateTime.MinValue && TeslaTokenExpire < DateTime.UtcNow.AddDays(-21);
+                    var manualTokenRefreshNeeded = false; // TeslaTokenExpire > DateTime.MinValue && TeslaTokenExpire < DateTime.UtcNow.AddDays(-21);
 
                     // if we cannot refresh the token automatically, because the refresh token is expired, treat car as inactive.
                     if (CarInDB > 0 && !manualTokenRefreshNeeded)
@@ -272,7 +272,7 @@ namespace TeslaLogger
                     DbHelper = new DBHelper(this);
                     webhelper = new WebHelper(this);
 
-                    if (CarInDB > 0 && !manualTokenRefreshNeeded)
+                    if (CarInDB > 0)
                     {
                         thread = new Thread(Loop)
                         {
