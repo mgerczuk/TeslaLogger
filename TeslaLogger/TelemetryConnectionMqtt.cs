@@ -62,13 +62,14 @@ namespace TeslaLogger
         private X509Certificate UserCertificateSelectionCallback(object sender, string targethost,
             X509CertificateCollection localCertificates, X509Certificate remoteCertificate, string[] acceptableIssuers)
         {
+            // no client certificate necessary
             return null;
         }
 
         private bool UserCertificateValidationCallback(object sender, X509Certificate certificate, X509Chain chain,
             SslPolicyErrors sslPolicyErrors)
         {
-            return true;
+            return sslPolicyErrors == SslPolicyErrors.None;
         }
 
 
