@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -12,7 +13,7 @@ using Timer = System.Timers.Timer;
 
 namespace TeslaLogger
 {
-    internal class TelemetryConnectionMqtt
+    internal class TelemetryConnectionMqtt : TelemetryConnection
     {
         private readonly Car car;
         private readonly string clientId;
@@ -28,10 +29,15 @@ namespace TeslaLogger
         private Random r = new Random();
 
 
-        public TelemetryConnectionMqtt(Car car, Config config)
+        public TelemetryConnectionMqtt(Car car)
         {
             this.car = car;
-            this.config = config;
+            this.config = JsonConvert.DeserializeObject<TelemetryConnectionMqtt.Config>(File.ReadAllText("fleet-telemetry-mqtt.json"));
+            if (config == null)
+            {
+                throw new Exception("Invalid fleet-telemetry-mqtt.json file!");
+            }
+
             clientId = Guid.NewGuid().ToString();
 
             if (car == null)
@@ -209,11 +215,11 @@ namespace TeslaLogger
             closedEvent.Set();
         }
 
-        public void CloseConnection()
+        public override void CloseConnection()
         {
         }
 
-        public void StartConnection()
+        public override void StartConnection()
         {
         }
 

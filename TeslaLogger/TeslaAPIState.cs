@@ -400,8 +400,6 @@ namespace TeslaLogger
 
         public bool ParseAPI(string JSON, string source)
         {
-            Logfile.Log("+++++ ParseAPI called??? +++++");
-
             if (string.IsNullOrEmpty(JSON))
             {
                 return false;

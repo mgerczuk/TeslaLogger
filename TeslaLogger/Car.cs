@@ -10,7 +10,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Exceptionless;
 using MySql.Data.MySqlClient;
-using Newtonsoft.Json;
 
 namespace TeslaLogger
 {
@@ -22,7 +21,7 @@ namespace TeslaLogger
 
         private Address lastRacingPoint; // defaults to null;
         internal WebHelper webhelper;
-        internal TelemetryConnectionMqtt telemetry;
+        internal TelemetryConnection telemetry;
         internal TelemetryParser telemetryParser;
 
         internal enum TeslaState
@@ -223,15 +222,14 @@ namespace TeslaLogger
         internal string FleetApiAddress = "";
         public string _access_type;
         public bool _virtual_key;
+        internal bool vehicle_location = true;
 
         [MethodImpl(MethodImplOptions.Synchronized)]
         internal TeslaAPIState GetTeslaAPIState() { return teslaAPIState; }
 
         private static readonly Dictionary<string, int> VIN2DBCarID = new Dictionary<string, int>();
 
-        internal bool UseTelemetryMQTT;
-
-        public Car(int CarInDB, string TeslaName, string TeslaPasswort, int CarInAccount, string TeslaToken, DateTime TeslaTokenExpire, string ModelName, string cartype, string carspecialtype, string cartrimbadging, string displayname, string vin, string TaskerHash, double? WhTR, bool fleetAPI, bool useMqttTelemetry = false, TeslaState currentState = TeslaState.Start, string wheel_type = "")
+        public Car(int CarInDB, string TeslaName, string TeslaPasswort, int CarInAccount, string TeslaToken, DateTime TeslaTokenExpire, string ModelName, string cartype, string carspecialtype, string cartrimbadging, string displayname, string vin, string TaskerHash, double? WhTR, bool fleetAPI, TeslaState currentState = TeslaState.Start, string wheel_type = "")
         {
             lock (_syncRoot)
             {
@@ -256,13 +254,12 @@ namespace TeslaLogger
                     this.WhTR = WhTR ?? 0.190;
                     this._currentState = currentState;
                     this.wheel_type = wheel_type;
-                    this.UseTelemetryMQTT = useMqttTelemetry;
-                    this.FleetAPI = fleetAPI || useMqttTelemetry;
+                    this.FleetAPI = fleetAPI;
 
                     // Despite Tesla's docs (https://developer.tesla.com/docs/fleet-api/authentication/third-party-tokens#refresh-tokens) mention
                     // a refresh token lifetime of 24h, we observed that refresh tokens can be used up to 3 weeks to get new access tokens
                     // => replaced AddHours(-24) with AddDays(-21)
-                    var manualTokenRefreshNeeded = false; // TeslaTokenExpire > DateTime.MinValue && TeslaTokenExpire < DateTime.UtcNow.AddDays(-21);
+                    var manualTokenRefreshNeeded = TeslaTokenExpire > DateTime.MinValue && TeslaTokenExpire < DateTime.UtcNow.AddDays(-21);
 
                     // if we cannot refresh the token automatically, because the refresh token is expired, treat car as inactive.
                     if (CarInDB > 0 && !manualTokenRefreshNeeded)
@@ -272,7 +269,7 @@ namespace TeslaLogger
                     DbHelper = new DBHelper(this);
                     webhelper = new WebHelper(this);
 
-                    if (CarInDB > 0)
+                    if (CarInDB > 0 && !manualTokenRefreshNeeded)
                     {
                         thread = new Thread(Loop)
                         {
@@ -322,19 +319,13 @@ namespace TeslaLogger
 
                     if (ApplicationSettings.Default.UseTelemetryServer)
                     {
-                        if (UseTelemetryMQTT)
+                        if (FleetAPI)
                         {
                             bool supportedByFleetTelemetry = SupportedByFleetTelemetry();
                             if (supportedByFleetTelemetry)
                             {
-                                var config = JsonConvert.DeserializeObject<TelemetryConnectionMqtt.Config>(File.ReadAllText("fleet-telemetry-mqtt.json"));
-                                if (config == null)
-                                {
-                                    throw new Exception("Invalid fleet-telemetry-mqtt.json file!");
-                                }
-
-                                telemetry = new TelemetryConnectionMqtt(this, config);
-                                telemetryParser = telemetry.parser;
+                                telemetry = TelemetryConnection.Instance(this);
+                                telemetryParser = telemetry?.parser;
                                 /*
 
                                 string resultContent = "{\"data\":[{\"key\":\"VehicleSpeed\",\"value\":{\"stringValue\":\"25.476\"}},{\"key\":\"CruiseState\",\"value\":{\"stringValue\":\"Standby\"}},{\"key\":\"Location\",\"value\":{\"locationValue\":{\"latitude\":48.18759,\"longitude\":9.899887}}}],\"createdAt\":\"2024-06-20T22:00:30.129139612Z\",\"vin\":\"xxx\"}";
@@ -461,7 +452,7 @@ namespace TeslaLogger
             if (y >= 2021) // all cars from 2021 are supported
                 return true;
 
-            if ((carType == "Model S" || carType == "Model X") & y < 2021)
+            if ((carType == "Model S" || carType == "Model X") & y < 2021) 
             {
                 return false;
             }
@@ -478,44 +469,37 @@ namespace TeslaLogger
                     Log("*** Using FLEET API ***");
                     CreateExeptionlessFeature("FleetAPI").Submit();
                 }
-
+                
 
                 DbHelper.GetAvgConsumption(out this.sumkm, out this.avgkm, out this.kwh100km, out this.avgsocdiff, out this.maxkm);
 
-                if (!UseTelemetryMQTT)
+                if (!webhelper.RestoreToken())
                 {
-                    if (!webhelper.RestoreToken())
-                    {
-                        webhelper.Tesla_token = webhelper.GetToken();
-                    }
-
-                    if (webhelper.Tesla_token == "NULL")
-                    {
-                        ExitCarThread("Tesla_token == NULL");
-                    }
-
-                    LogToken();
-
-                    if (DBHelper.DBConnectionstring.Length == 0)
-                    {
-                        ExitCarThread("DBHelper.DBConnectionstring.Length == 0");
-                    }
-
-                    if (!DbHelper.GetRegion())
-                        webhelper.GetRegion();
-
-                    if (!dbHelper.CheckVirtualKey())
-                        webhelper.CheckVirtualKey();
-
-                    if (webhelper.GetVehicles() == "NULL")
-                    {
-                        ExitCarThread("wh.GetVehicles() == NULL");
-                    }
+                    webhelper.Tesla_token = webhelper.GetToken();
                 }
 
-                // webhelper.scanMyTesla = new ScanMyTesla(this);
+                if (webhelper.Tesla_token == "NULL")
+                {
+                    ExitCarThread("Tesla_token == NULL");
+                }
 
-                webhelper.teslaCanSync = new TeslaCanSync(this);
+                LogToken();
+
+                if (DBHelper.DBConnectionstring.Length == 0)
+                {
+                    ExitCarThread("DBHelper.DBConnectionstring.Length == 0");
+                }
+
+                if (!DbHelper.GetRegion())
+                    webhelper.GetRegion();
+
+                if (!dbHelper.CheckVirtualKey())
+                    webhelper.CheckVirtualKey();
+
+                if (webhelper.GetVehicles() == "NULL")
+                {
+                    ExitCarThread("wh.GetVehicles() == NULL");
+                }
 
                 DbHelper.GetEconomy_Wh_km(webhelper);
                 lock (WebHelper.isOnlineLock)
@@ -596,7 +580,7 @@ namespace TeslaLogger
         {
             Log("ExitCarThread: " + v);
             run = false;
-
+            
             Allcars.Remove(this);
 
             if (VIN2DBCarID.ContainsKey(vin))
@@ -720,11 +704,11 @@ namespace TeslaLogger
                     }
                     else
                     {
-                        // Odometer didn't change for 600 seconds 
+                        // Odometer didn't change for 900 seconds 
                         TimeSpan ts = DateTime.Now - lastOdometerChanged;
-                        if (ts.TotalSeconds > 600)
+                        if (ts.TotalSeconds > 900 && !FleetAPI) // Fleet API has its own logic
                         {
-                            Log("Odometer didn't change for 600 seconds  -> Finish Trip!!!");
+                            Log("Odometer didn't change for 900 seconds  -> Finish Trip!!!");
                             DriveFinished();
                         }
                     }
@@ -832,7 +816,7 @@ namespace TeslaLogger
                                     break;
 
                                 Thread.Sleep(1000);
-                            }
+                            }                            
                         }
                         else
                         {
@@ -882,7 +866,7 @@ namespace TeslaLogger
                         {
                             Log($"Missing: {missingOdometer} km! - Check: https://teslalogger.de/faq-1.php");
                             WriteMissingFile(missingOdometer);
-
+                            
                             CreateExeptionlessLog("Missing", $"Missing: {missingOdometer} km", Exceptionless.Logging.LogLevel.Warn).Submit();
                         }
                         else
@@ -1610,7 +1594,7 @@ namespace TeslaLogger
                               // reset LastSetChargeLimitAddressName so that +scl can set the charge limit again
                               LastSetChargeLimitAddressName = string.Empty;
                           }
-                      }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+                      }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default); 
                 }
             }
         }
@@ -2232,5 +2216,5 @@ id = @carid", con))
             }
             return false;
         }
-    }
+    }   
 }

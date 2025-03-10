@@ -8,12 +8,48 @@ on:
     branches: [ "master", "TeslaFleetAPI"]
 
 jobs:
-  build:
+  #database:
+   # 
+    #runs-on: ubuntu-latest
+  #
+    #services:
+    #  mariadb:
+    #    image: mariadb:10.4
+    #    env:
+    #      MYSQL_ROOT_PASSWORD: teslalogger
+    #      MYSQL_DATABASE: teslalogger
+    #      MYSQL_USER: teslalogger
+    #      MYSQL_PASSWORD: teslalogger
+    #    ports:
+    #      - 3306:3306
+    #    options: >-
+    #      --health-cmd="mysqladmin ping --silent"
+    #      --health-interval=10s
+    #      --health-timeout=5s
+    #      --health-retries=3
+    #steps:
+    #- name: Checkout
+    #  uses: actions/checkout@v3
+    #  with:
+    #    sparse-checkout: |
+    #      TeslaLogger/sqlschema.sql
+#
+    #- name: Wait for MariaDB to be healthy
+    #  run: |
+    #    while ! mysqladmin ping -h"127.0.0.1" --silent; do
+    #      sleep 1
+    #    done
+#
+    #- name: Run SQL script
+    #  run: mysql -h127.0.0.1 -uroot -pteslalogger -Dteslalogger < TeslaLogger/sqlschema.sql
 
+
+
+  build:
     strategy:
       matrix:
         configuration: [Debug]
-
+  
     runs-on: windows-2019  # For a list of available runner types, refer to
                              # https://help.github.com/en/actions/reference/workflow-syntax-for-github-actions#jobsjob_idruns-on
 
@@ -22,102 +58,10 @@ jobs:
       Test_Project_Path: UnitTestsTeslalogger\UnitTestsTeslalogger.csproj                 # Replace with the path to your test project, i.e. MyWpfApp.Tests\MyWpfApp.Tests.csproj.
      
     steps:
-
-    - name: Cache MariaDB
-      id: cache-mariadb
-      uses: actions/cache@v3
-      with:
-        path: C:\MariaDB
-        key: ${{ runner.os }}-mariadb-${{ hashFiles('mariadb-10.4.7.zip') }}
-        restore-keys: |
-          ${{ runner.os }}-mariadb-
-
-    - name: Download MariaDB 10.4.7 Installer
-      if: steps.cache-mariadb.outputs.cache-hit != 'true'
-      run: |
-        curl -L -o mariadb-10.4.7.zip https://archive.mariadb.org/mariadb-10.4.7/winx64-packages/mariadb-10.4.7-winx64.zip
-       
-    - name: Create target folder for MariaDB
-      if: steps.cache-mariadb.outputs.cache-hit != 'true'
-      run: |
-        mkdir C:\MariaDB
-
-    - name: Unzip MariaDB files
-      if: steps.cache-mariadb.outputs.cache-hit != 'true'
-      run: |
-        powershell -Command "Expand-Archive -Path mariadb-10.4.7.zip -DestinationPath C:\MariaDB"
-
-    - name: Move files to correct directory
-      if: steps.cache-mariadb.outputs.cache-hit != 'true'
-      run: |
-        Move-Item -Path "C:\MariaDB\mariadb-10.4.7-winx64\*" -Destination "C:\MariaDB" -Force
-        Remove-Item -Recurse -Force "C:\MariaDB\mariadb-10.4.7-winx64"
-
-    - name: Verify MariaDB installation
-      run: |
-        dir C:\MariaDB
-        dir C:\MariaDB\bin
-
-    - name: Clean data directory
-      run: |
-        if (Test-Path "C:\MariaDB\data") {
-          Remove-Item -Recurse -Force "C:\MariaDB\data"
-        }
-        New-Item -ItemType Directory -Path "C:\MariaDB\data"
-
-    - name: Check permissions
-      run: |
-        icacls C:\MariaDB
-        icacls C:\MariaDB\data
-
-    #- name: Initialize MariaDB without --initialize-insecure
-    #  working-directory: C:\MariaDB
-    #  run: |
-    #    C:\MariaDB\bin\mysql_install_db.exe --datadir=C:\MariaDB\data
-
-    #- name: Install MariaDB as a service
-    #  working-directory: C:\MariaDB
-    #  run: |
-    #    C:\MariaDB\bin\mysqld.exe --install MariaDB --defaults-file=C:\MariaDB\my.ini
-#
-    # - name: Start MariaDB service
-    #   working-directory: C:\MariaDB
-    #   run: |
-    #     Start-Service -Name MariaDB
-
-    #- name: Start MariaDB
-    #  working-directory: C:\MariaDB
-    #  run: |
-    #    Start-Process -FilePath "C:\MariaDB\bin\mysqld.exe" -ArgumentList "--console --standalone --bootstrap" -NoNewWindow
-
-    - name: Start MariaDB
-      working-directory: C:\MariaDB
-      run: |
-        Start-Process -FilePath "C:\MariaDB\bin\mysqld.exe" -ArgumentList "--install mysql"
-
-    - name: Start MariaDB 2
-      working-directory: C:\MariaDB
-      run: |
-        net start mysql
-    
     - name: Checkout
       uses: actions/checkout@v3
       with:
         fetch-depth: 0
-    
-    - name: Configure MariaDB (Set root password)
-      working-directory: C:\MariaDB
-      run: |
-        mysqladmin.exe -u root password "teslalogger"
-
-    - name: Verify MariaDB installation
-      run: |
-        dir .\TeslaLogger
-
-    - name: Restore Teslalogger DB
-      working-directory: C:\MariaDB
-      run: |
-        C:\MariaDB\bin\mysql.exe -uroot -pteslalogger -Dteslalogger < .\TeslaLogger\sqlschema.sql
 
     # Add  MSBuild to the PATH: https://github.com/microsoft/setup-msbuild
     - name: Setup MSBuild.exe
@@ -128,13 +72,16 @@ jobs:
 
     - name: Restore nuget packages
       run: nuget restore TeslaLogger.sln
+
+    #- name: ping
+    #  run: ping mariadb
     
     - name: Build solution
       run: msbuild TeslaLogger.sln -t:rebuild -property:Configuration=Debug
 
     # Execute all unit tests in the solution
     - name: Execute unit tests
-      run: dotnet test --filter "UnitTestsGeocode|UnitTestGrafana|UnitTestBase|UnitTestTelemetryParser" --logger trx --logger console UnitTestsTeslalogger\bin\Debug\UnitTestsTeslalogger.dll
+      run: dotnet test --filter "UnitTestsGeocode|UnitTestGrafana|UnitTestBase|UnitTestTelemetryParser|UnitTestCO2" --logger trx --logger console UnitTestsTeslalogger\bin\Debug\UnitTestsTeslalogger.dll
       #run: dotnet vstest /Tests:UnitTestsGeocode /Logger:trx UnitTestsTeslalogger\bin\Debug\UnitTestsTeslalogger.dll
 
     - name: Publish Test Results

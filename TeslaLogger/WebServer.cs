@@ -400,6 +400,9 @@ namespace TeslaLogger
                     case bool _ when Journeys.CanHandleRequest(request):
                         Journeys.HandleRequest(request, response);
                         break;
+                    case bool _ when Komoot.CanHandleRequest(request):
+                        Komoot.HandleRequest(request, response);
+                        break;
                     case bool _ when request.Url.LocalPath.Equals("/teslaauthurl", System.StringComparison.Ordinal):
                         TeslaAuthURL(response);
                         break;
@@ -3272,6 +3275,7 @@ FROM
 
                             dt.Columns.Add("SupportedByFleetTelemetry");
                             dt.Columns.Add("inactive");
+                            dt.Columns.Add("vehicle_location");
 
                             foreach (DataRow dr in dt.Rows)
                             {
@@ -3279,7 +3283,10 @@ FROM
                                 {
                                     Car c = Car.GetCarByID(Convert.ToInt32(dr["id"]));
                                     if (c != null)
+                                    {
                                         dr["SupportedByFleetTelemetry"] = c.SupportedByFleetTelemetry() ? 1 : 0;
+                                        dr["vehicle_location"] = c.vehicle_location;
+                                    }
                                     else
                                         dr["inactive"] = 1;
                                 }
@@ -3305,7 +3312,7 @@ FROM
             WriteString(response, responseString, "application/json");
         }
 
-        private static void WriteString(HttpListenerResponse response, string responseString, string contentType=null)
+        internal static void WriteString(HttpListenerResponse response, string responseString, string contentType=null)
         {
             response.ContentEncoding = Encoding.UTF8;
             var buffer = Encoding.UTF8.GetBytes(responseString);

@@ -3382,7 +3382,7 @@ LIMIT 1", con)
             if (car.telemetryParser?.dcCharging == true)
                 fast_charger_present = true;
 
-            int chargeID = GetMaxChargeid(out DateTime chargeStart);
+            int chargeID = GetMaxChargeid(out DateTime chargeStart, out double? _);
             long chargingstateid = 0;
             if (wh != null)
             {
@@ -5214,7 +5214,7 @@ WHERE
             return 0;
         }
 
-        private int GetMaxChargeid(out DateTime chargeStart)
+        public int GetMaxChargeid(out DateTime chargeStart, out double? charge_energy_added)
         {
             using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
             {
@@ -5222,7 +5222,8 @@ WHERE
                 using (MySqlCommand cmd = new MySqlCommand(@"
 SELECT
     id,
-    datum
+    datum,
+    charge_energy_added
 FROM
     charging
 WHERE
@@ -5239,11 +5240,15 @@ LIMIT 1", con))
                         {
                             chargeStart = DateTime.Now;
                         }
+
+                        charge_energy_added = Convert.ToDouble(dr[2]);
+
                         return Convert.ToInt32(dr[0], Tools.ciEnUS);
                     }
                 }
             }
             chargeStart = DateTime.Now;
+            charge_energy_added = null;
             return 0;
         }
 
@@ -6533,7 +6538,7 @@ WHERE
             {
                 car.Log($"CloseChargingState id:{openChargingState}");
                 StaticMapService.CreateChargingMapOnChargingCompleted(car.CarInDB);
-                int chargeID = GetMaxChargeid(out DateTime chargeEnd);
+                int chargeID = GetMaxChargeid(out DateTime chargeEnd, out double? _);
                 using (MySqlConnection con = new MySqlConnection(DBConnectionstring))
                 {
                     con.Open();
@@ -6632,9 +6637,9 @@ WHERE
             return json;
         }
 
-        public static decimal InsertNewCar(string email, string password, int teslacarid, bool freesuc, string access_token, string refresh_token, string vin, string display_name, bool fleetAPI)
+        internal static int GetNextAvailableCarID()
         {
-            Logfile.Log($"Insert new Car: {display_name}, VIN: {vin}, TeslaCarId: {teslacarid}");
+            int newid = 1;
             using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
             {
                 con.Open();
@@ -6655,34 +6660,42 @@ FROM
         pos
 ) AS t", con))
                 {
-                    int newid = 1;
-
                     object oid = SQLTracer.TraceSc(cmd);
                     if (oid != null)
-                        newid = Convert.ToInt32(oid);
-
-                    using (var cmd2 = new MySqlCommand("insert cars (id, tesla_name, tesla_password, tesla_carid, display_name, freesuc, tesla_token, refresh_token, vin, fleetAPI) values (@id, @tesla_name, @tesla_password, @tesla_carid, @display_name, @freesuc,  @tesla_token, @refresh_token, @vin, @fleetAPI)", con))
                     {
-                        cmd2.Parameters.AddWithValue("@id", newid);
-                        cmd2.Parameters.AddWithValue("@tesla_name", email);
-                        cmd2.Parameters.AddWithValue("@tesla_password", password);
-                        cmd2.Parameters.AddWithValue("@tesla_carid", teslacarid);
-                        cmd2.Parameters.AddWithValue("@display_name", display_name);
-                        cmd2.Parameters.AddWithValue("@freesuc", freesuc ? 1 : 0);
-                        cmd2.Parameters.AddWithValue("@tesla_token", access_token);
-                        cmd2.Parameters.AddWithValue("@refresh_token", refresh_token);
-                        cmd2.Parameters.AddWithValue("@vin", vin);
-                        cmd2.Parameters.AddWithValue("@fleetAPI", fleetAPI);
-                        _ = SQLTracer.TraceNQ(cmd2, out _);
-
-#pragma warning disable CA2000 // Objekte verwerfen, bevor Bereich verloren geht
-                        Car nc = new Car(Convert.ToInt32(newid), email, password, teslacarid, access_token, DateTime.Now, "", "", "", "", display_name, vin, "", null, fleetAPI);
-#pragma warning restore CA2000 // Objekte verwerfen, bevor Bereich verloren geht
+                        newid = Convert.ToInt32(oid);
                     }
-
-                    return newid;
                 }
             }
+            return newid;
+        }
+
+        internal static decimal InsertNewCar(string email, string password, int teslacarid, bool freesuc, string access_token, string refresh_token, string vin, string display_name, bool fleetAPI)
+        {
+            Logfile.Log($"Insert new Car: {display_name}, VIN: {vin}, TeslaCarId: {teslacarid}");
+            int newid = GetNextAvailableCarID();
+            using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+            {
+                using (var cmd2 = new MySqlCommand("insert cars (id, tesla_name, tesla_password, tesla_carid, display_name, freesuc, tesla_token, refresh_token, vin, fleetAPI) values (@id, @tesla_name, @tesla_password, @tesla_carid, @display_name, @freesuc,  @tesla_token, @refresh_token, @vin, @fleetAPI)", con))
+                {
+                    cmd2.Parameters.AddWithValue("@id", newid);
+                    cmd2.Parameters.AddWithValue("@tesla_name", email);
+                    cmd2.Parameters.AddWithValue("@tesla_password", password);
+                    cmd2.Parameters.AddWithValue("@tesla_carid", teslacarid);
+                    cmd2.Parameters.AddWithValue("@display_name", display_name);
+                    cmd2.Parameters.AddWithValue("@freesuc", freesuc ? 1 : 0);
+                    cmd2.Parameters.AddWithValue("@tesla_token", access_token);
+                    cmd2.Parameters.AddWithValue("@refresh_token", refresh_token);
+                    cmd2.Parameters.AddWithValue("@vin", vin);
+                    cmd2.Parameters.AddWithValue("@fleetAPI", fleetAPI);
+                    _ = SQLTracer.TraceNQ(cmd2, out _);
+
+#pragma warning disable CA2000 // Objekte verwerfen, bevor Bereich verloren geht
+                    Car nc = new Car(Convert.ToInt32(newid), email, password, teslacarid, access_token, DateTime.Now, "", "", "", "", display_name, vin, "", null, fleetAPI);
+#pragma warning restore CA2000 // Objekte verwerfen, bevor Bereich verloren geht
+                }
+            }
+            return newid;
         }
 
         public static DataTable GetAllChargingstates()
@@ -7403,6 +7416,36 @@ ORDER BY startdate", con))
                 }
             }
 
+            return 0;
+        }
+
+        internal double GetDrivenKm(DateTime startDate, DateTime endDate)
+        {
+            try
+            {
+                using (MySqlConnection con = new MySqlConnection(DBConnectionstring + ";Allow User Variables=True"))
+                {
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand($@"SELECT max(odometer) - min(odometer)  
+                        FROM pos where carid = @carid and 
+                        Datum between @startdate and @enddate", con))
+                    {
+                        cmd.Parameters.AddWithValue("@carid", car.CarInDB);
+                        cmd.Parameters.AddWithValue("@startdate", startDate);
+                        cmd.Parameters.AddWithValue("@enddate", endDate);
+                        var odo = cmd.ExecuteScalar();
+                        if (odo != null && double.TryParse(odo.ToString(), out double drivenkm))
+                        {
+                            return drivenkm;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+                ex.ToExceptionless().Submit();
+            }
             return 0;
         }
     }

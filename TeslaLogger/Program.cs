@@ -234,6 +234,16 @@ namespace TeslaLogger
                 String Name = r["tesla_name"].ToString();
                 String Password = r["tesla_password"].ToString();
                 int carid = r["tesla_carid"] as Int32? ?? 0;
+                if (Name.StartsWith("KOMOOT:", StringComparison.Ordinal))
+                {
+                    Komoot _komoot = new Komoot(id, Name.Replace("KOMOOT:", string.Empty), Password);
+                    Thread komootThread = new Thread(() =>
+                    {
+                        _komoot.Run();
+                    });
+                    komootThread.Name = $"KomootThread_{id}";
+                    komootThread.Start();
+                }
                 String tesla_token = r["tesla_token"] as String ?? "";
                 if (tesla_token.StartsWith("OVMS:")) // OVMS Cars are not handled by Teslalogger
                 {
@@ -277,12 +287,8 @@ namespace TeslaLogger
                 if (r["access_type"] != DBNull.Value)
                     access_type = r["access_type"].ToString();
 
-                bool useMqttTelemetry = false;
-                if (r["use_mqtt_telemetry"] != DBNull.Value && Convert.ToInt32(r["use_mqtt_telemetry"]) == 1)
-                    useMqttTelemetry = true;
-
 #pragma warning disable CA2000 // Objekte verwerfen, bevor Bereich verloren geht
-                Car car = new Car(id, Name, Password, carid, tesla_token, tesla_token_expire, Model_Name, car_type, car_special_type, car_trim_badging, display_name, vin, tasker_hash, wh_tr, fleetAPI, useMqttTelemetry, oldCarState, wheel_type);
+                Car car = new Car(id, Name, Password, carid, tesla_token, tesla_token_expire, Model_Name, car_type, car_special_type, car_trim_badging, display_name, vin, tasker_hash, wh_tr, fleetAPI, oldCarState, wheel_type);
                 car.Raven = raven;
                 car._virtual_key = virtualKey;
                 car._access_type  = access_type;

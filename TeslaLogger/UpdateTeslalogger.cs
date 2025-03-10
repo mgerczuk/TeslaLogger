@@ -1204,13 +1204,6 @@ PRIMARY KEY(id)
                 AssertAlterDB();
                 DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD `virtualkey` TINYINT UNSIGNED  NULL DEFAULT '0'", 600);
             }
-
-            if (!DBHelper.ColumnExists("cars", "use_mqtt_telemetry"))
-            {
-                Logfile.Log("ALTER TABLE cars ADD Column use_mqtt_telemetry");
-                AssertAlterDB();
-                DBHelper.ExecuteSQLQuery(@"ALTER TABLE `cars` ADD `use_mqtt_telemetry` TINYINT UNSIGNED NOT NULL DEFAULT '0'", 600);
-            }
         }
 
         private static void CheckDBSchema_can()
