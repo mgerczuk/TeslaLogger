@@ -423,9 +423,6 @@ namespace TeslaLogger
         {
             car.CreateExeptionlessLog("Tesla Token", "UpdateTeslaTokenFromRefreshToken", Exceptionless.Logging.LogLevel.Info).Submit();
 
-            if (car.UseTelemetryMQTT)
-                return "";
-
             string refresh_token = car.DbHelper.GetRefreshToken(out string tesla_token);
 
             if (car.FleetAPI)
@@ -685,7 +682,7 @@ namespace TeslaLogger
             }))
                 {
 
-                    var response = httpclient_teslalogger_de.PostAsync(new Uri("https://teslalogger.de/teslaredirect/refresh_token.php"), formContent).Result;
+                    var response = httpclient_teslalogger_de.PostAsync(new Uri("http://teslalogger.lan:8081/teslaredirect/refresh_token.php"), formContent).Result;
                     string result = response.Content.ReadAsStringAsync().Result;
                     if (response.IsSuccessStatusCode)
                     {

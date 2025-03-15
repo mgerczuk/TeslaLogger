@@ -475,35 +475,32 @@ namespace TeslaLogger
 
                 DbHelper.GetAvgConsumption(out this.sumkm, out this.avgkm, out this.kwh100km, out this.avgsocdiff, out this.maxkm);
 
-                if (!UseTelemetryMQTT)
+                if (!webhelper.RestoreToken())
                 {
-                    if (!webhelper.RestoreToken())
-                    {
-                        webhelper.Tesla_token = webhelper.GetToken();
-                    }
+                    webhelper.Tesla_token = webhelper.GetToken();
+                }
 
-                    if (webhelper.Tesla_token == "NULL")
-                    {
-                        ExitCarThread("Tesla_token == NULL");
-                    }
+                if (webhelper.Tesla_token == "NULL")
+                {
+                    ExitCarThread("Tesla_token == NULL");
+                }
 
-                    LogToken();
+                LogToken();
 
-                    if (DBHelper.DBConnectionstring.Length == 0)
-                    {
-                        ExitCarThread("DBHelper.DBConnectionstring.Length == 0");
-                    }
+                if (DBHelper.DBConnectionstring.Length == 0)
+                {
+                    ExitCarThread("DBHelper.DBConnectionstring.Length == 0");
+                }
 
-                    if (!DbHelper.GetRegion())
-                        webhelper.GetRegion();
+                if (!DbHelper.GetRegion())
+                    webhelper.GetRegion();
 
-                    if (!dbHelper.CheckVirtualKey())
-                        webhelper.CheckVirtualKey();
+                if (!dbHelper.CheckVirtualKey())
+                    webhelper.CheckVirtualKey();
 
-                    if (webhelper.GetVehicles() == "NULL")
-                    {
-                        ExitCarThread("wh.GetVehicles() == NULL");
-                    }
+                if (webhelper.GetVehicles() == "NULL")
+                {
+                    ExitCarThread("wh.GetVehicles() == NULL");
                 }
 
                 // webhelper.scanMyTesla = new ScanMyTesla(this);
