@@ -586,7 +586,7 @@ namespace TeslaLogger
         {
             try
             {
-                if (car.UseTelemetryMQTT || !car.FleetAPI)
+                if (!car.FleetAPI)
                 {
                     return "";
                 }
@@ -1420,6 +1420,10 @@ namespace TeslaLogger
                         { }
                         */
 
+                        // scanMyTesla = new ScanMyTesla(car);
+
+                        teslaCanSync = new TeslaCanSync(car);
+
 
                         /*
                         dynamic jsonResult = JsonConvert.DeserializeObject(resultContent);
@@ -1685,14 +1689,6 @@ namespace TeslaLogger
 
         public async Task<string> IsOnline(bool returnOnUnauthorized = false)
         {
-            if (car.UseTelemetryMQTT)
-            {
-                if (car.telemetryParser?.IsOnline() == true)
-                    return "online";
-                else
-                    return "asleep";
-            }
-
             string resultContent = "";
             try
             {
@@ -4587,9 +4583,6 @@ DESC", con))
 
         public async Task<string> GetChargingHistoryV2(string vin, int pageNumber = 1)
         {
-            if (car.UseTelemetryMQTT)
-                return "{}";
-
             string resultContent = "";
             try
             {
@@ -5299,7 +5292,7 @@ DESC", con))
         {
             try
             {
-                if (car.UseTelemetryMQTT || !car.FleetAPI)
+                if (!car.FleetAPI)
                 {
                     return false;
                 }

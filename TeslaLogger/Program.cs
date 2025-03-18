@@ -194,14 +194,14 @@ namespace TeslaLogger
             try
             {
                 
-                    Thread threadNearbySuCService = new Thread(() =>
-                    {
-                        NearbySuCService.GetSingleton().Run();
-                    })
-                    {
-                        Name = "NearbySuCServiceThread"
-                    };
-                    threadNearbySuCService.Start();
+                Thread threadNearbySuCService = new Thread(() =>
+                {
+                    NearbySuCService.GetSingleton().Run();
+                })
+                {
+                    Name = "NearbySuCServiceThread"
+                };
+                threadNearbySuCService.Start();
                 
             }
             catch (Exception ex)

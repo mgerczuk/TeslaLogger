@@ -229,8 +229,6 @@ namespace TeslaLogger
 
         private static readonly Dictionary<string, int> VIN2DBCarID = new Dictionary<string, int>();
 
-        internal bool UseTelemetryMQTT => telemetry is TelemetryConnectionMqtt;
-
         public Car(int CarInDB, string TeslaName, string TeslaPasswort, int CarInAccount, string TeslaToken, DateTime TeslaTokenExpire, string ModelName, string cartype, string carspecialtype, string cartrimbadging, string displayname, string vin, string TaskerHash, double? WhTR, bool fleetAPI, TeslaState currentState = TeslaState.Start, string wheel_type = "")
         {
             lock (_syncRoot)
@@ -502,10 +500,6 @@ namespace TeslaLogger
                 {
                     ExitCarThread("wh.GetVehicles() == NULL");
                 }
-
-                // webhelper.scanMyTesla = new ScanMyTesla(this);
-
-                webhelper.teslaCanSync = new TeslaCanSync(this);
 
                 DbHelper.GetEconomy_Wh_km(webhelper);
                 lock (WebHelper.isOnlineLock)

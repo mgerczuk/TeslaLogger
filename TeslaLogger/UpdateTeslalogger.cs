@@ -1492,12 +1492,12 @@ PRIMARY KEY(id)
                             }
                             process.WaitForExit();
                         }
-                }
-                catch (Exception ex)
-                {
-                    ex.ToExceptionless().FirstCarUserID().Submit();
-                    Logfile.Log(ex.ToString());
-                }
+                    }
+                    catch (Exception ex)
+                    {
+                        ex.ToExceptionless().FirstCarUserID().Submit();
+                        Logfile.Log(ex.ToString());
+                    }
                 }
 
             }
