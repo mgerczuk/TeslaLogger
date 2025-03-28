@@ -169,13 +169,6 @@ namespace TeslaLogger
                 _ = Task.Factory.StartNew(() =>
                 {
                     Logfile.Log("DBIndex Update (Task) started.");
-                    if (!DBHelper.IndexExists("can_ix2", "can"))
-                    {
-                        Logfile.Log("alter table can add index can_ix2 (id,carid,datum)");
-                        AssertAlterDB();
-                        DBHelper.ExecuteSQLQuery("alter table can add index can_ix2 (id,carid,datum)", 6000);
-                    }
-
                     if (!DBHelper.IndexExists("chargingsate_ix_pos", "chargingstate"))
                     {
                         Logfile.Log("alter table chargingstate add index chargingsate_ix_pos (Pos)");
@@ -1341,7 +1334,7 @@ PRIMARY KEY(id)
                 // download update package from github
                 bool httpDownloadSuccessful = false;
                 bool zipExtractSuccessful = false;
-                string GitHubURL = "https://github.com/bassmaster187/TeslaLogger/archive/master.zip";
+                string GitHubURL = "https://gitlab.lan/root/teslalogger/-/archive/master2/teslalogger-master2.zip";
                 string master = "master";
 
                 if (File.Exists("BRANCH"))
@@ -1352,7 +1345,7 @@ PRIMARY KEY(id)
                     {
                         Logfile.Log($"YOU ARE USING BRANCH: " + branch);
 
-                        GitHubURL = "https://github.com/bassmaster187/TeslaLogger/archive/refs/heads/" + branch + ".zip";
+                        GitHubURL = "https://gitlab.lan/root/teslalogger/-/archive/" + branch + "/teslalogger-" + branch + ".zip";
                         master = branch;
                     }
                     else
@@ -1447,7 +1440,7 @@ PRIMARY KEY(id)
                     for (int x = 1; x < 10; x++)
                     {
                         Logfile.Log("git clone: try " + x);
-                        Tools.ExecMono("git", "clone --depth=1 --progress https://github.com/bassmaster187/TeslaLogger /etc/teslalogger/git/", true, true);
+                        Tools.ExecMono("git", "clone --depth=1 --progress -b master2 https://gitlab.lan/root/teslalogger.git /etc/teslalogger/git/", true, true);
 
                         if (Directory.Exists("/etc/teslalogger/git/TeslaLogger/GrafanaPlugins"))
                         {
@@ -2376,13 +2369,6 @@ PRIMARY KEY(id)
                 || GrafanaVersion == "8.5.22"
                 )
             {
-                if (!Tools.GetOsRelease().Contains("buster"))
-                {
-                    Logfile.Log("Grafana update suspended because of old OS:" + Tools.GetOsRelease());
-                    ExceptionlessClient.Default.CreateFeatureUsage("Grafana update suspended").FirstCarUserID().Submit();
-                    return;
-                }
-
                 Thread threadGrafanaUpdate = new Thread(() =>
                 {
                     string GrafanaFilename = $"grafana_{newversion}_armhf.deb";

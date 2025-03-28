@@ -1738,6 +1738,7 @@ namespace TeslaLogger
 
             webhelper.StopStreaming();
             webhelper.scanMyTesla?.StopThread();
+            webhelper.teslaCanSync?.StopThread();
 
             var t = new Thread(() =>
             {
@@ -1749,6 +1750,7 @@ namespace TeslaLogger
                 }
 
                 webhelper.scanMyTesla?.KillThread();
+                webhelper.teslaCanSync?.KillThread();
 
                 var dr = DBHelper.GetCar(CarInDB);
                 if (dr != null)

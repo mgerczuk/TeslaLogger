@@ -72,10 +72,10 @@
       <Value Profile="(Default)">True</Value>
     </Setting>
     <Setting Name="TelemetryServerType" Type="System.String" Scope="Application">
-      <Value Profile="(Default)">WS</Value>
+      <Value Profile="(Default)">MQTT</Value>
     </Setting>
     <Setting Name="TeslaHttpProxyURL" Type="System.String" Scope="Application">
-      <Value Profile="(Default)">https://teslalogger.de:4444</Value>
+      <Value Profile="(Default)">https://fleet-api.prd.eu.vn.cloud.tesla.com</Value>
     </Setting>
     <Setting Name="TelemetryClientID" Type="System.String" Scope="Application">
       <Value Profile="(Default)" />

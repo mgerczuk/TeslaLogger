@@ -12,6 +12,10 @@ namespace TeslaLogger
             {
                 return new TelemetryConnectionZMQ(car);
             }
+            if (ApplicationSettings.Default.TelemetryServerType == "MQTT")
+            {
+                return new TelemetryConnectionMqtt(car);
+            }
             else
             {
                 return new TelemetryConnectionWS(car);

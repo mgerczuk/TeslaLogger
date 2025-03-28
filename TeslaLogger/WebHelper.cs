@@ -86,6 +86,7 @@ namespace TeslaLogger
         const string TESLA_CLIENT_SECRET = "c7257eb71a564034f9419ee651c7d0e5f7aa6bfbd18bafb5c5c033b093bb2fa3";
         private const string INSERVICE = "INSERVICE";
         internal ScanMyTesla scanMyTesla;
+        public TeslaCanSync teslaCanSync;
         private string _lastShift_State = "P";
         private static readonly Regex regexAssemblyVersion = new Regex("\n\\[assembly: AssemblyVersion\\(\"([0-9\\.]+)\"", RegexOptions.Compiled);
 
@@ -682,7 +683,7 @@ namespace TeslaLogger
             }))
                 {
 
-                    var response = httpclient_teslalogger_de.PostAsync(new Uri("https://teslalogger.de/teslaredirect/refresh_token.php"), formContent).Result;
+                    var response = httpclient_teslalogger_de.PostAsync(new Uri("http://teslalogger.lan:8081/teslaredirect/refresh_token.php"), formContent).Result;
                     string result = response.Content.ReadAsStringAsync().Result;
                     if (response.IsSuccessStatusCode)
                     {
@@ -1420,7 +1421,10 @@ namespace TeslaLogger
                         { }
                         */
 
-                        scanMyTesla = new ScanMyTesla(car);
+                        // scanMyTesla = new ScanMyTesla(car);
+
+                        teslaCanSync = new TeslaCanSync(car);
+
 
                         /*
                         dynamic jsonResult = JsonConvert.DeserializeObject(resultContent);
@@ -4994,7 +4998,7 @@ DESC", con))
 
                 using (WebClient wc = new WebClient())
                 {
-                    contents = wc.DownloadString("https://raw.githubusercontent.com/bassmaster187/TeslaLogger/master/TeslaLogger/Properties/AssemblyInfo.cs");
+                    contents = wc.DownloadString("https://gitlab.lan/root/teslalogger/raw/master2/TeslaLogger/Properties/AssemblyInfo.cs");
                 }
 
                 Match m = regexAssemblyVersion.Match(contents);
@@ -5378,12 +5382,12 @@ DESC", con))
                 client.DefaultRequestHeaders.UserAgent.Add(userAgent);
                 client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("(00000000; " + Thread.CurrentThread.ManagedThreadId + ")"));
 
-                var g = client.GetAsync("https://api.github.com/repos/bassmaster187/TeslaLogger/branches/" + branch).Result;
+                var g = client.GetAsync("https://gitlab.lan/api/v4/projects/root%2FTeslaLogger/repository/branches/" + branch).Result;
                 statusCode = g.StatusCode;
                 if (g.IsSuccessStatusCode)
                 {
                     string res = g.Content.ReadAsStringAsync().Result;
-                    return res.Contains("signature");
+                    return res.Contains("\"commit\"");
                 }
                 else if (g.StatusCode == HttpStatusCode.NotFound)
                 {
