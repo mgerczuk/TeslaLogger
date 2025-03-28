@@ -1464,8 +1464,8 @@ PRIMARY KEY(id)
                 // running in TeslaLogger.exe, prepare update in separate process
                 if (System.Diagnostics.Process.GetCurrentProcess().ProcessName.Equals("TeslaLogger"))
                 {
-                try
-                {
+                    try
+                    {
                         Tools.CopyFile("/etc/teslalogger/git/TeslaLogger/bin/TLUpdate.exe", "/etc/teslalogger/TLUpdate.exe");
                         foreach (Car car in Car.Allcars)
                         {
