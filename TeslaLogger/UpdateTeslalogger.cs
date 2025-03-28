@@ -141,6 +141,8 @@ namespace TeslaLogger
 
                 GetChargingHistoryV2Service.CheckSchema();
 
+                Komoot.CheckSchema();
+
                 Logfile.Log("DBSchema Update finished.");
 
                 // end of schema update
@@ -273,7 +275,6 @@ namespace TeslaLogger
                     CreateEmptyWeatherIniFile();
                     CheckBackupCrontab();
                 }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
-
             }
             catch (Exception ex)
             {

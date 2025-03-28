@@ -2368,7 +2368,7 @@ namespace TeslaLogger
                     return;
                 }
             }
-            else if (car.CarType == "modelx" && car.CarSpecialType == "base" && year < 2021)
+            else if (car.CarType == "modelx" && (car.CarSpecialType == "base" || car.CarSpecialType == "founder") && year < 2021)
             {
                 if (car.TrimBadging == "75d")
                 {
@@ -3745,6 +3745,7 @@ namespace TeslaLogger
 
         public void UpdateAllEmptyAddresses()
         {
+            Tools.DebugLog("UpdateAllEmptyAddresses()");
             using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
             {
                 con.Open();
@@ -3849,6 +3850,7 @@ namespace TeslaLogger
 
         public static void UpdateAllPOIAddresses()
         {
+            Tools.DebugLog("UpdateAllPOIAddresses()");
             try
             {
                 if (Geofence.GetInstance().RacingMode)

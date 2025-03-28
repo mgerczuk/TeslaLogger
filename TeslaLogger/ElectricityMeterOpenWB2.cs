@@ -152,7 +152,7 @@ namespace TeslaLogger
                 if (r1.ContainsKey("message"))
                 {
                     double.TryParse(r1["message"].ToString(), out double value);
-                    return value;
+                    return value/1000;
                 }
                 else
                 {
@@ -230,7 +230,7 @@ namespace TeslaLogger
                 if (r1.ContainsKey("message"))
                 {
                     double.TryParse(r1["message"].ToString(), out double value);
-                    return value;
+                    return value/1000;
                 }
                 else
                 {
@@ -274,8 +274,8 @@ namespace TeslaLogger
                 if (status.ToString() != "success")
                     return null;
 
-                r1.TryGetValue("message", out object version);
-                if (version.ToString() == "true")
+                r1.TryGetValue("message", out object message);
+                if (message.ToString().ToLower() == "true")
                 {
                     return true;
                 }
