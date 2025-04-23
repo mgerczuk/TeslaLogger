@@ -1,37 +1,42 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MySql.Data.MySqlClient;
-using Exceptionless;
 using Newtonsoft.Json;
 
 namespace TeslaLogger
 {
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
+    [SuppressMessage("Design", "CA1031:Keine allgemeinen Ausnahmetypen abfangen", Justification = "<Pending>")]
     public class TeslaCanSync
     {
         private const int Seconds = 5;
-
-        private readonly string token;
-        private Thread thread;
-        private bool run = true;
         private readonly Car car;
+        private readonly string logDir;
         private readonly string url = "http://teslacan-esp.lan";
+
+        private bool run = true;
+        private Thread thread;
 
         internal TeslaCanSync(Car c)
         {
             if (c != null)
             {
-                token = c.TaskerHash;
                 car = c;
                 url = $"http://teslacan-{c.CarInDB}.lan";
                 c.Log($"TeslaCanSync: Connecting to {url}");
 
-                thread = new Thread(new ThreadStart(Start));
+                logDir = Path.Combine(AppContext.BaseDirectory, "logs", $"teslacan-{c.CarInDB}");
+
+                thread = new Thread(Start);
                 thread.Name = "TeslaCAN_" + car.CarInDB;
                 thread.Start();
             }
@@ -49,36 +54,114 @@ namespace TeslaLogger
 
             while (run)
             {
-                try
+                var connected = false;
+                while (run && !connected)
                 {
-                    var data = GetTeslaCanData().Result;
-
-                    if (data == null || data.Count == 0)
+                    try
                     {
-                        // car sleeping...
-                        Thread.Sleep(20000);
+                        using (var ping = new Ping())
+                        {
+                            var reply = ping.Send(url.Substring(7));
+                            connected = reply?.Status == IPStatus.Success;
+                        }
                     }
-                    else
+                    catch (PingException)
                     {
-                        foreach (var d in data) SaveData(d);
-
-                        var lag = DateTime.Now - data.Last().Timestamp;
-                        if (lag < TimeSpan.FromSeconds(Seconds))
-                            Thread.Sleep((int) (Seconds - lag.TotalSeconds + 0.5) * 1000);
                     }
+
+                    if (!connected)
+                        Thread.Sleep(2000);
                 }
-                catch (Exception ex)
-                {
-                    if (!((ex as AggregateException)?.InnerExceptions[0] is HttpRequestException))
-                    {
-                        car.CreateExceptionlessClient(ex).Submit();
-                        car.Log("TeslaCAN: " + ex.Message);
-                        Logfile.WriteException(ex.ToString());
-                    }
 
-                    Thread.Sleep(20000);
+                if (run && connected) GetLogFiles().Wait();
+
+                while (run && connected)
+                    try
+                    {
+                        var data = GetTeslaCanData().Result;
+
+                        if (data == null || data.Count == 0)
+                        {
+                            // car sleeping...
+                            connected = false;
+                        }
+                        else
+                        {
+                            foreach (var d in data) SaveData(d);
+
+                            var lag = DateTime.Now - data.Last().Timestamp;
+                            if (lag < TimeSpan.FromSeconds(Seconds))
+                                Thread.Sleep((int)(Seconds - lag.TotalSeconds + 0.5) * 1000);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!((ex as AggregateException)?.InnerExceptions[0] is HttpRequestException))
+                        {
+                            car.CreateExceptionlessClient(ex).Submit();
+                            car.Log("TeslaCAN: " + ex.Message);
+                            Logfile.WriteException(ex.ToString());
+                        }
+
+                        connected = false;
+                    }
+            }
+        }
+
+        private async Task GetLogFiles()
+        {
+            try
+            {
+                if (!Directory.Exists(logDir))
+                    Directory.CreateDirectory(logDir);
+
+                using (var client = new HttpClient())
+                {
+                    var result = await GetFiles(client).ConfigureAwait(true);
+                    if (result != null)
+                        foreach (var file in result.Files)
+                            if (file.Name.EndsWith(".txt", StringComparison.InvariantCulture) &&
+                                file.Name != "log.txt" ||
+                                file.Name.EndsWith(".zip", StringComparison.InvariantCulture))
+                            {
+                                var destFile = Path.Combine(logDir, file.Name);
+                                if (!System.IO.File.Exists(destFile))
+                                    await DownloadFile(client, new Uri(url + file.Path), destFile).ConfigureAwait(true);
+                            }
                 }
             }
+            catch (Exception)
+            {
+                car.Log("Error getting log files");
+                throw;
+            }
+        }
+
+        private async Task<FilesResult> GetFiles(HttpClient client)
+        {
+            var requestUri = new Uri(url + "/api/files?path=/sd/logs");
+            var responseMessage = await client.GetAsync(requestUri).ConfigureAwait(true);
+            if (!responseMessage.IsSuccessStatusCode)
+            {
+                car.Log($"Error getting {requestUri}");
+                return null;
+            }
+
+            var resultContent = await responseMessage.Content.ReadAsStringAsync().ConfigureAwait(true);
+            var result = JsonConvert.DeserializeObject<FilesResult>(resultContent);
+            return result;
+        }
+
+        private async Task DownloadFile(HttpClient client, Uri requestUri, string destFile)
+        {
+            var responseMessage = await client.GetAsync(requestUri).ConfigureAwait(true);
+            if (responseMessage.IsSuccessStatusCode)
+                using (var fs = new FileStream(destFile, FileMode.CreateNew))
+                {
+                    await responseMessage.Content.CopyToAsync(fs).ConfigureAwait(true);
+                }
+            else
+                car.Log($"Error getting {requestUri}");
         }
 
         private async Task<IList<Data>> GetTeslaCanData()
@@ -86,10 +169,10 @@ namespace TeslaLogger
             using (var client = new HttpClient())
             {
                 var start = DateTime.UtcNow;
-                var result = await client.GetAsync(new Uri(url+"/getdata?limit=12")).ConfigureAwait(true);
+                var result = await client.GetAsync(new Uri(url + "/getdata?limit=12")).ConfigureAwait(true);
                 var resultContent = await result.Content.ReadAsStringAsync().ConfigureAwait(true);
 
-                DBHelper.AddMothershipDataToDB(url+"/getdata", start, (int) result.StatusCode, car.CarInDB);
+                DBHelper.AddMothershipDataToDB(url + "/getdata", start, (int)result.StatusCode, car.CarInDB);
 
                 try
                 {
@@ -173,6 +256,7 @@ namespace TeslaLogger
                         {
                             car.CurrentJSON.SMTSpeed = Convert.ToDouble(line.Value, Tools.ciEnUS);
                         }
+
                         break;
                     case "43":
                         car.CurrentJSON.SMTBatteryPower = Convert.ToDouble(line.Value, Tools.ciEnUS);
@@ -257,7 +341,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.Write(ex.ToString());
+                Debug.Write(ex.ToString());
             }
         }
 
@@ -265,6 +349,28 @@ namespace TeslaLogger
         {
             public DateTime Timestamp;
             public Dictionary<string, object> Values;
+        }
+
+        public class File
+        {
+            [JsonProperty("date")] public string Date { get; set; }
+
+            [JsonProperty("isDir")] public bool IsDir { get; set; }
+
+            [JsonProperty("name")] public string Name { get; set; }
+
+            [JsonProperty("path")] public string Path { get; set; }
+
+            [JsonProperty("size")] public int Size { get; set; }
+        }
+
+        public class FilesResult
+        {
+            [JsonProperty("files")] public List<File> Files { get; set; }
+
+            [JsonProperty("freeSpaceBytes")] public long FreeSpaceBytes { get; set; }
+
+            [JsonProperty("path")] public string Path { get; set; }
         }
     }
 }
