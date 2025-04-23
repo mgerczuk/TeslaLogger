@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -67,6 +68,13 @@ namespace TeslaLogger
                     }
                     catch (PingException)
                     {
+                    }
+                    catch (SocketException)
+                    {
+                    }
+                    catch (Exception ex)
+                    {
+                        car.Log("TeslaCAN: Ping " + ex.Message);
                     }
 
                     if (!connected)
@@ -132,7 +140,7 @@ namespace TeslaLogger
             }
             catch (Exception)
             {
-                car.Log("Error getting log files");
+                car.Log("TeslaCAN: Error getting log files");
                 throw;
             }
         }
@@ -143,7 +151,7 @@ namespace TeslaLogger
             var responseMessage = await client.GetAsync(requestUri).ConfigureAwait(true);
             if (!responseMessage.IsSuccessStatusCode)
             {
-                car.Log($"Error getting {requestUri}");
+                car.Log($"TeslaCAN: Error getting {requestUri}");
                 return null;
             }
 
@@ -161,7 +169,7 @@ namespace TeslaLogger
                     await responseMessage.Content.CopyToAsync(fs).ConfigureAwait(true);
                 }
             else
-                car.Log($"Error getting {requestUri}");
+                car.Log($"TeslaCAN: Error getting {requestUri}");
         }
 
         private async Task<IList<Data>> GetTeslaCanData()
@@ -193,7 +201,7 @@ namespace TeslaLogger
                 }
                 catch (Exception)
                 {
-                    car.Log("Error parsing JSON:\n" + resultContent);
+                    car.Log("TeslaCAN: Error parsing JSON:\n" + resultContent);
                     throw;
                 }
             }
@@ -303,7 +311,7 @@ namespace TeslaLogger
                     catch (MySqlException ex)
                     {
                         if (ex.Message.Contains("Duplicate entry"))
-                            car.Log("Scanmytesla: " + ex.Message);
+                            car.Log("TeslaCAN: " + ex.Message);
                         else
                             throw;
                     }
