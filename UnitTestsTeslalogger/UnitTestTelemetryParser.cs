@@ -446,6 +446,7 @@ namespace UnitTestsTeslalogger
         public void DrivingBySpeed_typed()
         {
             Car c = new Car(0, "", "", 0, "", DateTime.Now, "", "", "", "", "", "XP7YGCEK9PB000000", "", null, false);
+            c.FleetAPI = true;
 
             var telemetry = new TelemetryParser(c);
             telemetry.databaseCalls = false;
@@ -456,9 +457,15 @@ namespace UnitTestsTeslalogger
             for (int i = 0; i < lines.Count; i++)
             {
                 if (i == 0)
+                {
                     expectedDriving = true; // VehicleSpeed: 1.86
+                }
                 else if (i == 16)
+                {
                     expectedDriving = false; // Gear: P
+                    c.GetTeslaAPIState().GetInt("heading", out int heading);
+                    Assert.AreEqual(127, heading);
+                }
 
                 telemetry.handleMessage(lines[i]);
                 AssertStates(telemetry, i, lines[i]);
@@ -553,6 +560,43 @@ namespace UnitTestsTeslalogger
                     Assert.AreEqual(29, c.CurrentJSON.active_route_km_to_arrival);
                     Assert.AreEqual(26, c.CurrentJSON.active_route_minutes_to_arrival);
                     Assert.AreEqual("Rot an der Rot", c.CurrentJSON.active_route_destination);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void SWUpdate()
+        {
+            Car c = new Car(0, "", "", 0, "", DateTime.Now, "", "", "", "", "", "XP7YGCEK9PB000000", "", null, false);
+
+            var telemetry = new TelemetryParser(c);
+            telemetry.databaseCalls = false;
+            telemetry.handleACChargeChange += Telemetry_handleACChargeChange;
+
+            var lines = LoadData("../../testdata/SWUpdate.txt");
+
+            for (int i = 0; i < lines.Count; i++)
+            {
+                telemetry.handleMessage(lines[i]);
+                if (i == 0)
+                {
+                    Assert.AreEqual("", c.CurrentJSON.software_update_version);
+                    Assert.AreEqual("", c.CurrentJSON.software_update_status);
+                }
+                else if (i == 3)
+                {
+                    Assert.AreEqual("2025.2.6", c.CurrentJSON.software_update_version);
+                    Assert.AreEqual("Downloading", c.CurrentJSON.software_update_status);
+                }
+                else if (i == 7)
+                {
+                    Assert.AreEqual("2025.2.6", c.CurrentJSON.software_update_version);
+                    Assert.AreEqual("Installing", c.CurrentJSON.software_update_status);
+                }
+                else if (i == 11)
+                {
+                    Assert.AreEqual("", c.CurrentJSON.software_update_version);
+                    Assert.AreEqual("", c.CurrentJSON.software_update_status);
                 }
             }
         }

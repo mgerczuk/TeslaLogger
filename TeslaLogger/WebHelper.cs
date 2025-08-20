@@ -4,12 +4,10 @@ using MySql.Data.MySqlClient;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
-using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -19,13 +17,11 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Runtime.Caching;
 using System.Runtime.CompilerServices;
-using System.Runtime.ConstrainedExecution;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web;
 using static TeslaLogger.Car;
 
 namespace TeslaLogger
@@ -538,6 +534,7 @@ namespace TeslaLogger
             catch (Exception ex)
             {
                 car.Log(ex.ToString());
+                Tools.DebugLog($"UpdateTeslaTokenFromRefreshToken: error parsing resultContent {resultContent}");
                 // car.ExternalLog("UpdateTeslaTokenFromRefreshToken: \r\nHTTP StatusCode: " + HttpStatusCode+ "\r\nresultContent: " + resultContent +"\r\n" + ex.ToString());
                 car.CreateExeptionlessLog("UpdateTeslaTokenFromRefreshToken", "Error getting access token", Exceptionless.Logging.LogLevel.Error).AddObject(HttpStatusCode, "HTTP StatusCode").AddObject(resultContent, "ResultContent").Submit();
                 car.CreateExceptionlessClient(ex).AddObject(HttpStatusCode, "HTTP StatusCode").AddObject(resultContent, "ResultContent").MarkAsCritical().Submit();
@@ -2877,6 +2874,7 @@ namespace TeslaLogger
                     // Log("IsDriving2");
 
                     Task<double> odometer = GetOdometerAsync();
+                    double? inside_temp = null;
                     double? outside_temp = null;
                     Task<double?> t_outside_temp = null;
 
@@ -2906,7 +2904,12 @@ namespace TeslaLogger
                         longitude = 0;
                     }
 
-                    car.DbHelper.InsertPos(ts.ToString(), latitude, longitude, speed, power, odometer.Result, ideal_battery_range_km, battery_range_km, battery_level, outside_temp, elevation);
+                    if(car.CurrentJSON.current_inside_temperature != null)
+                    {
+                        inside_temp = (double)car.CurrentJSON.current_inside_temperature;
+                    }
+
+                    car.DbHelper.InsertPos(ts.ToString(), latitude, longitude, speed, power, odometer.Result, ideal_battery_range_km, battery_range_km, battery_level, inside_temp, outside_temp, elevation);
 
                     if (shift_state == "D" || shift_state == "R" || shift_state == "N")
                     {
@@ -3346,6 +3349,7 @@ namespace TeslaLogger
                 double battery_range_km = Tools.MlToKm(irange, 1);
                 // ideal_battery_range_km = ideal_battery_range_km * car specific factor
                 double ideal_battery_range_km = battery_range_km * battery_range2ideal_battery_range;
+                double? inside_temp = car.CurrentJSON.current_inside_temperature;
                 double? outside_temp = car.CurrentJSON.current_outside_temperature;
                 if (!string.IsNullOrEmpty(shift_state) && shift_state.Equals("D") &&
                     (latitude != last_latitude_streaming || longitude != last_longitude_streaming || dpower != last_power_streaming))
@@ -3355,7 +3359,7 @@ namespace TeslaLogger
                     last_power_streaming = dpower;
 
                     //Tools.DebugLog($"Stream: InsertPos({v[0]}, {latitude}, {longitude}, {ispeed}, {dpower}, {dodometer_km}, {ideal_battery_range_km}, {battery_range_km}, {isoc}, {outside_temp}, String.Empty)");
-                    car.DbHelper.InsertPos(v[0], latitude, longitude, ispeed, dpower, dodometer_km, ideal_battery_range_km, battery_range_km, isoc, outside_temp, String.Empty);
+                    car.DbHelper.InsertPos(v[0], latitude, longitude, ispeed, dpower, dodometer_km, ideal_battery_range_km, battery_range_km, isoc, inside_temp, outside_temp, String.Empty);
                 }
             }
             if (int.TryParse(heading, out int iheading)) {  // heading in degrees
@@ -3405,7 +3409,7 @@ namespace TeslaLogger
             
         }*/
 
-        internal static async Task<string> ReverseGecocodingAsync(Car c, double latitude, double longitude, bool forceGeocoding = false, bool insertGeocodecache = true)
+        internal static async Task<string> ReverseGecocodingAsync(Car car, double latitude, double longitude, bool forceGeocoding = false, bool insertGeocodecache = true)
         {
             string url = "";
             string resultContent = "";
@@ -3468,8 +3472,10 @@ namespace TeslaLogger
 
                     DateTime start = DateTime.UtcNow;
                     resultContent = await webClient.DownloadStringTaskAsync(new Uri(url));
-                    DBHelper.AddMothershipDataToDB("ReverseGeocoding", start, 0, c.CarInDB);
-
+                    if (car != null)
+                    {
+                        DBHelper.AddMothershipDataToDB("ReverseGeocoding", start, 0, car.CarInDB);
+                    }
                     dynamic jsonResult = JsonConvert.DeserializeObject(resultContent);
                     string adresse = "";
 
@@ -3489,10 +3495,10 @@ namespace TeslaLogger
                         if (loc0.ContainsKey("adminArea1") && loc0["adminArea1Type"].ToString() == "Country")
                             country_code = loc0["adminArea1"].ToString().ToLower();
 
-                        if (country_code.Length > 0 && c != null)
+                        if (country_code.Length > 0 && car != null)
                         {
-                            c.CurrentJSON.current_country_code = country_code;
-                            c.CurrentJSON.current_state = loc0.ContainsKey("adminArea3") ? loc0["adminArea3"].ToString() : "";
+                            car.CurrentJSON.current_country_code = country_code;
+                            car.CurrentJSON.current_state = loc0.ContainsKey("adminArea3") ? loc0["adminArea3"].ToString() : "";
                         }
 
                         string road = "";
@@ -3539,10 +3545,10 @@ namespace TeslaLogger
                         if (r2.ContainsKey("country_code"))
                             country_code = r2["country_code"].ToString();
 
-                        if (country_code.Length > 0 && c != null)
+                        if (country_code.Length > 0 && car != null)
                         {
-                            c.CurrentJSON.current_country_code = country_code;
-                            c.CurrentJSON.current_state = r2.ContainsKey("state") ? r2["state"].ToString() : "";
+                            car.CurrentJSON.current_country_code = country_code;
+                            car.CurrentJSON.current_state = r2.ContainsKey("state") ? r2["state"].ToString() : "";
                         }
 
                         string road = "";
@@ -3604,7 +3610,7 @@ namespace TeslaLogger
                     else
                     {
                         NominatimCount++;
-                        Logfile.Log("Reverse geocoding by Nominatim" + NominatimCount);
+                        Logfile.Log("Reverse geocoding by Nominatim: " + NominatimCount);
                     }
 
                     return adresse;
@@ -3936,26 +3942,34 @@ DESC", con))
         internal static int UpdateAllPOIAddresses(int count, string bucket)
         {
             if (bucket.Length == 0)
+            {
                 return count;
-
+            }
             using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
             {
                 con.Open();
-
-                using (MySqlCommand cmd = new MySqlCommand(@"Select lat, lng, pos.id, address, fast_charger_brand, max_charger_power 
-                        from pos    
-                        left join chargingstate on pos.id = chargingstate.pos
-                        where pos.id in (" + MySql.Data.MySqlClient.MySqlHelper.EscapeString(bucket) + ")", con))
+                using (MySqlCommand cmd = new MySqlCommand(@"
+SELECT
+    lat,
+    lng,
+    pos.id,
+    address,
+    fast_charger_brand,
+    max_charger_power 
+FROM
+    pos    
+    LEFT JOIN chargingstate ON pos.id = chargingstate.pos
+WHERE
+    pos.id IN (" + MySql.Data.MySqlClient.MySqlHelper.EscapeString(bucket) + ")", con))
                 {
                     MySqlDataReader dr = SQLTracer.TraceDR(cmd);
-
+                    //Tools.DebugLog(cmd);
                     while (dr.Read())
                     {
                         count = UpdatePOIAdress(count, dr);
                     }
                 }
             }
-
             return count;
         }
 
@@ -4220,9 +4234,11 @@ DESC", con))
                 _ = long.TryParse(climate_state["timestamp"].ToString(), out long ts);
                 try
                 {
+                    decimal? inside_temp = null;
                     if (climate_state["inside_temp"] != null)
                     {
-                        car.CurrentJSON.current_inside_temperature = Convert.ToDouble(climate_state["inside_temp"]);
+                        inside_temp = (decimal)climate_state["inside_temp"];
+                        car.CurrentJSON.current_inside_temperature = (double)inside_temp;
                     }
                 }
                 catch (Exception) { }
@@ -5277,6 +5293,7 @@ DESC", con))
                             dynamic jsonResult = JsonConvert.DeserializeObject(response);
                             dynamic message = jsonResult["message"];
                             Logfile.Log("SuperchargeBingo: Checkin Error: " + message);
+                            Tools.DebugLog($"SuperchargeBingo error {json}");
                         }
                     }
 

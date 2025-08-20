@@ -43,6 +43,8 @@ namespace TeslaLogger
         public bool current_fast_charger_present; // defaults to false
 
         public string current_car_version = "";
+        public string software_update_status = ""; // defaults to null;
+        public string software_update_version = ""; // defaults to null;
 
         public DateTime current_trip_start = DateTime.MinValue;
         public DateTime current_trip_end = DateTime.MinValue;
@@ -67,6 +69,11 @@ namespace TeslaLogger
 
         public string current_country_code = "";
         public string current_state = "";
+
+        public double tpms_pressure_fr; // defaults to 0;
+        public double tpms_pressure_fl; // defaults to 0;
+        public double tpms_pressure_rr; // defaults to 0;
+        public double tpms_pressure_rl; // defaults to 0;
 
         public DateTime lastScanMyTeslaReceived = DateTime.MinValue;
         public double? SMTCellTempAvg; // defaults to null;
@@ -162,8 +169,8 @@ namespace TeslaLogger
                 var apistate = car.GetTeslaAPIState();
 
                 apistate.GetBool("charge_port_door_open", out current_charge_port_door_open);
-                apistate.GetString("software_update.status", out string software_update_status);
-                apistate.GetString("software_update.version", out string software_update_version);
+                apistate.GetString("software_update.status", out software_update_status);
+                apistate.GetString("software_update.version", out software_update_version);
 
                 apistate.GetInt("fd_window", out int fd_window);
                 apistate.GetInt("fp_window", out int fp_window);
@@ -252,7 +259,11 @@ namespace TeslaLogger
                    { "frunk" , frunk},
                    { "trunk" , trunk},
                    { "locked" , locked},
-                   { "FatalError", FatalError}
+                   { "FatalError", FatalError},
+                   { "tpms_pressure_fr", tpms_pressure_fr },
+                   { "tpms_pressure_fl", tpms_pressure_fl },
+                   { "tpms_pressure_rr", tpms_pressure_rr },
+                   { "tpms_pressure_rl", tpms_pressure_rl }
                 };
 
                 TimeSpan ts = DateTime.Now - lastScanMyTeslaReceived;
@@ -333,14 +344,28 @@ namespace TeslaLogger
 
         internal void ToKVS()
         {
-            KVS.InsertOrUpdate($"currentJSON_{car.CarInDB}", jsonStringHolder[car.CarInDB]);
+            ToKVS(car.CarInDB);
+        }
+
+        internal static void ToKVS(int CarInDB)
+        {
+            KVS.InsertOrUpdate($"currentJSON_{CarInDB}", jsonStringHolder[CarInDB]);
         }
 
         internal void FromKVS()
         {
-            if (KVS.Get($"currentJSON_{car.CarInDB}", out string cJSON) == KVS.SUCCESS)
+            FromKVS(car.CarInDB);
+        }
+
+        internal static void FromKVS(int CarInDB)
+        {
+            if (KVS.Get($"currentJSON_{CarInDB}", out string cJSON) == KVS.SUCCESS)
             {
-                jsonStringHolder[car.CarInDB] = cJSON;
+                jsonStringHolder[CarInDB] = cJSON;
+            }
+            else
+            {
+                jsonStringHolder[CarInDB] = "{}";
             }
         }
     }
