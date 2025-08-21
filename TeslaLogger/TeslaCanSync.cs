@@ -11,6 +11,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Makaretu.Dns;
 using MySql.Data.MySqlClient;
 using Newtonsoft.Json;
 
@@ -26,6 +27,7 @@ namespace TeslaLogger
 
         private bool run = true;
         private Thread thread;
+        private readonly TeslaCanHost teslaCan;
 
         internal TeslaCanSync(Car c)
         {
@@ -37,10 +39,27 @@ namespace TeslaLogger
 
                 logDir = Path.Combine(AppContext.BaseDirectory, "logs", $"teslacan-{c.CarInDB}");
 
+                teslaCan = new TeslaCanHost($"teslacan-{c.CarInDB}");
                 thread = new Thread(Start);
                 thread.Name = "TeslaCAN_" + car.CarInDB;
                 thread.Start();
             }
+        }
+
+        private bool WaitConnected(string hostName)
+        {
+            if (run && teslaCan.IsConnected())
+            {
+                return true;
+            }
+
+            var connected = false;
+            while (run && !connected)
+            {
+                connected = teslaCan.WaitForInstance(30000);
+            }
+
+            return run && connected;
         }
 
         private void Start()
@@ -51,39 +70,21 @@ namespace TeslaLogger
                 return;
             }
 
-            car.Log("Start refactored TeslaCAN Thread!");
+            var hostName = url.Substring(7);
+            hostName = hostName.Substring(0, hostName.Length - 4);
+            car.Log($"Start refactored TeslaCAN Thread with host {hostName}");
 
             while (run)
             {
-                var connected = false;
-                while (run && !connected)
-                {
-                    try
-                    {
-                        using (var ping = new Ping())
-                        {
-                            var reply = ping.Send(url.Substring(7));
-                            connected = reply?.Status == IPStatus.Success;
-                        }
-                    }
-                    catch (PingException)
-                    {
-                    }
-                    catch (SocketException)
-                    {
-                    }
-                    catch (Exception ex)
-                    {
-                        car.Log("TeslaCAN: Ping " + ex.Message);
-                    }
+                var connected = WaitConnected(hostName);
 
-                    if (!connected)
-                        Thread.Sleep(2000);
-                }
+                if (run && connected)
+                    car.Log($"Connected to TeslaCAN host {hostName}");
 
                 if (run && connected) GetLogFiles().Wait();
 
                 while (run && connected)
+                {
                     try
                     {
                         var data = GetTeslaCanData().Result;
@@ -113,6 +114,10 @@ namespace TeslaLogger
 
                         connected = false;
                     }
+                }
+
+                if (run)
+                    car.Log($"Disconnected from TeslaCAN host {hostName}");
             }
         }
 
@@ -338,6 +343,8 @@ namespace TeslaLogger
         public void StopThread()
         {
             run = false;
+            teslaCan.StopWait();
+            thread.Join(1000);
         }
 
         public void KillThread()
@@ -350,6 +357,64 @@ namespace TeslaLogger
             catch (Exception ex)
             {
                 Debug.Write(ex.ToString());
+            }
+        }
+
+        private class TeslaCanHost
+        {
+            private readonly string hostName;
+            private ManualResetEvent ev ;
+            private bool stopped = false;
+
+            public TeslaCanHost(string hostName)
+            {
+                this.hostName = hostName;
+            }
+
+            public bool IsConnected()
+            {
+                try
+                {
+                    using (var ping = new Ping())
+                    {
+                        var reply = ping.Send(hostName);
+                        return reply?.Status == IPStatus.Success;
+                    }
+                }
+                catch (PingException)
+                {
+                }
+                catch (SocketException)
+                {
+                }
+
+                return false;
+            }
+
+            public bool WaitForInstance(int millisecondsTimeout)
+            {
+                ev = new ManualResetEvent(false);
+
+                using (var sd = new ServiceDiscovery())
+                {
+                    sd.ServiceInstanceDiscovered += (sender, args) =>
+                    {
+                        if (args.ServiceInstanceName.Labels.First() == hostName)
+                        {
+                            ev?.Set();
+                        }
+                    };
+
+                    var result = ev.WaitOne(millisecondsTimeout);
+                    ev = null;
+                    return result && !stopped;
+                }
+            }
+
+            public void StopWait()
+            {
+                stopped = true;
+                ev?.Set();
             }
         }
 
