@@ -55,30 +55,30 @@ jobs:
             ghcr.io/mgerczuk/teslalogger:${{ steps.vars.outputs.version }}
           platforms: linux/amd64,linux/arm64
 
-    - name: Build and push Webserver
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile-Webserver
-        push: true
-        tags: | 
-          ghcr.io/mgerczuk/teslalogger-webserver:latest
-          ghcr.io/mgerczuk/teslalogger-webserver:${{ steps.vars.outputs.version }}
-        platforms: linux/amd64,linux/arm64
+      - name: Build and push Webserver
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile-Webserver
+          push: true
+          tags: | 
+            ghcr.io/mgerczuk/teslalogger-webserver:latest
+            ghcr.io/mgerczuk/teslalogger-webserver:${{ steps.vars.outputs.version }}
+          platforms: linux/amd64,linux/arm64
     
-    - name: Build and push Grafana
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile-Grafana
-        push: true
-        tags: | 
-          ghcr.io/mgerczuk/teslalogger-grafana:latest
-          ghcr.io/mgerczuk/teslalogger-grafana:${{ steps.vars.outputs.version }}
-        platforms: linux/amd64,linux/arm64
+      - name: Build and push Grafana
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile-Grafana
+          push: true
+          tags: | 
+            ghcr.io/mgerczuk/teslalogger-grafana:latest
+            ghcr.io/mgerczuk/teslalogger-grafana:${{ steps.vars.outputs.version }}
+          platforms: linux/amd64,linux/arm64
 
-#    - name: Update Docker Version via HTTP GET
-#      run: |
-#        curl -v "https://teslalogger.de/set_latest_teslalogger_docker_version.php?apikey=${{ secrets.APIKEY_DOCKER_VERSION}}&version=${{ env.GIT_TAG }}"
+#      - name: Update Docker Version via HTTP GET
+#        run: |
+#          curl -v "https://teslalogger.de/set_latest_teslalogger_docker_version.php?apikey=${{ secrets.APIKEY_DOCKER_VERSION}}&version=${{ env.GIT_TAG }}"
 
 
