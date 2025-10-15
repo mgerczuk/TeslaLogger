@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    #if: github.ref == 'refs/heads/NET8-master2'
+#    if: github.ref == 'refs/heads/NET8-master2'
 
     runs-on: ubuntu-latest
 
