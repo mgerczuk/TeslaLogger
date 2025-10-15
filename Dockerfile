@@ -1,4 +1,4 @@
-FROM bassmaster187/teslalogger-base:1.0.0
+FROM ghcr.io/mgerczuk/teslalogger-base:1.0.0
 
 ARG TARGETARCH
 
