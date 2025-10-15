@@ -1,4 +1,5 @@
 ﻿using Exceptionless;
+using Google.Protobuf.WellKnownTypes;
 using MySql.Data.MySqlClient;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -9,6 +10,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using static TeslaLogger.NearbySuCService;
 
 namespace TeslaLogger
 {
@@ -168,7 +170,7 @@ namespace TeslaLogger
         {
             if (!Driving && !acCharging && !dcCharging)
             {
-                if (OnlineTimeout())
+                if (OnlineTimeout() || lastPackCurrent == 0)
                     return false;
             }
 
@@ -324,7 +326,7 @@ namespace TeslaLogger
                         car.CurrentJSON.current_is_preconditioning = preconditioning;
                         Log("Preconditioning: " + preconditioning);
                         car.CurrentJSON.CreateCurrentJSON();
-                        
+
                         Log("Insert Location (Preconditioning)");
                         InsertLastLocation(d, false);
                     }
@@ -367,7 +369,7 @@ namespace TeslaLogger
                             car.CurrentJSON.CreateCurrentJSON();
 
                             Log("Insert Location (InsideTemp)");
-                            InsertLastLocation(d, false); 
+                            InsertLastLocation(d, false);
                         }
                     }
                     else if (key == "TimeToFullCharge")
@@ -529,24 +531,32 @@ namespace TeslaLogger
                         if (double.TryParse(v, NumberStyles.Any, CultureInfo.InvariantCulture, out double pressure))
                         {
                             pressure = Math.Round(pressure, 2);
+                            
                             if (databaseCalls)
                             {
                                 switch (suffix)
                                 {
                                     case "Fl":
                                         car.DbHelper.InsertTPMS(1, pressure, d);
+                                        car.CurrentJSON.tpms_pressure_fl = pressure;
                                         break;
                                     case "Fr":
                                         car.DbHelper.InsertTPMS(2, pressure, d);
+                                        car.CurrentJSON.tpms_pressure_fr = pressure;
                                         break;
                                     case "Rl":
                                         car.DbHelper.InsertTPMS(3, pressure, d);
+                                        car.CurrentJSON.tpms_pressure_rl = pressure;
                                         break;
                                     case "Rr":
                                         car.DbHelper.InsertTPMS(4, pressure, d);
+                                        car.CurrentJSON.tpms_pressure_rr = pressure;
                                         break;
                                 }
                             }
+                            car.CurrentJSON.CreateCurrentJSON();
+                            car.teslaAPIState.AddValue("tpms_pressure_" + suffix.ToLower(), "double", value, Tools.ToUnixTime(d), "vehicle_state");
+                            
                         }
                     }
                     else if (key == "VehicleName")
@@ -593,7 +603,7 @@ namespace TeslaLogger
                         v = v.ToLower(CultureInfo.InvariantCulture);
                         if (bool.TryParse(v, out bool serviceMode))
                         {
-                            //TODO : Implement ServiceMode
+                            car.teslaAPIState.AddValue("in_service", "int", serviceMode ? 1 : 0, Tools.ToUnixTime(d), "vehicle_state");
                         }
                     }
                     else if (key == "CarType")
@@ -642,6 +652,58 @@ namespace TeslaLogger
 
                         }
                     }
+                    else if (key == "SoftwareUpdateInstallationPercentComplete")
+                    {
+                        string v1 = value["stringValue"];
+                        if (v1 == null)
+                        {
+                            v1 = value["intValue"];
+                            if (v1 == null)
+                            {
+                                continue;
+                            }
+                        }
+                        if (!int.TryParse(v1, NumberStyles.Any, CultureInfo.InvariantCulture, out int swUpdateInstalling))
+                        {
+                            continue;
+                        }
+
+                        if (car.CurrentJSON.software_update_version != "")
+                        {
+
+                            if (swUpdateInstalling == 1)
+                            {
+                                car.teslaAPIState.AddValue("software_update.status", "string", "Available", Tools.ToUnixTime(d), "vehicle_state");
+                            }
+                            if (swUpdateInstalling == 3)
+                            {
+                                car.teslaAPIState.AddValue("software_update.status", "string", "Downloading", Tools.ToUnixTime(d), "vehicle_state");
+                            }
+                            if (swUpdateInstalling > 10)
+                            {
+                                car.teslaAPIState.AddValue("software_update.status", "string", "Installing", Tools.ToUnixTime(d), "vehicle_state");
+                            }
+                        }
+                        else
+                        {
+                            car.teslaAPIState.AddValue("software_update.status", "string", "", Tools.ToUnixTime(d), "vehicle_state");
+                        }
+                            car.CurrentJSON.CreateCurrentJSON();
+
+                    }
+                    else if (key == "SoftwareUpdateVersion")
+                    {
+                        string version = value["stringValue"];
+                        if (!String.IsNullOrEmpty(version) && version != " " && version.Length > 4)
+                        {
+                            car.teslaAPIState.AddValue("software_update.version", "string", version, Tools.ToUnixTime(d), "vehicle_state");
+                        }
+                        else
+                        {
+                            car.teslaAPIState.AddValue("software_update.version", "string", "", Tools.ToUnixTime(d), "vehicle_state");
+                        }
+                        car.CurrentJSON.CreateCurrentJSON();
+                    }
                     else if (key == "DoorState")
                     {
                         string DoorState = value["stringValue"];
@@ -689,13 +751,13 @@ namespace TeslaLogger
                                 { "TrunkRear", "rt" }
                             };
 
-                            JToken doors = obj["doorValue"]; 
+                            JToken doors = obj["doorValue"];
 
                             if (doors is JObject doorValues)
                             {
                                 foreach (var dm in doorMapping) // close all doors
                                     car.teslaAPIState.AddValue(dm.Value, "int", 0, Tools.ToUnixTime(d), "vehicle_state");
-                               
+
                                 foreach (var door in doorValues)
                                 {
                                     string originalKey = door.Key;
@@ -1082,6 +1144,8 @@ namespace TeslaLogger
                     cmd.ExecuteNonQuery();
                     
                 }
+                long ts = DateTimeToUTC_UnixTimestamp(d);
+                _ = car.webhelper.SendDataToAbetterrouteplannerAsync(ts, car.CurrentJSON.current_battery_level, 0, true, lastChargingPower * -1.0, car.CurrentJSON.GetLatitude(), car.CurrentJSON.GetLongitude());
             }
             Log($"Insert Charging TR: {lastIdealBatteryRange}km");
         }
@@ -1236,7 +1300,12 @@ namespace TeslaLogger
                     if (speed == null)
                         speed = 0;
 
-                    lastposid = car.DbHelper.InsertPos(ts.ToString(), lastLatitude, lastLongitude, (int)speed.Value, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, lastSoc, lastOutsideTemp, "");
+                    if (IsCharging)
+                        _ = car.webhelper.SendDataToAbetterrouteplannerAsync(ts, car.CurrentJSON.current_battery_level, 0, true, lastChargingPower * -1.0, (double)latitude, (double)longitude);
+                    else
+                        _ = car.webhelper.SendDataToAbetterrouteplannerAsync(ts, lastSoc, (double)speed, false, 0.0, (double)latitude, (double)longitude);
+
+                    lastposid = car.DbHelper.InsertPos(ts.ToString(), lastLatitude, lastLongitude, (int)speed.Value, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, lastSoc, lastInsideTemp, lastOutsideTemp, "");
 
                     if (loggingPosId)
                     {
@@ -1632,6 +1701,11 @@ namespace TeslaLogger
             InsertFirstCharging(date);
             InsertLastLocation(date);
             dcCharging = true;
+            if (!String.IsNullOrEmpty(car.SuCBingoUser) && !String.IsNullOrEmpty(car.SuCBingoApiKey))
+            {
+                car.Log("SuperchargeBingo: Checkin!");
+                car.webhelper.SuperchargeBingoCheckin(lastLatitude, lastLongitude);
+            }
         }
 
         private void StartACCharging(DateTime date)
@@ -1931,7 +2005,7 @@ namespace TeslaLogger
             long ts = DateTimeToUTC_UnixTimestamp(date);
 
             if (databaseCalls)
-                lastposid = car.DbHelper.InsertPos(ts.ToString(), lastLatitude, lastLongitude, speed, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, lastSoc, lastOutsideTemp, "");
+                lastposid = car.DbHelper.InsertPos(ts.ToString(), lastLatitude, lastLongitude, speed, null, lastOdometer, lastIdealBatteryRange, lastRatedRange, lastSoc, lastInsideTemp, lastOutsideTemp, "");
 
             Log($"InsertFirstPos {date} ID: {lastposid}");
         }

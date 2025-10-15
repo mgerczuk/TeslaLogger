@@ -51,7 +51,7 @@ namespace UnitTestsTeslalogger
         }
 
         [TestMethod]
-        public void OpenWB2()
+        public void OpenWB2_single()
         {
             var v = new ElectricityMeterOpenWB2("", "");
 
@@ -59,7 +59,7 @@ namespace UnitTestsTeslalogger
             v.mockup_charge_state = System.IO.File.ReadAllText(@"..\..\testdata\openwb2_charge_state.txt");
             v.mockup_charge_point = System.IO.File.ReadAllText(@"..\..\testdata\openwb2_cp.txt");
             v.mockup_grid = System.IO.File.ReadAllText(@"..\..\testdata\openwb2_grid.txt");
-            v.mockup_hierarchy = System.IO.File.ReadAllText(@"..\..\testdata\openwb2_hierarchy.txt");
+            v.mockup_hierarchy = System.IO.File.ReadAllText(@"..\..\testdata\openwb2_hierarchy_single_wb.txt");
 
             double? kwh = v.GetVehicleMeterReading_kWh();
             var charging = v.IsCharging();
@@ -68,25 +68,52 @@ namespace UnitTestsTeslalogger
             string ret = v.ToString();
             Console.WriteLine(ret);
             Assert.AreEqual(441.759, kwh);
-            Assert.AreEqual(false, charging);
+            Assert.AreEqual(true, charging);
             Assert.AreEqual(123456.789, utility_meter_kwh);
             Assert.AreEqual("2.1.7-Beta.2", version);
         }
 
-
         [TestMethod]
-        public void GoEMeter()
+        public void OpenWB2_multiple()
         {
-            string url = Settings.Default.ElectricityMeterGoEURL;
+            var v = new ElectricityMeterOpenWB2("", "");
 
-            if (string.IsNullOrEmpty(url))
-                Assert.Inconclusive("No Settings for Go-E Charger");
+            v.mockup_version = System.IO.File.ReadAllText(@"..\..\testdata\openwb2_version.txt");
+            v.mockup_charge_state = System.IO.File.ReadAllText(@"..\..\testdata\openwb2_charge_state.txt");
+            v.mockup_charge_point = System.IO.File.ReadAllText(@"..\..\testdata\openwb2_cp.txt");
+            v.mockup_grid = System.IO.File.ReadAllText(@"..\..\testdata\openwb2_grid.txt");
+            v.mockup_hierarchy = System.IO.File.ReadAllText(@"..\..\testdata\openwb2_hierarchy_multiple_wb.txt");
 
-            var v = new ElectricityMeterGoE(url, "");
+            double? kwh = v.GetVehicleMeterReading_kWh();
+            var charging = v.IsCharging();
+            var utility_meter_kwh = v.GetUtilityMeterReading_kWh();
+            var version = v.GetVersion();
             string ret = v.ToString();
             Console.WriteLine(ret);
+            Assert.AreEqual(441.759, kwh);
+            Assert.AreEqual(true, charging);
+            Assert.AreEqual(123456.789, utility_meter_kwh);
+            Assert.AreEqual("2.1.7-Beta.2", version);
         }
 
+        [TestMethod]
+        public void GoECharger()
+        {
+            var v = new ElectricityMeterGoE("", "");
+            v.status = System.IO.File.ReadAllText(@"..\..\testdata\goe.txt");
+
+            double? kwh = v.GetVehicleMeterReading_kWh();
+            var charging = v.IsCharging();
+            var utility_meter_kwh = v.GetUtilityMeterReading_kWh();
+            var version = v.GetVersion();
+            string ret = v.ToString();
+            Console.WriteLine(ret);
+
+            Assert.AreEqual(673329.3, kwh);
+            Assert.AreEqual(false, charging);
+            Assert.AreEqual(81.8, utility_meter_kwh);
+            Assert.AreEqual("59.4", version);
+        }
 
         [TestMethod]
         public void CFos()
@@ -139,10 +166,10 @@ namespace UnitTestsTeslalogger
             string ret = v.ToString();
             Console.WriteLine(ret);
 
-            Assert.AreEqual(544.41, kwh);
-            Assert.AreEqual(false, charging);
-            Assert.AreEqual(5755.34, utility_meter_kwh);
-            Assert.AreEqual("0.133.0", version);
+            Assert.AreEqual(2043.66, kwh);
+            Assert.AreEqual(true, charging);
+            Assert.AreEqual(1234.56, utility_meter_kwh);
+            Assert.AreEqual("0.207.5", version);
         }
 
         [TestMethod]
@@ -158,10 +185,10 @@ namespace UnitTestsTeslalogger
             string ret = v.ToString();
             Console.WriteLine(ret);
 
-            Assert.AreEqual(544.41, kwh);
-            Assert.AreEqual(false, charging);
-            Assert.AreEqual(5755.34, utility_meter_kwh);
-            Assert.AreEqual("0.133.0", version);
+            Assert.AreEqual(2043.66, kwh);
+            Assert.AreEqual(true, charging);
+            Assert.AreEqual(1234.56, utility_meter_kwh);
+            Assert.AreEqual("0.207.5", version);
         }
 
         [TestMethod]
@@ -180,7 +207,7 @@ namespace UnitTestsTeslalogger
             Assert.AreEqual(6716.148, kwh);
             Assert.AreEqual(false, charging);
             Assert.AreEqual(null, utility_meter_kwh);
-            Assert.AreEqual("0.133.0", version);
+            Assert.AreEqual("0.207.5", version);
         }
 
         [TestMethod]

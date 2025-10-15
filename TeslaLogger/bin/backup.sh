@@ -22,7 +22,13 @@ else
     mysqldump -uroot -pteslalogger  --single-transaction --routines --triggers teslalogger can --where "datum >= '2024-01-01'" | gzip -9 > $SQLDUMP-can.gz
 fi
 
-gzip -c /etc/teslalogger/geofence-private.csv > $GEOFENCE
+if test -f "/etc/teslalogger/data/geofence-private.csv"; then 
+	gzip -c /etc/teslalogger/data/geofence-private.csv > $GEOFENCE
+elif test -f "/etc/teslalogger/geofence-private.csv"; then
+	gzip -c /etc/teslalogger/geofence-private.csv > $GEOFENCE
+else
+	echo "No geofence-private.csv file found"
+fi
 
 cd /etc/teslalogger/Exception 
 if ls *.txt >/dev/null 2>&1; then

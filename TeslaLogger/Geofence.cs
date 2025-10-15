@@ -147,10 +147,11 @@ namespace TeslaLogger
             
             if (fsw == null)
             {
-                var path = FileManager.GetExecutingPath();
-                path = path.Replace("Debug/net8.0/", "");
+                var path = FileManager.GetFilePath(TLFilename.GeofencePrivateFilename);
+                FileInfo fpath = new FileInfo(path);
+                var dir = fpath.Directory;
 
-                fsw = new FileSystemWatcher(path, "*.csv");
+                fsw = new FileSystemWatcher(dir.FullName, "*.csv");
                 FSWCounter++;
                 if (FSWCounter > 1) 
                 {
@@ -541,7 +542,7 @@ namespace TeslaLogger
                                 continue;
                             }
 
-                            if (max_power > 150 && (!p.name.Contains("Supercharger-V3") || !p.name.Contains("Supercharger-V4")))
+                            if (max_power > 150 && !p.name.Contains("Supercharger-V3") && !p.name.Contains("Supercharger-V4"))
                             {
                                 continue;
                             }

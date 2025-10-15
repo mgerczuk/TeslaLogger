@@ -19,6 +19,7 @@ using System.Web;
 using System.Net.Http;
 using HttpMultipartParser;
 using System.Reflection;
+using System.Xml.Linq;
 
 namespace TeslaLogger
 {
@@ -205,6 +206,13 @@ namespace TeslaLogger
                         case "backup":
                             Backup(response);
                             return;
+                        case "logger":
+                            logger(request, response);
+                            return;
+                        case "restartgrafana":
+                            Tools.RestartGrafanaServer().Wait();
+                            WriteString(response, "ok");
+                            return;
                     }
                 }
                 else if (url.Segments.Length == 3)
@@ -236,6 +244,12 @@ namespace TeslaLogger
                             return;
 
                     }
+                }
+                
+                if (url.Segments.Length > 2 && url.Segments[1] == "lucid/")
+                {
+                    TeslaLoggerNET8.Lucid.LucidWebServer.HandleRequest(url, request, response);
+                    return;
                 }
 
 
@@ -533,6 +547,14 @@ namespace TeslaLogger
             }
         }
 
+        private void logger(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            string data = GetDataFromRequestInputStream(request);
+            Logfile.Log(data);
+            System.Diagnostics.Debug.WriteLine("Logger: " + data);
+            WriteString(response, "ok");
+        }
+
         private void Admin_Writefile(HttpListenerRequest request, HttpListenerResponse response)
         {
             var u = request.Url;
@@ -561,7 +583,6 @@ namespace TeslaLogger
             else if (filename == "geofence-private.csv")
             {
                 p = FileManager.GetFilePath(TLFilename.GeofencePrivateFilename);
-                p = p.Replace("Debug/net8.0/", "");
             }
 
             System.Diagnostics.Debug.WriteLine("Webserver writefile: " + p);
@@ -633,6 +654,8 @@ namespace TeslaLogger
 
             if (filename == "settings.json")
                 p = FileManager.GetFilePath(TLFilename.SettingsFilename);
+            else if (filename == "geofence-private.csv")
+                p = FileManager.GetFilePath(TLFilename.GeofencePrivateFilename);
 
             System.Diagnostics.Debug.WriteLine("Webserver getfile: " + p);
 
@@ -2337,8 +2360,7 @@ DROP TABLE chargingstate_bak";
         {
             try
             {
-                string logfilePath = Path.Combine(FileManager.GetExecutingPath(), "nohup.out");
-                logfilePath = logfilePath.Replace("/Debug/net8.0", "");
+                string logfilePath = Logfile.Logfilepath;
 
                 if (Directory.Exists("zip"))
                     Directory.Delete("zip", true);
@@ -3349,7 +3371,7 @@ FROM
             WriteString(response, responseString, "application/json");
         }
 
-        private static void Admin_GetAllCars(HttpListenerRequest request, HttpListenerResponse response)
+        private static void Admin_GetAllCars(HttpListenerRequest _, HttpListenerResponse response)
         {
             string responseString = "";
 
@@ -3377,8 +3399,14 @@ FROM
                                         dr["SupportedByFleetTelemetry"] = c.SupportedByFleetTelemetry() ? 1 : 0;
                                         dr["vehicle_location"] = c.vehicle_location;
                                     }
+                                    else if (dr["tesla_name"] != null && dr["tesla_name"].ToString().StartsWith("KOMOOT:", StringComparison.Ordinal))
+                                    {
+                                        dr["inactive"] = 0;
+                                    }
                                     else
+                                    {
                                         dr["inactive"] = 1;
+                                    }
                                 }
                                 catch (Exception ex)
                                 {

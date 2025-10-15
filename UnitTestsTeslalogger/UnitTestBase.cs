@@ -26,11 +26,11 @@ namespace UnitTestsTeslalogger
             Tools.SetThreadEnUS();
             long unixTimestamp = (long)(DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1))).TotalSeconds;
             unixTimestamp *= 1000;
-            c.DbHelper.InsertPos(unixTimestamp.ToString(), 48.456691, 10.030241, 0, 0, 1, 0, 0, 0, 0, "0");
+            c.DbHelper.InsertPos(unixTimestamp.ToString(), 48.456691, 10.030241, 0, 0, 1, 0, 0, 0, 0, 0, "0");
             int startid = c.DbHelper.GetMaxPosid(true);
             c.DbHelper.StartDriveState(DateTime.Now);
 
-            c.DbHelper.InsertPos(unixTimestamp.ToString(), 35.677121, 139.751033, 0, 0, 2, 0, 0, 0, 0, "0");
+            c.DbHelper.InsertPos(unixTimestamp.ToString(), 35.677121, 139.751033, 0, 0, 2, 0, 0, 0, 0, 0, "0");
             int endid = c.DbHelper.GetMaxPosid(true);
             c.DbHelper.CloseDriveState(DateTime.Now);
         }
@@ -1033,6 +1033,63 @@ namespace UnitTestsTeslalogger
         }
 
         [TestMethod]
+        public void Car_Lucid_Air_pure()
+        {
+            Car c = new Car(0, "", "", 0, "", DateTime.Now, "", "", "", "", "", "", "", null, false);
+            WebHelper wh = c.webhelper;
+
+            MemoryCache.Default.Remove("GetAvgMaxRage_0");
+            MemoryCache.Default.Add("GetAvgMaxRage_0", 650, DateTime.Now.AddMinutes(1));
+            wh.car.Vin = "50EA1PFA4PAXXXXXX";
+            wh.car.CarType = "LUCID";
+            wh.car.CarSpecialType = "";
+            wh.car.DBWhTR = 134;
+            wh.car.TrimBadging = "PURE";
+            wh.UpdateEfficiency();
+
+            Assert.AreEqual("Lucid Air PURE", wh.car.ModelName);
+            Assert.AreEqual(0.134, wh.car.WhTR);
+        }
+
+        [TestMethod]
+        public void Car_Lucid_Air_pure_2025()
+        {
+            Car c = new Car(0, "", "", 0, "", DateTime.Now, "", "", "", "", "", "", "", null, false);
+            WebHelper wh = c.webhelper;
+
+            MemoryCache.Default.Remove("GetAvgMaxRage_0");
+            MemoryCache.Default.Add("GetAvgMaxRage_0", 684, DateTime.Now.AddMinutes(1));
+            wh.car.Vin = "50EA1PGB3SAXXXXXX";
+            wh.car.CarType = "LUCID";
+            wh.car.CarSpecialType = "";
+            wh.car.DBWhTR = 119;
+            wh.car.TrimBadging = "PURE";
+            wh.UpdateEfficiency();
+
+            Assert.AreEqual("Lucid Air PURE 2025", wh.car.ModelName);
+            Assert.AreEqual(0.119, wh.car.WhTR);
+        }
+
+        [TestMethod]
+        public void Car_Lucid_Air_TOURING()
+        {
+            Car c = new Car(0, "", "", 0, "", DateTime.Now, "", "", "", "", "", "", "", null, false);
+            WebHelper wh = c.webhelper;
+
+            MemoryCache.Default.Remove("GetAvgMaxRage_0");
+            MemoryCache.Default.Add("GetAvgMaxRage_0", 684, DateTime.Now.AddMinutes(1));
+            wh.car.Vin = "50EA1TEA2PAXXXXXX";
+            wh.car.CarType = "LUCID";
+            wh.car.CarSpecialType = "";
+            wh.car.DBWhTR = 134;
+            wh.car.TrimBadging = "TOURING";
+            wh.UpdateEfficiency();
+
+            Assert.AreEqual("Lucid Air TOURING", wh.car.ModelName);
+            Assert.AreEqual(0.134, wh.car.WhTR);
+        }
+
+        [TestMethod]
         public void VersionCheck()
         {
             Assert.IsFalse(UpdateTeslalogger.UpdateNeeded("1.0.0.0", "1.0.0.0", Tools.UpdateType.all));
@@ -1113,19 +1170,19 @@ namespace UnitTestsTeslalogger
             var geofence = Geofence.GetInstance();
 
             var a = geofence.GetPOI(48.456708, 10.029897);
-            Assert.AreEqual(a.name, "⚡⚡ Supercharger DE-Ulm");
+            Assert.AreEqual(a.name, "⚡⚡⚡ Supercharger-V3 DE-Ulm");
 
             a = geofence.GetPOI(48.456616, 10.030200);
-            Assert.AreEqual(a.name, "⚡⚡ Supercharger DE-Ulm");
+            Assert.AreEqual(a.name, "⚡⚡⚡ Supercharger-V3 DE-Ulm");
 
             a = geofence.GetPOI(48.456790, 10.030014);
-            Assert.AreEqual(a.name, "⚡⚡ Supercharger DE-Ulm");
+            Assert.AreEqual(a.name, "⚡⚡⚡ Supercharger-V3 DE-Ulm");
 
             a = geofence.GetPOI(48.456691, 10.030241);
-            Assert.AreEqual(a.name, "⚡⚡ Supercharger DE-Ulm");
+            Assert.AreEqual(a.name, "⚡⚡⚡ Supercharger-V3 DE-Ulm");
 
             a = geofence.GetPOI(48.456888, 10.029635);
-            Assert.AreEqual(a.name, "EnBW DE-Ulm Seligweiler");
+            Assert.AreEqual(a.name, "EnBW DE-Rasthof Seligweiler");
         }
 
         [TestMethod]

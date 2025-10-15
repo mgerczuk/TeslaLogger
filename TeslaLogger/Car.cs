@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Exceptionless;
 using MySql.Data.MySqlClient;
+using TeslaLoggerNET8.Lucid;
 
 namespace TeslaLogger
 {
@@ -72,7 +73,7 @@ namespace TeslaLogger
         private HFLMode highFrequencyLoggingMode = HFLMode.Ticks;
         internal HFLMode GetHighFrequencyLoggingMode() { return highFrequencyLoggingMode; }
 
-        private Thread thread;
+        protected Thread thread;
         private bool run = true;
 
         internal string TeslaName;
@@ -118,6 +119,8 @@ namespace TeslaLogger
         private bool useTaskerToken = true;
         internal string wheel_type = "";
         internal bool oldAPIchinaCar = false;
+
+        protected int SleepInStateSleep = 10000;
 
         public double WhTR
         {
@@ -255,6 +258,7 @@ namespace TeslaLogger
                     this._currentState = currentState;
                     this.wheel_type = wheel_type;
                     this.FleetAPI = fleetAPI;
+                    SleepInStateSleep = ApplicationSettings.Default.SleepInStateSleep;
 
                     // Despite Tesla's docs (https://developer.tesla.com/docs/fleet-api/authentication/third-party-tokens#refresh-tokens) mention
                     // a refresh token lifetime of 24h, we observed that refresh tokens can be used up to 3 weeks to get new access tokens
@@ -266,8 +270,17 @@ namespace TeslaLogger
                     {
                         Allcars.Add(this);
                     }
-                    DbHelper = new DBHelper(this);
-                    webhelper = new WebHelper(this);
+
+                    if (this is TeslaLoggerNET8.Lucid.LucidCar)
+                    {
+                        dbHelper = new LucidDBHelper((LucidCar)this);
+                        webhelper = new LucidWebHelper((LucidCar)this);
+                    }
+                    else
+                    {
+                        DbHelper = new DBHelper(this);
+                        webhelper = new WebHelper(this);
+                    }
 
                     if (CarInDB > 0 && !manualTokenRefreshNeeded)
                     {
@@ -301,7 +314,7 @@ namespace TeslaLogger
             return -1; // -1 means error as CarID in database can only be a positive integer
         }
 
-        private void Loop()
+        protected void Loop()
         {
             try
             {
@@ -446,7 +459,7 @@ namespace TeslaLogger
             }
         }
 
-        internal bool SupportedByFleetTelemetry()
+        internal virtual bool SupportedByFleetTelemetry()
         {
             string vindecoder = Tools.VINDecoder(vin, out int y, out string carType, out _, out _, out _, out _, out _).ToString();
             if (y >= 2021) // all cars from 2021 are supported
@@ -767,7 +780,7 @@ namespace TeslaLogger
             }
             else
             {
-                int sleep = ApplicationSettings.Default.SleepInStateSleep / 250;
+                int sleep = SleepInStateSleep / 250;
                 for (int x = 0; x < sleep; x++)
                 {
                     Thread.Sleep(250);

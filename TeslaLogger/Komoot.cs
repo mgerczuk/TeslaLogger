@@ -40,7 +40,7 @@ namespace TeslaLogger
         {
             internal int carID;
             internal long tourID;
-            readonly internal DateTime start;
+            readonly internal DateTime startTS;
             internal double distance_m = double.NaN;
             internal double distance_calculated;
             readonly string type;
@@ -48,9 +48,10 @@ namespace TeslaLogger
             internal Position firstPosition;
             internal Position lastPosition;
             internal string json = "{}";
-            internal DateTime end;
+            internal DateTime endTS;
 
             internal Dictionary<int, Position> positions = new Dictionary<int, Position>();
+            internal double odometer;
 
             public KomootTour(int carID, long tourid, string type, string sport, DateTime start)
             {
@@ -58,8 +59,8 @@ namespace TeslaLogger
                 tourID = tourid;
                 this.type = type;
                 this.sport = sport;
-                this.start = start;
-                end = start;
+                this.startTS = start;
+                endTS = start;
             }
 
             public override string ToString()
@@ -68,23 +69,24 @@ namespace TeslaLogger
                 sb.AppendLine($"TourID: {tourID}");
                 sb.AppendLine($"Type: {type}");
                 sb.AppendLine($"Sport: {sport}");
-                sb.AppendLine($"Start: {start}");
+                sb.AppendLine($"Start: {startTS}");
                 sb.AppendLine($"Positions: {positions.Count}");
                 foreach (int key in positions.Keys.OrderBy(k => k))
                 {
-                    sb.AppendLine($" {key} - ({positions[key].lat},{positions[key].lng}) t:{positions[key].delta_t} s:{positions[key].speed} d:{positions[key].dist_km}");
+                    sb.AppendLine($" {key} - ({positions[key].lat},{positions[key].lng}) t:{positions[key].delta_t} s:{positions[key].speed} dist:{positions[key].dist_km} head:{positions[key].heading}");
                 }
                 return sb.ToString();
             }
 
             internal class Position
             {
-                internal double lat;
-                internal double lng;
-                internal double alt;
+                internal double lat; // defaults to 0.0
+                internal double lng; // defaults to 0.0
+                internal double alt; // defaults to 0.0
                 internal long delta_t;
-                internal double speed;
-                internal double dist_km;
+                internal double speed; // defaults to 0.0
+                internal double dist_km; // defaults to 0.0
+                internal double heading; // defaults to 0.0
 
                 public Position(double lat, double lng, double alt, int delta_t, double speed)
                 {
@@ -95,6 +97,11 @@ namespace TeslaLogger
                     this.speed = speed;
                 }
 
+                /// Calculates the distance in kilometers between the current position and another position
+                /// using the Haversine formula.
+                /// </summary>
+                /// <param name="other">The other position to calculate the distance to.</param>
+                /// <returns>The distance in kilometers between the two positions.</returns>
                 internal double CalculateDistance(Position other)
                 {
                     // calculate distance and speed with previous pos
@@ -111,12 +118,23 @@ namespace TeslaLogger
                     return dist_km;
                 }
 
-
+                /// <summary>
+                /// Calculates the speed between the current position and another position.
+                /// </summary>
+                /// <param name="other">The other position to compare with the current position.</param>
+                /// <returns>
+                /// The calculated speed in kilometers per hour (km/h), based on the distance 
+                /// between the two positions and the time difference.
+                /// </returns>
+                /// <remarks>
+                /// The calculation uses the Haversine formula to determine the distance 
+                /// between two geographical points and assumes the time difference is in milliseconds.
+                /// </remarks>
                 internal double CalculateSpeed(Position other)
                 {
                     // calculate distance and speed with previous pos
                     // inspired by https://github.com/mapado/haversine/blob/main/haversine/haversine.py
-                    double speed = this.dist_km / Math.Abs(this.delta_t - other.delta_t) * 3600000; // km/ms -> km/h
+                    double speed = CalculateDistance(other) / Math.Abs(this.delta_t - other.delta_t) * 3600000; // km/ms -> km/h
                     return speed;
                 }
             }
@@ -147,9 +165,9 @@ namespace TeslaLogger
                 {
                     Tools.DebugLog($"addPosition(lat:{lat}, lng:{lng}, alt:{alt}, delta_t:{delta_t}, speed:{speed} not added");
                 }
-                if (start.AddMilliseconds(delta_t) > end)
+                if (startTS.AddMilliseconds(delta_t) > endTS)
                 {
-                    end = start.AddMilliseconds(delta_t);
+                    endTS = startTS.AddMilliseconds(delta_t);
                 }
             }
 
@@ -161,7 +179,9 @@ namespace TeslaLogger
                     httpClient.DefaultRequestHeaders.Add("Authorization", "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{kli.user_id}:{kli.token}")));
                     using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, new Uri($"https://api.komoot.de/v007/tours/{tourID}?_embedded=coordinates,way_types,surfaces,directions,participants,timeline&directions=v2&fields=timeline&format=coordinate_array&timeline_highlights_fields=tips,recommenders")))
                     {
+                        DateTime start = DateTime.UtcNow;
                         HttpResponseMessage result = httpClient.SendAsync(request).Result;
+                        DBHelper.AddMothershipDataToDB("Komoot: DownloadTour", start, (int)result.StatusCode, kli.carID);
                         if (result.IsSuccessStatusCode)
                         {
                             string resultContent = result.Content.ReadAsStringAsync().Result;
@@ -176,6 +196,15 @@ namespace TeslaLogger
                 }
             }
 
+            /// <summary>
+            /// Adjusts the distances of positions in the tour to correct any discrepancies
+            /// between the computed total distance and the actual measured distance.
+            /// </summary>
+            /// <remarks>
+            /// This method calculates a correction factor based on the ratio of the actual
+            /// measured distance to the computed total distance. It then applies this correction
+            /// factor to each position's distance to ensure the total matches the measured value.
+            /// </remarks>
             internal void CorrectPositionDistances()
             {
                 double distance_computed_km = 0.0;
@@ -190,17 +219,140 @@ namespace TeslaLogger
                     positions[posID].dist_km *= correction_factor;
                 }
             }
+
+            internal void ComputeHeading()
+            {
+                if (this.positions.Count == 2)
+                {
+                    // ignore just one position, compute special case two positions
+                    this.firstPosition.heading = GetBearing(this.firstPosition.lat, this.firstPosition.lng, this.lastPosition.lat, this.lastPosition.lng);
+                    this.lastPosition.heading = GetBearing(this.firstPosition.lat, this.firstPosition.lng, this.lastPosition.lat, this.lastPosition.lng);
+                }
+                else if (this.positions.Count > 2)
+                {
+                    // 3 or more positions
+                    Dictionary<int, int> positionKeys = new Dictionary<int, int>();
+                    int index = 0;
+                    foreach (int posID in positions.Keys.OrderBy(k => k))
+                    {
+                        positionKeys.Add(index, posID);
+                        index += 1;
+                    }
+                    // compute first
+                    positions[positionKeys[0]].heading = GetBearing(positions[positionKeys[0]].lat, positions[positionKeys[0]].lng, positions[positionKeys[1]].lat, positions[positionKeys[1]].lng);
+                    // compute last
+                    positions[positionKeys[positionKeys.Count - 1]].heading = GetBearing(positions[positionKeys[positionKeys.Count - 2]].lat, positions[positionKeys[positionKeys.Count - 2]].lng, positions[positionKeys[positionKeys.Count - 1]].lat, positions[positionKeys[positionKeys.Count - 1]].lng);
+                    // compute everything in between 2..(n-1)
+                    for (index = 1; index < positionKeys.Count - 1; index++)
+                    {
+                        Position prevP = positions[positionKeys[index - 1]];
+                        Position currP = positions[positionKeys[index]];
+                        Position nextP = positions[positionKeys[index + 1]];
+                        double bearing1 = GetBearing(prevP.lat, prevP.lng, currP.lat, currP.lng);
+                        double bearing2 = GetBearing(currP.lat, currP.lng, nextP.lat, nextP.lng);
+                        currP.heading = (bearing1 + bearing2) / 2;
+                        //Tools.DebugLog($"({prevP.lat},{prevP.lng})->({currP.lat},{currP.lng}) heading:{prevP.heading}{currP.heading} diff:{Math.Abs(prevP.heading - currP.heading)}");
+                    }
+                }
+            }
+
+            // generated by ChatGPT
+            private static double GetBearing(double lat1, double lon1, double lat2, double lon2)
+            {
+                double radLat1 = ToRadians(lat1);
+                double radLat2 = ToRadians(lat2);
+                double deltaLon = ToRadians(lon2 - lon1);
+
+                double y = Math.Sin(deltaLon) * Math.Cos(radLat2);
+                double x = Math.Cos(radLat1) * Math.Sin(radLat2) - Math.Sin(radLat1) * Math.Cos(radLat2) * Math.Cos(deltaLon);
+                double theta = Math.Atan2(y, x);
+
+                double bearing = (ToDegrees(theta) + 360) % 360; // Normalisierung auf 0–360°
+                return bearing;
+            }
+
+            private static double ToRadians(double degrees) => degrees * Math.PI / 180.0;
+            private static double ToDegrees(double radians) => radians * 180.0 / Math.PI;
+
+            internal void CheckSpeed(KomootLoginInfo kli)
+            {
+                if (this.positions.Count > 3)
+                {
+                    Tools.DebugLog("CheckSpeed() speed4");
+                    // 4 or more positions
+                    Dictionary<int, int> positionKeys = new Dictionary<int, int>();
+                    int index = 0;
+                    foreach (int posID in positions.Keys.OrderBy(k => k))
+                    {
+                        positionKeys.Add(index, posID);
+                        index += 1;
+                    }
+                    for (index = 1; index < positionKeys.Count - 3; index++)
+                    {
+                        Position prevP = positions[positionKeys[index - 1]];
+                        Position currP1 = positions[positionKeys[index]];
+                        Position currP2 = positions[positionKeys[index + 1]];
+                        Position nextP = positions[positionKeys[index + 2]];
+                        double acceleration1 = ((currP1.speed - prevP.speed) / 3.6) / ((currP1.delta_t - prevP.delta_t) / 1000);
+                        double acceleration2 = ((currP2.speed - currP1.speed) / 3.6) / ((currP2.delta_t - currP1.delta_t) / 1000);
+                        double acceleration3 = ((nextP.speed - currP2.speed) / 3.6) / ((nextP.delta_t - currP2.delta_t) / 1000);
+                        //Tools.DebugLog($"speed:{prevP.speed}->{currP1.speed}->{currP2.speed}->{nextP.speed} acceleration1:{acceleration1}m/s acceleration2:{acceleration2}m/s acceleration3:{acceleration3}m/s ");
+                        if (acceleration1 > 1.1 && Math.Abs(acceleration2) < 0.5 && acceleration3 < -1.1)
+                        {
+                            // drop speed at currP1 and CurrP2 and replace with weighted 3:2 avg(prevP,nextP)
+                            Logfile.Log($"#{kli.carID} Komoot: speed4: {Math.Round(prevP.speed, 2)}->{Math.Round(currP1.speed, 2)}->{Math.Round(currP2.speed, 2)}->{Math.Round(nextP.speed, 2)} acc:{Math.Round(acceleration1, 2)}-{Math.Round(acceleration2, 2)} correct speed:{Math.Round(currP1.speed, 2)}->{Math.Round((prevP.speed * 3 + nextP.speed * 2) / 5.0, 2)},{Math.Round(currP2.speed, 2)}->{Math.Round((prevP.speed * 2 + nextP.speed * 3) / 5.0, 2)}");
+                            currP1.speed = (prevP.speed * 3 + nextP.speed * 2) / 5.0;
+                            currP2.speed = (prevP.speed * 2 + nextP.speed * 3) / 5.0;
+                        }
+                        if (acceleration1 > 0.75 && Math.Abs(acceleration2) < 0.25 && acceleration3 < -0.75)
+                        {
+                            Tools.DebugLog($"speed4: candidate? {prevP.speed}->{currP1.speed}->{currP2.speed}->{nextP.speed} acceleration1:{acceleration1}m/s acceleration2:{acceleration2}m/s acceleration3:{acceleration3}m/s ");
+                        }
+                    }
+                }
+                if (this.positions.Count > 2)
+                {
+                    Tools.DebugLog("CheckSpeed() speed3");
+                    // 3 or more positions
+                    Dictionary<int, int> positionKeys = new Dictionary<int, int>();
+                    int index = 0;
+                    foreach (int posID in positions.Keys.OrderBy(k => k))
+                    {
+                        positionKeys.Add(index, posID);
+                        index += 1;
+                    }
+                    for (index = 1; index < positionKeys.Count - 2; index++)
+                    {
+                        Position prevP = positions[positionKeys[index - 1]];
+                        Position currP = positions[positionKeys[index]];
+                        Position nextP = positions[positionKeys[index + 1]];
+                        double acceleration1 = ((currP.speed - prevP.speed) / 3.6) / ((currP.delta_t - prevP.delta_t) / 1000);
+                        double acceleration2 = ((nextP.speed - currP.speed) / 3.6) / ((nextP.delta_t - currP.delta_t) / 1000);
+                        //Tools.DebugLog($"speed:{prevP.speed}->{currP.speed}->{nextP.speed} acceleration1:{acceleration1}m/s acceleration2:{acceleration2}m/s");
+                        if (acceleration1 > 1.1 && acceleration2 < -1.1)
+                        {
+                            // drop speed at currP and replace with avg(prevP,nextP)
+                            Tools.DebugLog($"#{kli.carID} Komoot: speed3: {Math.Round(prevP.speed, 2)}->{Math.Round(currP.speed, 2)}->{Math.Round(nextP.speed, 2)} acc:{Math.Round(acceleration1, 2)}-{Math.Round(acceleration2, 2)} correct speed:{Math.Round(currP.speed, 2)}->{Math.Round((prevP.speed+nextP.speed)/2.0,2 )}");
+                            currP.speed = (prevP.speed + nextP.speed) / 2.0;
+                        }
+                    }
+                }
+            }
         }
 
-        private readonly int interval = 6 * 60 * 60; // 6 hours in seconds
+        private readonly int interval = 3 * 60 * 60; // 3 hours in seconds
         private readonly int carID = -1;
         private readonly string username = string.Empty;
         private readonly string password = string.Empty;
 
+        private bool workNow; // defaults to false
+        private static List<Komoot> komootInstances = new List<Komoot>();
+
         private static readonly Dictionary<string, string> EndPoints = new Dictionary<string, string>()
         {
             { "KomootListSettings", "/komoot/listSettings" },
-            { "KomootSaveSettings", "/komoot/saveSettings" }
+            { "KomootSaveSettings", "/komoot/saveSettings" },
+            { "KomootWorkNow", "/komoot/workNow" }
         };
 
         public Komoot(int CarID, string Username, string Password)
@@ -208,6 +360,13 @@ namespace TeslaLogger
             this.carID = CarID;
             this.username = Username;
             this.password = Password;
+            komootInstances.Add(this);
+        }
+
+        public void WorkNow()
+        {
+            Tools.DebugLog("WorkNow()");
+            workNow = true;
         }
 
         internal static void CheckSchema()
@@ -284,13 +443,18 @@ WHERE
                 while (true)
                 {
                     Work(kli);
-                    Thread.Sleep(interval * 1000);
+                    for (int i = 0; i < 1000; i++)
+                    {
+                        if (workNow) { break; }
+                        Thread.Sleep((int)(((DateTime.Now.Hour >= 4 && DateTime.Now.Hour < 18) ? 0.5 : 1.0) * (double)interval));
+                    }
+                    workNow = false;
                 }
             }
             catch (Exception ex)
             {
                 ex.ToExceptionless().FirstCarUserID().Submit();
-                Tools.DebugLog("Komoot: Exception", ex);
+                // Tools.DebugLog("Komoot: Exception", ex);
             }
         }
 
@@ -303,6 +467,7 @@ WHERE
             }
             else
             {
+                CurrentJSON.FromKVS(kli.carID);
                 Dictionary<long, KomootTour> tours = DownloadTours(kli, dumpJSON);
                 if (tours.Count > 0)
                 {
@@ -335,11 +500,11 @@ WHERE
                     Logfile.Log($"#{kli.carID} Komoot: tour({tourid}) JSON:" + Environment.NewLine + tour.json);
                 }
                 // check if drivestate already exists
-                if (DriveStateExists(kli.carID, tour.start, out int drivestateID))
+                if (DriveStateExists(kli.carID, tour.startTS, out int drivestateID))
                 {
                     // tour does not exist in komoot table, but drivestate exists
                     // --> insert into komoot table
-                    Tools.DebugLog($"Komoot tour {tourid} does not exist in table komoot, but drivestate with carID {kli.carID} start {tours[tourid].start} exists: {drivestateID}");
+                    Tools.DebugLog($"Komoot tour {tourid} does not exist in table komoot, but drivestate with carID {kli.carID} start {tours[tourid].startTS} exists: {drivestateID}");
                     InsertTour(kli.carID, drivestateID, tour);
                     continue;
                 }
@@ -348,7 +513,65 @@ WHERE
                 {
                     Logfile.Log($"#{kli.carID} Komoot: GetTour({tourid}) JSON:" + Environment.NewLine + tour.json);
                 }
-                /* expected JSON
+                ParseTourJSON(kli, tourid, tour);
+                // positions parsed, continue to insert positions into table pos
+                // find initial odometer for first pos
+                tour.odometer = GetInitialOdo(tour.carID, tour.startTS);
+                Logfile.Log($"#{kli.carID} Komoot: ParseTours({tourid}) initialOdo:{tour.odometer}");
+                int firstPosID = 0;
+                int LastPosId = 0;
+                tour.CorrectPositionDistances();
+                tour.ComputeHeading();
+                tour.CheckSpeed(kli);
+                // Tools.DebugLog($"#{kli.carID} Komoot: ParseTours({tourid}) " + Environment.NewLine + tour);
+                foreach (int posID in tour.positions.Keys.OrderBy(k => k))
+                {
+                    KomootTour.Position pos = tour.positions[posID];
+                    if (pos == tour.firstPosition)
+                    {
+                        firstPosID = InsertPos(tour.carID, pos.lat, pos.lng, tour.startTS.AddMilliseconds(pos.delta_t), pos.speed, pos.alt, tour.odometer);
+                    }
+                    else
+                    {
+                        tour.odometer = tour.odometer + pos.dist_km;
+                        LastPosId = InsertPos(tour.carID, pos.lat, pos.lng, tour.startTS.AddMilliseconds(pos.delta_t), pos.speed, pos.alt, tour.odometer);
+                    }
+                }
+                if (firstPosID > 0 && LastPosId > 0)
+                {
+                    // successfully added positions to table pos
+                    drivestateID = CreateDriveState(tour.carID, tour.startTS, firstPosID, tour.endTS, LastPosId);
+                    InsertTour(kli.carID, drivestateID, tour);
+                    // mock CurrentJSON
+                    MockCurrentJSON(kli, tour);
+                }
+                else
+                {
+                    Logfile.Log($"#{kli.carID} Komoot: error - no positions added to table pos - tour JSON:" + Environment.NewLine + tour.json);
+                }
+            }
+
+        }
+
+        static void MockCurrentJSON(KomootLoginInfo kli, KomootTour tour)
+        {
+            CurrentJSON.jsonStringHolder[kli.carID] = $@"{{
+    ""sleeping"": true,
+    ""odometer"": {tour.odometer},
+    ""ts"": ""{tour.endTS.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")}"",
+    ""latitude"": {tour.lastPosition.lat},
+    ""longitude"": {tour.lastPosition.lng},
+    ""heading"": {tour.lastPosition.heading},
+    ""trip_start_dt"": ""{tour.startTS.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")}"",
+    ""trip_duration_sec"": ""{(int)(tour.endTS-tour.startTS).TotalSeconds}"",
+    ""locked"": true
+}}";
+            CurrentJSON.ToKVS(kli.carID);
+        }
+
+        private static void ParseTourJSON(KomootLoginInfo kli, long tourid, KomootTour tour)
+        {
+            /* expected JSON
 {
 "id": 987654321,
 "type": "tour_recorded",
@@ -403,27 +626,27 @@ WHERE
 "coordinates": {
 "items": [
 {
-    "lat": 42.4484,
-    "lng": 53.340371,
-    "alt": 42.3,
-    "t": 0
+"lat": 42.4484,
+"lng": 53.340371,
+"alt": 42.3,
+"t": 0
 },
 {
-    "lat": 62.448262,
-    "lng": 73.340385,
-    "alt": 42.3,
-    "t": 2000
+"lat": 62.448262,
+"lng": 73.340385,
+"alt": 42.3,
+"t": 2000
 },
 {
-    "lat": 82.448126,
-    "lng": 33.340499,
-    "alt": 42.3,
-    "t": 4709
+"lat": 82.448126,
+"lng": 33.340499,
+"alt": 42.3,
+"t": 4709
 }
 ],
 "_links": {
 "self": {
-    "href": "https://api.komoot.de/v007/tours/987654321/coordinates"
+"href": "https://api.komoot.de/v007/tours/987654321/coordinates"
 }
 }
 },
@@ -437,11 +660,11 @@ WHERE
 "status": "public",
 "_links": {
 "self": {
-    "href": "https://api.komoot.de/v007/users/1234567890/profile_embedded"
+"href": "https://api.komoot.de/v007/users/1234567890/profile_embedded"
 },
 "relation": {
-    "href": "https://api.komoot.de/v007/users/{username}/relations/1234567890",
-    "templated": true
+"href": "https://api.komoot.de/v007/users/{username}/relations/1234567890",
+"templated": true
 }
 },
 "display_name": "DisplayNameCFGT",
@@ -451,7 +674,7 @@ WHERE
 "timeline": {
 "_links": {
 "self": {
-    "href": "https://api.komoot.de/v007/tours/987654321/timeline/"
+"href": "https://api.komoot.de/v007/tours/987654321/timeline/"
 }
 },
 "page": {
@@ -492,104 +715,98 @@ WHERE
 }
 }
 }
-                 */
-                dynamic jsonResult = JsonConvert.DeserializeObject(tour.json);
-                // check JSON contents
-                if (jsonResult.ContainsKey("_embedded") && jsonResult["_embedded"].ContainsKey("coordinates") && jsonResult["_embedded"]["coordinates"].ContainsKey("items"))
+             */
+            dynamic jsonResult = JsonConvert.DeserializeObject(tour.json);
+            // check JSON contents
+            if (jsonResult.ContainsKey("_embedded") && jsonResult["_embedded"].ContainsKey("coordinates") && jsonResult["_embedded"]["coordinates"].ContainsKey("items"))
+            {
+                // JSON OK
+                Dictionary<int, Tuple<double, double, double>> positions = new Dictionary<int, Tuple<double, double, double>>();
+                Logfile.Log($"#{kli.carID} Komoot: ParseTourJSON({tourid}) parsing {jsonResult["_embedded"]["coordinates"]["items"].Count} coordinates ...");
+                foreach (dynamic pos in jsonResult["_embedded"]["coordinates"]["items"])
                 {
-                    // JSON OK
-                    Logfile.Log($"#{kli.carID} Komoot: ParseTours({tourid}) parsing {jsonResult["_embedded"]["coordinates"]["items"].Count} coordinates ...");
-                    foreach (dynamic pos in jsonResult["_embedded"]["coordinates"]["items"])
+                    if (pos.ContainsKey("lat") && pos.ContainsKey("lng") && pos.ContainsKey("alt") && pos.ContainsKey("t"))
                     {
-                        if (pos.ContainsKey("lat") && pos.ContainsKey("lng") && pos.ContainsKey("alt") && pos.ContainsKey("t"))
+                        if (double.TryParse(pos["lat"].ToString(), out double lat) && double.TryParse(pos["lng"].ToString(), out double _) && double.TryParse(pos["alt"].ToString(), out double _) && int.TryParse(pos["t"].ToString(), out int _))
                         {
-                            if (double.TryParse(pos["lat"].ToString(), out double lat) && double.TryParse(pos["lng"].ToString(), out double _) && double.TryParse(pos["alt"].ToString(), out double _) && int.TryParse(pos["t"].ToString(), out int _))
+                            // generate pseudopositions?
+                            if (positions.Count > 0)
                             {
-                                tour.AddPosition(lat, double.Parse(pos["lng"].ToString()), double.Parse(pos["alt"].ToString()), int.Parse(pos["t"].ToString()));
+                                var lastpos = positions.OrderByDescending(kvp => kvp.Key).First();
+                                if (int.Parse(pos["t"].ToString()) - lastpos.Key > 11000)
+                                {
+                                    int timediff = int.Parse(pos["t"].ToString()) - lastpos.Key;
+                                    int pseudopositions = (int)Math.Floor((timediff - 2000) / 2000.0);
+                                    int step = (timediff - 2000) / pseudopositions;
+                                    Tools.DebugLog($"pos delta {timediff} -> insert pseudo positions: {pseudopositions}");
+                                    Tools.DebugLog($"lastpos delta_t: {lastpos.Key}");
+                                    for (int i = 1; i <= pseudopositions; i++)
+                                    {
+                                        Tools.DebugLog($"add pseudopos {i} at delta_t {lastpos.Key + step * i} {Tuple.Create(lastpos.Value.Item1, lastpos.Value.Item2, lastpos.Value.Item3)}");
+                                        positions[lastpos.Key + step * i] = Tuple.Create(lastpos.Value.Item1, lastpos.Value.Item2, lastpos.Value.Item3);
+                                    }
+                                    Tools.DebugLog($"currpos delta_t: {pos["t"].ToString()}");
+                                }
                             }
-                            else
-                            {
-                                StringBuilder sb = new StringBuilder();
-                                sb.AppendLine();
-                                sb.Append("lat:");
-                                sb.AppendLine(pos["lat"]);
-                                sb.Append("lng:");
-                                sb.AppendLine(pos["lng"]);
-                                sb.Append("alt:");
-                                sb.AppendLine(pos["alt"]);
-                                sb.Append("t:");
-                                sb.AppendLine(pos["t"]);
-                                Logfile.Log($"#{kli.carID} Komoot: ParseTours({tourid}) parsing tours.pos error - error parsing JSON contents" + sb.ToString());
-                            }
+                            positions[int.Parse(pos["t"].ToString())] = Tuple.Create(lat, double.Parse(pos["lng"].ToString()), double.Parse(pos["alt"].ToString()));
                         }
                         else
                         {
                             StringBuilder sb = new StringBuilder();
                             sb.AppendLine();
                             sb.Append("lat:");
-                            sb.AppendLine(jsonResult.ContainsKey("lat"));
+                            sb.AppendLine(pos["lat"]);
                             sb.Append("lng:");
-                            sb.AppendLine(jsonResult.ContainsKey("lng"));
+                            sb.AppendLine(pos["lng"]);
                             sb.Append("alt:");
-                            sb.AppendLine(jsonResult.ContainsKey("alt"));
+                            sb.AppendLine(pos["alt"]);
                             sb.Append("t:");
-                            sb.AppendLine(jsonResult.ContainsKey("t"));
-                            Logfile.Log($"#{kli.carID} Komoot: ParseTours({tourid}) parsing tours.pos error - missing JSON contents" + sb.ToString());
+                            sb.AppendLine(pos["t"]);
+                            Logfile.Log($"#{kli.carID} Komoot: ParseTourJSON({tourid}) parsing tours.pos error - error parsing JSON contents" + sb.ToString());
                         }
-                    }
-                }
-                else
-                {
-                    StringBuilder sb = new StringBuilder();
-                    sb.AppendLine();
-                    sb.Append("date:");
-                    sb.AppendLine(jsonResult.ContainsKey("date"));
-                    sb.Append("_embedded:");
-                    sb.AppendLine(jsonResult.ContainsKey("_embedded"));
-                    if (jsonResult.ContainsKey("_embedded"))
-                    {
-                        sb.Append("_embedded.coordinates:");
-                        sb.AppendLine(jsonResult["_embedded"].ContainsKey("coordinates"));
-                        if (jsonResult["_embedded"].ContainsKey("coordinates"))
-                        {
-                            sb.Append("_embedded.coordinates.items:");
-                            sb.AppendLine(jsonResult["_embedded"]["coordinates"].ContainsKey("items"));
-                        }
-                    }
-                    sb.AppendLine();
-                    Logfile.Log($"#{kli.carID} Komoot: parsing tours error - missing JSON contents" + sb.ToString() + tour.json);
-                }
-                // positions parsed, continue to insert positions into table pos
-                Tools.DebugLog($"#{kli.carID} Komoot: ParseTours({tourid}) " + Environment.NewLine + tour);
-                // find initial odometer for first pos
-                double odo = GetInitialOdo(tour.carID, tour.start);
-                Tools.DebugLog($"#{kli.carID} Komoot: ParseTours({tourid}) initialOdo:{odo}");
-                int firstPosID = 0;
-                int LastPosId = 0;
-                tour.CorrectPositionDistances();
-                foreach (int posID in tour.positions.Keys.OrderBy(k => k))
-                {
-                    KomootTour.Position pos = tour.positions[posID];
-                    if (pos == tour.firstPosition)
-                    {
-                        firstPosID = InsertPos(tour.carID, pos.lat, pos.lng, tour.start.AddMilliseconds(pos.delta_t), pos.speed, pos.alt, odo);
                     }
                     else
                     {
-                        odo = odo + pos.dist_km;
-                        LastPosId = InsertPos(tour.carID, pos.lat, pos.lng, tour.start.AddMilliseconds(pos.delta_t), pos.speed, pos.alt, odo);
+                        StringBuilder sb = new StringBuilder();
+                        sb.AppendLine();
+                        sb.Append("lat:");
+                        sb.AppendLine(jsonResult.ContainsKey("lat"));
+                        sb.Append("lng:");
+                        sb.AppendLine(jsonResult.ContainsKey("lng"));
+                        sb.Append("alt:");
+                        sb.AppendLine(jsonResult.ContainsKey("alt"));
+                        sb.Append("t:");
+                        sb.AppendLine(jsonResult.ContainsKey("t"));
+                        Logfile.Log($"#{kli.carID} Komoot: ParseTourJSON({tourid}) parsing tours.pos error - missing JSON contents" + sb.ToString());
                     }
                 }
-                if (firstPosID > 0 && LastPosId > 0)
+                // positions parsed from JSON, pseudopositions generated, now add positions
+                Logfile.Log($"#{kli.carID} Komoot: ParseTourJSON({tourid}) found {positions.Count} positions (including generated pseudopositions)");
+                foreach (KeyValuePair<int, Tuple<double, double, double>> pos in positions)
                 {
-                    // successfully added positions to table pos
-                    drivestateID = CreateDriveState(tour.carID, tour.start, firstPosID, tour.end, LastPosId);
-                    InsertTour(kli.carID, drivestateID, tour);
+                    tour.AddPosition(pos.Value.Item1, pos.Value.Item2, pos.Value.Item3, pos.Key);
                 }
-                else
+            }
+            else
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine();
+                sb.Append("date:");
+                sb.AppendLine(jsonResult.ContainsKey("date"));
+                sb.Append("_embedded:");
+                sb.AppendLine(jsonResult.ContainsKey("_embedded"));
+                if (jsonResult.ContainsKey("_embedded"))
                 {
-                    Logfile.Log($"#{kli.carID} Komoot: error - no positions added to table pos - tour JSON:" + Environment.NewLine + tour.json);
+                    sb.Append("_embedded.coordinates:");
+                    sb.AppendLine(jsonResult["_embedded"].ContainsKey("coordinates"));
+                    if (jsonResult["_embedded"].ContainsKey("coordinates"))
+                    {
+                        sb.Append("_embedded.coordinates.items:");
+                        sb.AppendLine(jsonResult["_embedded"]["coordinates"].ContainsKey("items"));
+                    }
                 }
+                sb.AppendLine();
+                Logfile.Log($"#{kli.carID} Komoot: parsing tours error - missing JSON contents" + sb.ToString() + tour.json);
             }
         }
 
@@ -870,7 +1087,9 @@ VALUES (
                     httpClient.DefaultRequestHeaders.Add("Authorization", "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{kli.user_id}:{kli.token}")));
                     using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, new Uri(url)))
                     {
+                        DateTime start = DateTime.UtcNow;
                         HttpResponseMessage result = httpClient.SendAsync(request).Result;
+                        DBHelper.AddMothershipDataToDB("Komoot: DownloadTours", start, (int)result.StatusCode, kli.carID);
                         if (result.IsSuccessStatusCode)
                         {
                             string resultContent = result.Content.ReadAsStringAsync().Result;
@@ -1036,7 +1255,7 @@ VALUES (
                                     {
                                         if (Int64.TryParse(tour["id"].ToString(), out long tourid) && DateTime.TryParse(tour["date"].ToString(), out DateTime _))
                                         {
-                                            KomootTour newTour = new KomootTour(kli.carID, tourid, tour["type"].ToString(), tour["sport"].ToString(), DateTime.Parse(tour["date"].ToString()));
+                                            KomootTour newTour = new KomootTour(kli.carID, tourid, tour["type"].ToString(), tour["sport"].ToString(), DateTime.Parse(tour["date"].ToString()).ToLocalTime());
                                             if (tour.ContainsKey("id") && double.TryParse(tour["distance"].ToString(), out double _))
                                             {
                                                 newTour.distance_m = double.Parse(tour["distance"].ToString());
@@ -1058,6 +1277,13 @@ VALUES (
                             {
                                 Logfile.Log($"#{kli.carID} Komoot: error: tours does not contain _embedded.tours");
                             }
+                            // komoot responds with the newest tour as first tour
+                            // check if we already have this and skip next pages
+                            if (TourIsAlreadyInDatabase(komootTours.Keys.Max())) {
+                                Tools.DebugLog($"Tour {komootTours.Keys.Max()} is already in the database");
+                                Logfile.Log($"#{kli.carID} Komoot: no new tours");
+                                nextPage = false;
+                            }
                         }
                         else
                         {
@@ -1069,6 +1295,43 @@ VALUES (
             return komootTours;
         }
 
+        private static bool TourIsAlreadyInDatabase(long tourID)
+        {
+            try
+            {
+                using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
+                {
+                    con.Open();
+                    using (MySqlCommand cmd = new MySqlCommand(@"
+SELECT
+  tourID
+FROM
+  komoot
+WHERE
+  tourID = @tourID
+", con))
+                    {
+                        cmd.Parameters.AddWithValue("@tourID", tourID);
+                        MySqlDataReader dr = SQLTracer.TraceDR(cmd);
+                        if (dr.Read() && dr[0] != DBNull.Value)
+                        {
+                            if (long.TryParse(dr[0].ToString(), out long _))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ex.ToExceptionless().FirstCarUserID().Submit();
+                Logfile.Log(ex.ToString());
+            }
+
+            return false;
+        }
+
         private static KomootLoginInfo Login(KomootLoginInfo kli)
         {
             Logfile.Log($"#{kli.carID} Komoot: logging in as {kli.username} ...");
@@ -1077,7 +1340,9 @@ VALUES (
                 httpClient.DefaultRequestHeaders.Add("Authorization", "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{kli.username}:{kli.password}")));
                 using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, new Uri($"https://api.komoot.de/v006/account/email/{kli.username}/")))
                 {
+                    DateTime start = DateTime.UtcNow;
                     HttpResponseMessage result = httpClient.SendAsync(request).Result;
+                    DBHelper.AddMothershipDataToDB("Komoot: Login", start, (int)result.StatusCode, kli.carID);
                     if (result.IsSuccessStatusCode)
                     {
                         string resultContent = result.Content.ReadAsStringAsync().Result;
@@ -1151,11 +1416,23 @@ VALUES (
                 case bool _ when request.Url.LocalPath.Equals(EndPoints["KomootSaveSettings"], StringComparison.Ordinal):
                     HandleRequest_KomootSaveSettings(request, response);
                     break;
+                case bool _ when request.Url.LocalPath.Equals(EndPoints["KomootWorkNow"], StringComparison.Ordinal):
+                    HandleRequest_KomootWorkNow(request, response);
+                    break;
                 default:
                     response.StatusCode = (int)HttpStatusCode.NotFound;
                     WebServer.WriteString(response, @"URL Not Found!");
                     break;
             }
+        }
+
+        private static void HandleRequest_KomootWorkNow(HttpListenerRequest _, HttpListenerResponse response)
+        {
+            foreach (Komoot komoot in komootInstances)
+            {
+                komoot.WorkNow();
+            }
+            WebServer.WriteString(response, "OK");
         }
 
         private static void HandleRequest_KomootSaveSettings(HttpListenerRequest request, HttpListenerResponse response)

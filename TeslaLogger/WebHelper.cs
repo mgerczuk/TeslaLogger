@@ -4,12 +4,10 @@ using MySql.Data.MySqlClient;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
-using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
-using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -19,13 +17,11 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Runtime.Caching;
 using System.Runtime.CompilerServices;
-using System.Runtime.ConstrainedExecution;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web;
 using static TeslaLogger.Car;
 
 namespace TeslaLogger
@@ -68,7 +64,7 @@ namespace TeslaLogger
         internal string conn_charge_cable = "";
         internal bool fast_charger_present; // defaults to false;
         //private bool stopStreaming = false;
-        private string elevation = "";
+        protected string elevation = "";
         private DateTime elevation_time = DateTime.Now;
         internal DateTime lastTokenRefresh = DateTime.Now;
         internal DateTime lastIsDriveTimestamp = DateTime.Now;
@@ -259,7 +255,7 @@ namespace TeslaLogger
             }
         }
 
-        public bool RestoreToken()
+        public virtual bool RestoreToken()
         {
             try
             {
@@ -378,7 +374,7 @@ namespace TeslaLogger
                 System.IO.File.WriteAllText("Logfile_GetToken_" + name + ".txt", resultContent);
         }
 
-        public string GetToken()
+        public virtual string GetToken()
         {
             string resultContent = "";
             MatchCollection m;
@@ -539,6 +535,7 @@ namespace TeslaLogger
             catch (Exception ex)
             {
                 car.Log(ex.ToString());
+                Tools.DebugLog($"UpdateTeslaTokenFromRefreshToken: error parsing resultContent {resultContent}");
                 // car.ExternalLog("UpdateTeslaTokenFromRefreshToken: \r\nHTTP StatusCode: " + HttpStatusCode+ "\r\nresultContent: " + resultContent +"\r\n" + ex.ToString());
                 car.CreateExeptionlessLog("UpdateTeslaTokenFromRefreshToken", "Error getting access token", Exceptionless.Logging.LogLevel.Error).AddObject(HttpStatusCode, "HTTP StatusCode").AddObject(resultContent, "ResultContent").Submit();
                 car.CreateExceptionlessClient(ex).AddObject(HttpStatusCode, "HTTP StatusCode").AddObject(resultContent, "ResultContent").MarkAsCritical().Submit();
@@ -1001,7 +998,7 @@ namespace TeslaLogger
             lastCharging_State = "";
         }
 
-        internal bool IsCharging(bool justCheck = false, bool noMemcache = false)
+        public virtual bool IsCharging(bool justCheck = false, bool noMemcache = false)
         {
             if (car.FleetAPI)
             {
@@ -1286,7 +1283,7 @@ namespace TeslaLogger
             }
         }
 
-        public string GetVehicles()
+        public virtual string GetVehicles()
         {
             string resultContent = "";
             while (true)
@@ -1688,7 +1685,7 @@ namespace TeslaLogger
         public static object isOnlineLock = new object();
 #pragma warning restore CA2211 // Nicht konstante Felder dürfen nicht sichtbar sein
 
-        public async Task<string> IsOnline(bool returnOnUnauthorized = false)
+        public async virtual Task<string> IsOnline(bool returnOnUnauthorized = false)
         {
             string resultContent = "";
             try
@@ -2000,7 +1997,7 @@ namespace TeslaLogger
             return "NULL";
         }
 
-        internal void CheckRefreshToken()
+        internal virtual void CheckRefreshToken()
         {
             if (nextTeslaTokenFromRefreshToken < DateTime.UtcNow)
             {
@@ -2009,7 +2006,7 @@ namespace TeslaLogger
             }
         }
 
-        void CheckVehicleConfig()
+        protected void CheckVehicleConfig()
         {
             if (car.FleetAPI)
             {
@@ -2534,185 +2531,37 @@ namespace TeslaLogger
                     return;
                 }
             }
-
-
-            /*
-            if (car.Model == "MS")
+            else if (car.CarType == "LUCID")
             {
-                if (car.Battery == "BTX5")
+                if (car.TrimBadging == "PURE")
                 {
-                    if (car.AWD)
-                    {
-                        eff = "0.186";
-                        car = "S 75D";
-                    }
+                    if (year == 2025)
+                        WriteCarSettings("0.119", "Lucid Air PURE 2025");
                     else
-                    {
-                        eff = "0.185";
-                        car = "S 75";
-                    }
+                        WriteCarSettings("0.134", "Lucid Air PURE");
+                    return;
                 }
-                else if (car.Battery == "BTX4")
+                else if (car.TrimBadging == "TOURING")
                 {
-                    if (car.Performance)
-                    {
-                        eff = "0.200";
-                        car = "S P90D";
-                    }
-                    else
-                    {
-                        eff = "0.189";
-                        car = "S90D";
-                    }
+                    WriteCarSettings("0.134", "Lucid Air TOURING");
+                    return;
                 }
-                else if (car.Battery == "BTX6")
+                else if (car.TrimBadging == "GRAND TOURING")
                 {
-                    if (car.Performance)
-                    {
-                        eff = "0.200";
-                        car = "S P100D";
-                    }
-                    else
-                    {
-                        eff = "0.189";
-                        car = "S 100D";
-                    }
+                    WriteCarSettings("0.134", "Lucid Air GRAND TOURING");
+                    return;
                 }
-                else if (car.Battery == "BTX8")
+                else if (car.TrimBadging == "DREAM EDITION")
                 {
-                    if (car.AWD)
-                    {
-                        eff = "0.186";
-                        car = "S 75D (85kWh)";
-                    }
-                    else
-                    {
-                        eff = "0.185";
-                        car = "S 75 (85kWh)";
-                    }
-                }
-                else if (car.Battery == "BT85")
-                {
-                    if (car.AWD)
-                    {
-                        if (car.Performance)
-                        {
-                            car = "S P85D";
-                            eff = "0.201";
-                        }
-                        else
-                        {
-                            car = "S 85D";
-                            eff = "0.186";
-                        }
-                    }
-                    else
-                    {
-                        if (car.Performance)
-                        {
-                            car = "S P85";
-                            eff = "0.210";
-                        }
-                        else
-                        {
-                            car = "S 85";
-                            eff = "0.201";
-                        }
-                    }
-                }
-                else if (car.Battery == "PBT85")
-                {
-                    car = "S P85";
-                    eff = "0.210";
-                }
-                else if (car.Battery == "BT70")
-                {
-                    car = "S 70 ?";
-                    eff = "0.200";
-                }
-                else if (car.Battery == "BT60")
-                {
-                    car = "S 60 ?";
-                    eff = "0.200";
+                    WriteCarSettings("0.134", "Lucid Air DREAM EDITION");
+                    return;
                 }
                 else
                 {
-                    car = "S ???";
-                    eff = "0.200";
+                    car.WhTR = 134;
+                    car.WriteSettings();
                 }
             }
-            else if (car.Model == "MX")
-            {
-                if (car.Battery == "BTX5")
-                {
-                    eff = "0.208";
-                    car = "X 75D";
-                }
-                else if (car.Battery == "BTX4")
-                {
-                    if (!car.Performance)
-                    {
-                        eff = "0.208";
-                        car = "X 90D";
-                    }
-                    else
-                    {
-                        eff = "0.217";
-                        car = "X P90D";
-                    }
-                }
-                else if (car.Battery == "BTX6")
-                {
-                    if (car.Performance)
-                    {
-                        eff = "0.226";
-                        car = "X P100D";
-                    }
-                    else
-                    {
-                        eff = "0.208";
-                        car = "X 100D";
-                    }
-                }
-                else
-                {
-                    car = "X ???";
-                    eff = "0.208";
-                }
-
-            }
-            else if (car.Model == "M3")
-            {
-                if (car.Battery == "BT37")
-                {
-                    if (car.Performance)
-                    {
-                        eff = "0.153";
-                        car = "M3P";
-                    }
-                    else
-                    {
-                        eff = "0.153";
-                        car = "M3";
-                    }
-                }
-                else
-                {
-                    eff = "0.153";
-                    car = "M3 ???";
-                }
-            }
-            else
-            {
-                if (car.Battery == "BT85")
-                {
-                    car = "S 85 ?";
-                    eff = "0.200";
-                }
-            }
-
-            WriteCarSettings(eff, car);
-            */
         }
 
         private void WriteCarSettings(string eff, string ModelName)
@@ -2728,7 +2577,7 @@ namespace TeslaLogger
             }
         }
 
-        public bool IsDriving(bool justinsertdb = false)
+        public virtual bool IsDriving(bool justinsertdb = false)
         {
             if (car.FleetAPI)
             {
@@ -2878,6 +2727,7 @@ namespace TeslaLogger
                     // Log("IsDriving2");
 
                     Task<double> odometer = GetOdometerAsync();
+                    double? inside_temp = null;
                     double? outside_temp = null;
                     Task<double?> t_outside_temp = null;
 
@@ -2907,7 +2757,12 @@ namespace TeslaLogger
                         longitude = 0;
                     }
 
-                    car.DbHelper.InsertPos(ts.ToString(), latitude, longitude, speed, power, odometer.Result, ideal_battery_range_km, battery_range_km, battery_level, outside_temp, elevation);
+                    if(car.CurrentJSON.current_inside_temperature != null)
+                    {
+                        inside_temp = (double)car.CurrentJSON.current_inside_temperature;
+                    }
+
+                    car.DbHelper.InsertPos(ts.ToString(), latitude, longitude, speed, power, odometer.Result, ideal_battery_range_km, battery_range_km, battery_level, inside_temp, outside_temp, elevation);
 
                     if (shift_state == "D" || shift_state == "R" || shift_state == "N")
                     {
@@ -3010,7 +2865,7 @@ namespace TeslaLogger
             }
         }
 
-        private void StartStream()
+        protected virtual void StartStream()
         {
             string resultContent = null;
             byte[] buffer = new byte[1024];
@@ -3347,6 +3202,7 @@ namespace TeslaLogger
                 double battery_range_km = Tools.MlToKm(irange, 1);
                 // ideal_battery_range_km = ideal_battery_range_km * car specific factor
                 double ideal_battery_range_km = battery_range_km * battery_range2ideal_battery_range;
+                double? inside_temp = car.CurrentJSON.current_inside_temperature;
                 double? outside_temp = car.CurrentJSON.current_outside_temperature;
                 if (!string.IsNullOrEmpty(shift_state) && shift_state.Equals("D") &&
                     (latitude != last_latitude_streaming || longitude != last_longitude_streaming || dpower != last_power_streaming))
@@ -3356,7 +3212,7 @@ namespace TeslaLogger
                     last_power_streaming = dpower;
 
                     //Tools.DebugLog($"Stream: InsertPos({v[0]}, {latitude}, {longitude}, {ispeed}, {dpower}, {dodometer_km}, {ideal_battery_range_km}, {battery_range_km}, {isoc}, {outside_temp}, String.Empty)");
-                    car.DbHelper.InsertPos(v[0], latitude, longitude, ispeed, dpower, dodometer_km, ideal_battery_range_km, battery_range_km, isoc, outside_temp, String.Empty);
+                    car.DbHelper.InsertPos(v[0], latitude, longitude, ispeed, dpower, dodometer_km, ideal_battery_range_km, battery_range_km, isoc, inside_temp, outside_temp, String.Empty);
                 }
             }
             if (int.TryParse(heading, out int iheading)) {  // heading in degrees
@@ -3406,7 +3262,7 @@ namespace TeslaLogger
             
         }*/
 
-        internal static async Task<string> ReverseGecocodingAsync(Car c, double latitude, double longitude, bool forceGeocoding = false, bool insertGeocodecache = true)
+        internal static async Task<string> ReverseGecocodingAsync(Car car, double latitude, double longitude, bool forceGeocoding = false, bool insertGeocodecache = true)
         {
             string url = "";
             string resultContent = "";
@@ -3469,8 +3325,10 @@ namespace TeslaLogger
 
                     DateTime start = DateTime.UtcNow;
                     resultContent = await webClient.DownloadStringTaskAsync(new Uri(url));
-                    DBHelper.AddMothershipDataToDB("ReverseGeocoding", start, 0, c.CarInDB);
-
+                    if (car != null)
+                    {
+                        DBHelper.AddMothershipDataToDB("ReverseGeocoding", start, 0, car.CarInDB);
+                    }
                     dynamic jsonResult = JsonConvert.DeserializeObject(resultContent);
                     string adresse = "";
 
@@ -3490,10 +3348,10 @@ namespace TeslaLogger
                         if (loc0.ContainsKey("adminArea1") && loc0["adminArea1Type"].ToString() == "Country")
                             country_code = loc0["adminArea1"].ToString().ToLower();
 
-                        if (country_code.Length > 0 && c != null)
+                        if (country_code.Length > 0 && car != null)
                         {
-                            c.CurrentJSON.current_country_code = country_code;
-                            c.CurrentJSON.current_state = loc0.ContainsKey("adminArea3") ? loc0["adminArea3"].ToString() : "";
+                            car.CurrentJSON.current_country_code = country_code;
+                            car.CurrentJSON.current_state = loc0.ContainsKey("adminArea3") ? loc0["adminArea3"].ToString() : "";
                         }
 
                         string road = "";
@@ -3540,10 +3398,10 @@ namespace TeslaLogger
                         if (r2.ContainsKey("country_code"))
                             country_code = r2["country_code"].ToString();
 
-                        if (country_code.Length > 0 && c != null)
+                        if (country_code.Length > 0 && car != null)
                         {
-                            c.CurrentJSON.current_country_code = country_code;
-                            c.CurrentJSON.current_state = r2.ContainsKey("state") ? r2["state"].ToString() : "";
+                            car.CurrentJSON.current_country_code = country_code;
+                            car.CurrentJSON.current_state = r2.ContainsKey("state") ? r2["state"].ToString() : "";
                         }
 
                         string road = "";
@@ -3605,7 +3463,7 @@ namespace TeslaLogger
                     else
                     {
                         NominatimCount++;
-                        Logfile.Log("Reverse geocoding by Nominatim" + NominatimCount);
+                        Logfile.Log("Reverse geocoding by Nominatim: " + NominatimCount);
                     }
 
                     return adresse;
@@ -3937,26 +3795,34 @@ DESC", con))
         internal static int UpdateAllPOIAddresses(int count, string bucket)
         {
             if (bucket.Length == 0)
+            {
                 return count;
-
+            }
             using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
             {
                 con.Open();
-
-                using (MySqlCommand cmd = new MySqlCommand(@"Select lat, lng, pos.id, address, fast_charger_brand, max_charger_power 
-                        from pos    
-                        left join chargingstate on pos.id = chargingstate.pos
-                        where pos.id in (" + MySql.Data.MySqlClient.MySqlHelper.EscapeString(bucket) + ")", con))
+                using (MySqlCommand cmd = new MySqlCommand(@"
+SELECT
+    lat,
+    lng,
+    pos.id,
+    address,
+    fast_charger_brand,
+    max_charger_power 
+FROM
+    pos    
+    LEFT JOIN chargingstate ON pos.id = chargingstate.pos
+WHERE
+    pos.id IN (" + MySql.Data.MySqlClient.MySqlHelper.EscapeString(bucket) + ")", con))
                 {
                     MySqlDataReader dr = SQLTracer.TraceDR(cmd);
-
+                    //Tools.DebugLog(cmd);
                     while (dr.Read())
                     {
                         count = UpdatePOIAdress(count, dr);
                     }
                 }
             }
-
             return count;
         }
 
@@ -4104,7 +3970,7 @@ DESC", con))
             return -1;
         }
 
-        internal async Task<double> GetOdometerAsync()
+        public virtual async Task<double> GetOdometerAsync()
         {
             string resultContent = "";
             try
@@ -4221,9 +4087,11 @@ DESC", con))
                 _ = long.TryParse(climate_state["timestamp"].ToString(), out long ts);
                 try
                 {
+                    decimal? inside_temp = null;
                     if (climate_state["inside_temp"] != null)
                     {
-                        car.CurrentJSON.current_inside_temperature = Convert.ToDouble(climate_state["inside_temp"]);
+                        inside_temp = (decimal)climate_state["inside_temp"];
+                        car.CurrentJSON.current_inside_temperature = (double)inside_temp;
                     }
                 }
                 catch (Exception) { }
@@ -4923,7 +4791,8 @@ DESC", con))
                     { "year" , car.Year.ToString() },
                     { "motor" , car.Motor } ,
                     { "wt" , car.wheel_type } ,
-                    { "vin" , obfuscatedVin} // just the first 11 chars of the vin will be sent. The serial number is truncated!
+                    { "vin" , obfuscatedVin}, // just the first 11 chars of the vin will be sent. The serial number is truncated!
+                    { "NET8", Tools.IsDotnet8() ? "1" : "0"  }
                 };
 
                 using (FormUrlEncodedContent content = new FormUrlEncodedContent(d))
@@ -4995,6 +4864,14 @@ DESC", con))
 
             try
             {
+                if (Tools.IsDockerNET8())
+                {
+                    using (WebClient wc = new WebClient())
+                    {
+                        contents = wc.DownloadString("https://teslalogger.de/latest_teslalogger_docker_version.txt");
+                        return contents;
+                    }
+                }
 
                 using (WebClient wc = new WebClient())
                 {
@@ -5279,6 +5156,7 @@ DESC", con))
                             dynamic jsonResult = JsonConvert.DeserializeObject(response);
                             dynamic message = jsonResult["message"];
                             Logfile.Log("SuperchargeBingo: Checkin Error: " + message);
+                            Tools.DebugLog($"SuperchargeBingo error {json}");
                         }
                     }
 

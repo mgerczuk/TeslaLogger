@@ -5,24 +5,40 @@ name: .NET8
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ "NET8" ]
-  pull_request:
-    branches: [ "NET8" ]
-
+  
 jobs:
   build:
+    if: github.ref == 'refs/heads/NET8'
 
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
     - name: Setup .NET
       uses: actions/setup-dotnet@v3
       with:
         dotnet-version: 8.0.x
+
+    - name: Git describe tags
+      shell: bash
+      run: |
+        git describe --tags --abbrev=0
+  
+    - name: Get latest version tag
+      shell: bash
+      run: |
+        echo "GIT_TAG=`echo $(git describe --tags --abbrev=0)`" >> $GITHUB_ENV
+        
+    - name: Show latest version tag
+      run: |
+        echo "GIT_TAG=${{ env.GIT_TAG }}"
+
     - name: Restore dependencies
       run: dotnet restore TeslaLoggerNET8.sln
+
     - name: Build
       run: dotnet build --no-restore TeslaLoggerNET8.sln
 
@@ -47,7 +63,10 @@ jobs:
         context: .
         file: ./Dockerfile
         push: true
-        tags: bassmaster187/teslalogger:latest
+        tags: |
+          bassmaster187/teslalogger:latest
+          bassmaster187/teslalogger:${{ env.GIT_TAG }}
+        platforms: linux/amd64,linux/arm64
 
     - name: Build and push Webserver
       uses: docker/build-push-action@v5
@@ -55,7 +74,10 @@ jobs:
         context: .
         file: ./Dockerfile-Webserver
         push: true
-        tags: bassmaster187/teslalogger-webserver:latest
+        tags: | 
+          bassmaster187/teslalogger-webserver:latest
+          bassmaster187/teslalogger-webserver:${{ env.GIT_TAG }}
+        platforms: linux/amd64,linux/arm64
     
     - name: Build and push Grafana
       uses: docker/build-push-action@v5
@@ -63,6 +85,13 @@ jobs:
         context: .
         file: ./Dockerfile-Grafana
         push: true
-        tags: bassmaster187/teslalogger-grafana:latest
-   
-      
+        tags: | 
+          bassmaster187/teslalogger-grafana:latest
+          bassmaster187/teslalogger-grafana:${{ env.GIT_TAG }}
+        platforms: linux/amd64,linux/arm64
+
+    - name: Update Docker Version via HTTP GET
+      run: |
+        curl -v "https://teslalogger.de/set_latest_teslalogger_docker_version.php?apikey=${{ secrets.APIKEY_DOCKER_VERSION}}&version=${{ env.GIT_TAG }}"
+
+
