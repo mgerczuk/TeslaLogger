@@ -1,97 +1,84 @@
-# This workflow will build a .NET project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
-
 name: .NET8
 
 on:
   workflow_dispatch:
-  
+
 jobs:
   build:
-    if: github.ref == 'refs/heads/NET8'
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: 8.0.x
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 8.0.x
 
-    - name: Git describe tags
-      shell: bash
-      run: |
-        git describe --tags --abbrev=0
-  
-    - name: Get latest version tag
-      shell: bash
-      run: |
-        echo "GIT_TAG=`echo $(git describe --tags --abbrev=0)`" >> $GITHUB_ENV
-        
-    - name: Show latest version tag
-      run: |
-        echo "GIT_TAG=${{ env.GIT_TAG }}"
+      - name: Restore dependencies
+        run: dotnet restore TeslaLoggerNET8.sln
 
-    - name: Restore dependencies
-      run: dotnet restore TeslaLoggerNET8.sln
+      - name: Build
+        run: dotnet build --no-restore TeslaLoggerNET8.sln
 
-    - name: Build
-      run: dotnet build --no-restore TeslaLoggerNET8.sln
+#      - name: Publish
+#        run: dotnet publish --no-restore -o publish TeslaLoggerNET8.sln
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with: 
-        name: Teslalogger
-        path: TeslaLogger/bin/Debug/net8.0/TeslaLogger.dll
+      - name: Git describe tags
+        id: vars
+        shell: bash
+        run: |
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "1.0.0")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
 
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: bassmaster187
-        password: ${{ secrets.DOCKERHUB_PASSWORD }}
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Teslalogger
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/mgerczuk/teslalogger:latest
+            ghcr.io/mgerczuk/teslalogger:${{ steps.vars.outputs.version }}
+          platforms: linux/amd64,linux/arm64
+
+      - name: Build and push Webserver
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile-Webserver
+          push: true
+          tags: | 
+            ghcr.io/mgerczuk/teslalogger-webserver:latest
+            ghcr.io/mgerczuk/teslalogger-webserver:${{ steps.vars.outputs.version }}
+          platforms: linux/amd64,linux/arm64
     
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    
-    - name: Build and push Teslalogger
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile
-        push: true
-        tags: |
-          bassmaster187/teslalogger:latest
-          bassmaster187/teslalogger:${{ env.GIT_TAG }}
-        platforms: linux/amd64,linux/arm64
+      - name: Build and push Grafana
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile-Grafana
+          push: true
+          tags: | 
+            ghcr.io/mgerczuk/teslalogger-grafana:latest
+            ghcr.io/mgerczuk/teslalogger-grafana:${{ steps.vars.outputs.version }}
+          platforms: linux/amd64,linux/arm64
 
-    - name: Build and push Webserver
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile-Webserver
-        push: true
-        tags: | 
-          bassmaster187/teslalogger-webserver:latest
-          bassmaster187/teslalogger-webserver:${{ env.GIT_TAG }}
-        platforms: linux/amd64,linux/arm64
-    
-    - name: Build and push Grafana
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile-Grafana
-        push: true
-        tags: | 
-          bassmaster187/teslalogger-grafana:latest
-          bassmaster187/teslalogger-grafana:${{ env.GIT_TAG }}
-        platforms: linux/amd64,linux/arm64
-
-    - name: Update Docker Version via HTTP GET
-      run: |
-        curl -v "https://teslalogger.de/set_latest_teslalogger_docker_version.php?apikey=${{ secrets.APIKEY_DOCKER_VERSION}}&version=${{ env.GIT_TAG }}"
+#      - name: Update Docker Version via HTTP GET
+#        run: |
+#          curl -v "https://teslalogger.de/set_latest_teslalogger_docker_version.php?apikey=${{ secrets.APIKEY_DOCKER_VERSION}}&version=${{ env.GIT_TAG }}"
 
 
