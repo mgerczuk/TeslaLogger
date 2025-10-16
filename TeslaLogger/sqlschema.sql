@@ -388,7 +388,6 @@ CREATE TABLE `drivestate` (
   `CarID` int(10) unsigned DEFAULT NULL,
   `wheel_type` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `export` tinyint(1) DEFAULT NULL,
-  `wheel_type` varchar(40) DEFAULT NULL,
   `AP_sec_sum` int(11) DEFAULT NULL,
   `AP_sec_max` int(11) DEFAULT NULL,
   `TPMS_FL` double DEFAULT NULL,
