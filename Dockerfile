@@ -18,11 +18,12 @@ ENV PATH="/usr/share/dotnet:${PATH}"
 
 COPY lucidapi /etc/lucidapi
 COPY TeslaLogger/sqlschema.sql /etc/teslalogger/sqlschema
-COPY --chmod=777 TeslaLogger/bin /etc/teslalogger/
+COPY --chmod=777 --exclude=TeslaLogger/bin/Release --exclude=TeslaLogger/bin/Debug TeslaLogger/bin /etc/teslalogger/
+COPY --chmod=777 publish /etc/teslalogger
 COPY TeslaLogger/Grafana /etc/teslalogger/git/TeslaLogger/Grafana
 COPY TeslaLogger/GrafanaConfig /etc/teslalogger/git/TeslaLogger/GrafanaConfig
 COPY TeslaLogger/GrafanaPlugins /etc/teslalogger/git/TeslaLogger/GrafanaPlugins
 
-WORKDIR /etc/teslalogger/Debug/net8.0
+WORKDIR /etc/teslalogger
 
 ENTRYPOINT ["dotnet", "./TeslaLoggerNET8.dll"]
