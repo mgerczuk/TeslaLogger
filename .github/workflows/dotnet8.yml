@@ -23,8 +23,8 @@ jobs:
       - name: Build
         run: dotnet build --no-restore TeslaLoggerNET8.sln
 
-#      - name: Publish
-#        run: dotnet publish --no-restore -o publish TeslaLoggerNET8.sln
+      - name: Publish
+        run: dotnet publish --no-restore -o publish TeslaLoggerNET8.sln
 
       - name: Git describe tags
         id: vars
