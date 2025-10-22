@@ -680,7 +680,7 @@ namespace TeslaLogger
             }))
                 {
 
-                    var response = httpclient_teslalogger_de.PostAsync(new Uri("http://teslalogger.lan:8081/teslaredirect/refresh_token.php"), formContent).Result;
+                    var response = httpclient_teslalogger_de.PostAsync(new Uri(ApplicationSettings.Default.RefreshTokenURL), formContent).Result;
                     string result = response.Content.ReadAsStringAsync().Result;
                     if (response.IsSuccessStatusCode)
                     {
@@ -4386,6 +4386,7 @@ WHERE
 
         private async Task UpdateCommandConterAsync()
         {
+            /*
             try
             {
                 int fleetapi = car.FleetAPI ? 1 : 0;
@@ -4398,6 +4399,7 @@ WHERE
             {
                 Log($"UpdateTaskerToken error: {e.Message}");
             }
+            */
         }
 
 

@@ -80,5 +80,8 @@
     <Setting Name="TelemetryClientID" Type="System.String" Scope="Application">
       <Value Profile="(Default)" />
     </Setting>
+    <Setting Name="RefreshTokenURL" Type="System.String" Scope="User">
+      <Value Profile="(Default)">http://teslalogger.lan:8081/teslaredirect/refresh_token.php</Value>
+    </Setting>
   </Settings>
 </SettingsFile>
