@@ -58,11 +58,18 @@ namespace TeslaLogger
             if (filename == TLFilename.SettingsFilename || filename == TLFilename.EncryptionFilename || filename == TLFilename.GeofencePrivateFilename)
             {
                 var p = GetExecutingPath();
-                p = p.Replace("Debug/net8.0/", "data/");
-                p = p.Replace("Debug\\net8.0\\", "data\\");
+                if (p == "/etc/teslalogger/")
+                {
+                    p = Path.Combine(p, "data");
+                }
+                else
+                {
+                    p = p.Replace("Debug/net8.0/", "data/");
+                    p = p.Replace("Debug\\net8.0\\", "data\\");
 
-                p = p.Replace("bin/data/", "data/");
-                p = p.Replace("bin\\data\\", "data\\");
+                    p = p.Replace("bin/data/", "data/");
+                    p = p.Replace("bin\\data\\", "data\\");
+                }
 
                 return Path.Combine(p, Filenames[filename]);
             }
