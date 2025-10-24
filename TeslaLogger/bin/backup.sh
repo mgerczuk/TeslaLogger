@@ -16,7 +16,7 @@ if [ $DAY -eq 1 ] && [ $MONTH -eq 1 ]; then
 fi
 
 if test -f "/tmp/teslalogger-DOCKER"; then
-    mysqldump -uroot -pteslalogger -hdatabase --single-transaction --routines --triggers teslalogger | gzip -9 > $SQLDUMP.gz
+    mysqldump -uteslalogger -pteslalogger -hmariadb --single-transaction --routines --triggers teslalogger | gzip -9 > $SQLDUMP.gz
 else
     mysqldump -uroot -pteslalogger  --single-transaction --routines --triggers teslalogger --ignore-table teslalogger.can | gzip -9 > $SQLDUMP-core.gz
     mysqldump -uroot -pteslalogger  --single-transaction --routines --triggers teslalogger can --where "datum >= '2024-01-01'" | gzip -9 > $SQLDUMP-can.gz

@@ -148,7 +148,7 @@ function JSONDatetoString($jsondate)
 
 function GrafanaVersion()
 {
-    $content = file_get_contents("http://grafana:3000/api/health");
+    $content = file_get_contents("http://teslalogger-grafana:3000/api/health");
     $j = json_decode($content);
     if (!empty($j->{"version"})) 
         return $j->{"version"};	

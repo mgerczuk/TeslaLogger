@@ -5,7 +5,7 @@ datasources:
     type: mysql
     url: mariadb:3306
     database: teslalogger
-    user: root
+    user: teslalogger
     uid: PC0C98BF192F75B00
     secureJsonData:
       password: teslalogger
