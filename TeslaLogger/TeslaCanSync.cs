@@ -81,11 +81,11 @@ namespace TeslaLogger
                 if (run && connected)
                     car.Log($"Connected to TeslaCAN host {hostName}");
 
-                if (run && connected) GetLogFiles().Wait();
-
-                while (run && connected)
+                try
                 {
-                    try
+                    if (run && connected) GetLogFiles().Wait();
+
+                    while (run && connected)
                     {
                         var data = GetTeslaCanData().Result;
 
@@ -93,6 +93,7 @@ namespace TeslaLogger
                         {
                             // car sleeping...
                             connected = false;
+                            Thread.Sleep(1000);
                         }
                         else
                         {
@@ -103,17 +104,17 @@ namespace TeslaLogger
                                 Thread.Sleep((int)(Seconds - lag.TotalSeconds + 0.5) * 1000);
                         }
                     }
-                    catch (Exception ex)
+                }
+                catch (Exception ex)
+                {
+                    if (!((ex as AggregateException)?.InnerExceptions[0] is HttpRequestException))
                     {
-                        if (!((ex as AggregateException)?.InnerExceptions[0] is HttpRequestException))
-                        {
-                            car.CreateExceptionlessClient(ex).Submit();
-                            car.Log("TeslaCAN: " + ex.Message);
-                            Logfile.WriteException(ex.ToString());
-                        }
-
-                        connected = false;
+                        car.CreateExceptionlessClient(ex).Submit();
+                        car.Log("TeslaCAN: " + ex.Message);
+                        Logfile.WriteException(ex.ToString());
                     }
+
+                    connected = false;
                 }
 
                 if (run)
