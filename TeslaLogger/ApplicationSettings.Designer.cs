@@ -258,7 +258,7 @@ namespace TeslaLogger {
             }
         }
         
-        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("http://teslalogger.lan:8081/teslaredirect/refresh_token.php")]
         public string RefreshTokenURL {
