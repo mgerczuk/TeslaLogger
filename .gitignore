@@ -50,6 +50,8 @@ TeslaLogger/bin/dashboardlinks.txt
 TeslaLogger/bin/MAP-Data/*
 TeslaLogger/bin/jsontest/*
 TeslaLogger/bin/NOBACKUPONUPDATE*
+TeslaLogger/bin/*.xml
+TeslaLogger/bin/*.pdb
 
 !UnitTestsTeslalogger/bin/Debug/
 UnitTestsTeslalogger/bin/Debug/*
