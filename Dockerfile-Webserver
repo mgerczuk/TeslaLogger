@@ -7,6 +7,7 @@ RUN apt-get update && \
   apt-get clean && \
   apt-get autoremove -y && \
   rm -rf /var/lib/apt/lists/* && \
+  sed -e '/<\/VirtualHost>/i \    PassEnv TESLALOGGER_LOGFILE' -i /etc/apache2/sites-available/000-default.conf && \
   sed -e '/<Directory \/var\/www\/>/,/<\/Directory>/s/AllowOverride None/AllowOverride All/' -i /etc/apache2/apache2.conf && \
   echo "1" > /var/tmp/dockerwebserverversion && \
   echo "1" > /var/tmp/dockernet8 

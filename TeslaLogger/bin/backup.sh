@@ -3,6 +3,8 @@
 mkdir -p /etc/teslalogger/backup
 mkdir -p /etc/teslalogger/Exception
 
+LOGFILE="${TESLALOGGER_LOGFILE:-/etc/teslalogger/nohup.out}"
+
 NOW=$(date +%Y%m%d%H%M%S)
 DAY=$(date +%d)
 MONTH=$(date +%m)
@@ -40,12 +42,12 @@ if [ $DAY -eq 1 ]; then
 	LOGBACKUP=/etc/teslalogger/backup/logfile-$YEAR$MONTH.gz
 	echo $LOGBACKUP
 	if ! test -f "$LOGBACKUP"; then
-	cp /etc/teslalogger/nohup.out /etc/teslalogger/logfile-$YEAR$MONTH.log
+	cp ${LOGFILE} /etc/teslalogger/logfile-$YEAR$MONTH.log
 		gzip -c9 /etc/teslalogger/logfile-*.log > $LOGBACKUP
 		if test -f "$LOGBACKUP"; then
 		rm /etc/teslalogger/logfile-*.log
 	fi
-	echo > /etc/teslalogger/nohup.out
+	echo > ${LOGFILE}
 	fi
 	#echo processing cleanup of files older than one year except yearly backups - thank you @saibot
 	find /etc/teslalogger/backup/ -type f -name "mysqldump*.gz" -mtime +365 -delete

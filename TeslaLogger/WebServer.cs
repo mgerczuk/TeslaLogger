@@ -2159,7 +2159,7 @@ DROP TABLE chargingstate_bak";
                     }
                 }
             }
-            if (File.Exists(Path.Combine(Logfile.GetExecutingPath(), "nohup.out")))
+            if (File.Exists(Logfile.Logfilepath))
             {
                 System.Globalization.CultureInfo ciDeDE = new System.Globalization.CultureInfo("de-DE");
                 int linenumber = 0;
@@ -2171,7 +2171,7 @@ DROP TABLE chargingstate_bak";
                 Tools.DebugLog($"startdate {startdate}");
                 Tools.DebugLog($"enddate {enddate}");
                 // parse nohup.out
-                foreach (string line in File.ReadAllLines(Path.Combine(Logfile.GetExecutingPath(), "nohup.out")))
+                foreach (string line in File.ReadAllLines(Logfile.Logfilepath))
                 {
                     if (startlinenumber == 0)
                     {
@@ -2205,7 +2205,7 @@ DROP TABLE chargingstate_bak";
                 {
                     startlinenumber += 17 - (TLstartlinenumber - startlinenumber);
                 }
-                foreach (string line in File.ReadAllLines(Path.Combine(Logfile.GetExecutingPath(), "nohup.out")))
+                foreach (string line in File.ReadAllLines(Logfile.Logfilepath))
                 {
                     // TL start was before startlinenumber
                     if (TLstartlinenumber < startlinenumber)

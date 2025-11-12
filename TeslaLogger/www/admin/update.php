@@ -1,7 +1,7 @@
 <?PHP
-	unlink("/etc/teslalogger/cmd_updated.txt");
+	require_once("tools.php");
 
-	$logfile = "/etc/teslalogger/nohup.out";
+	unlink("/etc/teslalogger/cmd_updated.txt");
 	$dockerfile = "/tmp/teslalogger-DOCKER";
 
 	$time = date("d.m.Y H:i:s", time());

@@ -1,6 +1,6 @@
 <?php 
-
 require_once("tools.php");
+
 $language = "en";
 $TemperatureUnit = "";
 $LengthUnit = "";
@@ -160,7 +160,6 @@ function logger($t)
 		return;
 	}
 
-	$logfile = "/etc/teslalogger/nohup.out";
 	$time = date("d.m.Y H:i:s", time());
 	$ret2 =	file_put_contents($logfile, $time . " : ". $t ."\r\n", FILE_APPEND);
 }

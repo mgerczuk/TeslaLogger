@@ -211,4 +211,7 @@ function GetDefaultCarId()
     return 1;
 }
 
+// Central logfile definition for PHP pages.
+$logfile = getenv('TESLALOGGER_LOGFILE') ?: '/etc/teslalogger/nohup.out';
+
 ?>

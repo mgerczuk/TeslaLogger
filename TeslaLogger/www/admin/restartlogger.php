@@ -1,8 +1,6 @@
 <?PHP
-	require("tools.php");
-
-	$logfile = "/etc/teslalogger/nohup.out";
-
+	require_once("tools.php");
+	
 	$time = date("d.m.Y H:i:s", time());
 	$ret2 =	file_put_contents($logfile, $time . " : Reboot request!\r\n", FILE_APPEND);
 	$ret2 =	file_put_contents($logfile, $time . " : --------------------------------------------\r\n\r\n", FILE_APPEND);

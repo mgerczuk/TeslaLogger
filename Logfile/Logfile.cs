@@ -28,14 +28,18 @@ namespace TeslaLogger
             {
                 if (_logfilepath == null)
                 {
-                    _logfilepath = Path.Combine(GetExecutingPath(), "nohup.out");
+                    var envLogFile = Environment.GetEnvironmentVariable("TESLALOGGER_LOGFILE");
+                    if (!string.IsNullOrEmpty(envLogFile))
+                    {
+                        _logfilepath = envLogFile;
+                    }
+                    else
+                    {
+                        _logfilepath = Path.Combine(GetExecutingPath(), "nohup.out");
+                    }
                 }
 
                 return _logfilepath;
-            }
-            set
-            {
-                _logfilepath = value;
             }
         }
 
@@ -208,6 +212,7 @@ namespace TeslaLogger
         public static string GetExecutingPath()
         {
             //System.IO.Directory.GetCurrentDirectory() is not returning the current path of the assembly
+            // TODO: FileManager has a similar method, consider refactoring
 
             System.Reflection.Assembly executingAssembly = System.Reflection.Assembly.GetExecutingAssembly();
 
