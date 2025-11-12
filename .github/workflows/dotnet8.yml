@@ -1,16 +1,39 @@
-name: .NET8
+name: .NET8 Build & Docker Publish
 
 on:
   workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Get release version
+        id: version
+        shell: bash
+        run: |
+          TAG=${{ github.event.release.tag_name }}
+          echo "Tag is: $TAG"
+          VERSION=${TAG#v}  # entfernt führendes 'v'
+          echo "Version without v: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update AssemblyInfo.cs with release version
+        shell: bash
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          FILE="TeslaLogger/Properties/AssemblyInfo.cs"
+          echo "Updating $FILE to version $VERSION"
+          sed -i "s/AssemblyVersion(\"[0-9.]*\")/AssemblyVersion(\"$VERSION\")/g" "$FILE"
+          sed -i "s/AssemblyFileVersion(\"[0-9.]*\")/AssemblyFileVersion(\"$VERSION\")/g" "$FILE"
+          echo "Updated AssemblyInfo.cs successfully."
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v3
@@ -20,19 +43,8 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore TeslaLoggerNET8.sln
 
-      - name: Build
-        run: dotnet build --no-restore TeslaLoggerNET8.sln
-
       - name: Publish
-        run: dotnet publish --no-restore -o publish TeslaLoggerNET8.sln
-
-      - name: Git describe tags
-        id: vars
-        shell: bash
-        run: |
-          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "1.0.0")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Building version: $VERSION"
+        run: dotnet publish --no-restore -o publish TeslaLogger/TeslaLoggerNET8.csproj
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -52,7 +64,7 @@ jobs:
           push: true
           tags: |
             ghcr.io/mgerczuk/teslalogger:latest
-            ghcr.io/mgerczuk/teslalogger:${{ steps.vars.outputs.version }}
+            ghcr.io/mgerczuk/teslalogger:${{ steps.version.outputs.version }}
           platforms: linux/amd64,linux/arm64
 
       - name: Build and push Webserver
@@ -63,9 +75,9 @@ jobs:
           push: true
           tags: | 
             ghcr.io/mgerczuk/teslalogger-webserver:latest
-            ghcr.io/mgerczuk/teslalogger-webserver:${{ steps.vars.outputs.version }}
+            ghcr.io/mgerczuk/teslalogger-webserver:${{ steps.version.outputs.version }}
           platforms: linux/amd64,linux/arm64
-    
+
       - name: Build and push Grafana
         uses: docker/build-push-action@v5
         with:
@@ -74,11 +86,5 @@ jobs:
           push: true
           tags: | 
             ghcr.io/mgerczuk/teslalogger-grafana:latest
-            ghcr.io/mgerczuk/teslalogger-grafana:${{ steps.vars.outputs.version }}
+            ghcr.io/mgerczuk/teslalogger-grafana:${{ steps.version.outputs.version }}
           platforms: linux/amd64,linux/arm64
-
-#      - name: Update Docker Version via HTTP GET
-#        run: |
-#          curl -v "https://teslalogger.de/set_latest_teslalogger_docker_version.php?apikey=${{ secrets.APIKEY_DOCKER_VERSION}}&version=${{ env.GIT_TAG }}"
-
-
