@@ -30,7 +30,7 @@ namespace TeslaLoggerNET8.Lucid
         private double longitude;
         private long last_updated_ms;
         private double kwhr;
-        private double kw;
+        private double PS;
         private double front_left_tire_pressure_bar;
         private double rear_left_tire_pressure_bar;
         private double front_right_tire_pressure_bar;
@@ -41,6 +41,8 @@ namespace TeslaLoggerNET8.Lucid
         private double max_cell_temp_db;
         private double min_cell_temp_db;
         private bool isDoorLocked;
+        private DateTime lastCapacity_kwhr = DateTime.MinValue;
+        private DateTime lastBatteryHealthLevel = DateTime.MinValue;
 
         internal LucidWebHelper(LucidCar car) : base(car)
         {
@@ -70,7 +72,7 @@ namespace TeslaLoggerNET8.Lucid
             return "";
         }
 
-        public override async Task<string> IsOnline(bool returnOnUnauthorized = false)
+        public override async Task<string> IsOnlineAsync(bool returnOnUnauthorized = false)
         {
             GetNewData();
 
@@ -89,7 +91,7 @@ namespace TeslaLoggerNET8.Lucid
             return "online";
         }
 
-        public override bool IsDriving(bool justinsertdb = false)
+        public override async Task<bool> IsDrivingAsync(bool justinsertdb = false)
         {
             GetNewData();
             bool isDriving = power == "POWER_STATE_DRIVE" || gear_position == "GEAR_DRIVE" || gear_position == "GEAR_REVERSE";
@@ -97,8 +99,8 @@ namespace TeslaLoggerNET8.Lucid
             if (justinsertdb || isDriving)
             {
                 var ts = Tools.ToUnixTime(DateTime.UtcNow) * 1000;
-                _ = SendDataToAbetterrouteplannerAsync(ts, battery_level, speed, false, kw, latitude, longitude);
-                int id = car.DbHelper.InsertPos(ts.ToString(), latitude, longitude, (int)Math.Round(speed), (decimal)kw, car.CurrentJSON.current_odometer, ideal_battery_range, ideal_battery_range, battery_level, car.CurrentJSON.current_inside_temperature, car.CurrentJSON.current_outside_temperature, elevation);
+                await SendDataToAbetterrouteplannerAsync(ts, battery_level, speed, false, PS, latitude, longitude);
+                int id = await car.DbHelper.InsertPosAsync(ts.ToString(), latitude, longitude, (int)Math.Round(speed), (decimal)PS, car.CurrentJSON.current_odometer, ideal_battery_range, ideal_battery_range, battery_level, car.CurrentJSON.current_inside_temperature, car.CurrentJSON.current_outside_temperature, elevation);
                 car.Log("Insert Pos " + id);
             }
             
@@ -108,7 +110,7 @@ namespace TeslaLoggerNET8.Lucid
             return isDriving;
         }
 
-        public override bool IsCharging(bool justCheck = false, bool noMemcache = false)
+        public override async Task<bool> IsChargingAsync(bool justCheck = false, bool noMemcache = false)
         {
             GetNewData();
             var charging = charge_state == "CHARGE_STATE_CHARGING";
@@ -150,6 +152,7 @@ namespace TeslaLoggerNET8.Lucid
             if (!string.IsNullOrEmpty(error))
             {
                 lastNewData = DateTime.UtcNow.AddMinutes(1);
+                car.Log("LucidAPIError: " + error);
                 return;
             }
 
@@ -355,6 +358,24 @@ namespace TeslaLoggerNET8.Lucid
                                     car.Log($"Lock: {isDoorLocked}");
                                 }
                                 break;
+                            case "capacity_kwhr":
+                                if (lastCapacity_kwhr.AddHours(24) < DateTime.Now)
+                                {
+                                    lastCapacity_kwhr = DateTime.Now;
+                                    double capacity_kwhr = double.Parse(value, CultureInfo.InvariantCulture);
+                                    car.DbHelper.InsertCan(71, capacity_kwhr); // Nominal full pack
+                                    car.Log($"Battery Capacity: {capacity_kwhr} kWh");
+                                }
+                                break;
+                            case "battery_health_level":
+                                if (lastBatteryHealthLevel.AddHours(24) < DateTime.Now)
+                                {
+                                    lastBatteryHealthLevel = DateTime.Now;
+                                    double battery_health_level = double.Parse(value, CultureInfo.InvariantCulture);
+                                    car.DbHelper.InsertCan(1000, battery_health_level); // Battery Health Level / SOH
+                                    car.Log($"Battery Health Level / SOH: {battery_health_level}");
+                                }
+                                break;
 
                             default:
                                 //Console.WriteLine($"Unknown Key: '{key}', Value: {value}");
@@ -394,12 +415,12 @@ namespace TeslaLoggerNET8.Lucid
 
             if (Math.Abs(p) < 1000)
             {
-                kw = p;
-                car.Log($"kwhr {kwhr} / kwhrdiff {kwhrdiff} / ms {ms} / p: {Math.Round(p, 1)} kW");
+                PS = p * 1.3596;
+                car.Log($"kwhr {kwhr} / kwhrdiff {kwhrdiff} / ms {ms} / p: {Math.Round(PS, 1)} PS");
             }
             else
             {
-                car.Log($"ERROR: kwhr {kwhr} / kwhrdiff {kwhrdiff} / ms {ms} / p: {Math.Round(p, 1)} kW");
+                car.Log($"ERROR: kwhr {kwhr} / kwhrdiff {kwhrdiff} / ms {ms} / p: {Math.Round(PS, 1)} PS");
             }
         }
 
@@ -513,11 +534,11 @@ namespace TeslaLoggerNET8.Lucid
                             }
 
                             var ts = DateTime.UtcNow - start;
-                            DBHelper.AddMothershipDataToDB("LucidAPI", ts.TotalSeconds, 500, carid);
+                            _ = DBHelper.AddMothershipDataToDBAsync("LucidAPI", ts.TotalSeconds, 500, carid);
                         }
                         else
                         {
-                            DBHelper.AddMothershipDataToDB("LucidAPI", start, 0, carid);
+                            _ = DBHelper.AddMothershipDataToDBAsync("LucidAPI", start, 0, carid);
                         }
 
                         return output;
@@ -528,7 +549,7 @@ namespace TeslaLoggerNET8.Lucid
             {
                 car.Log($"An error occurred: {ex.Message}");
                 var ts = DateTime.UtcNow - start;
-                DBHelper.AddMothershipDataToDB("LucidAPI", ts.TotalSeconds, 400, carid);
+                _ = DBHelper.AddMothershipDataToDBAsync("LucidAPI", ts.TotalSeconds, 400, carid);
             }
             
 

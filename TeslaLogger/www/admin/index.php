@@ -39,7 +39,7 @@ else
     <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
     <title>Teslalogger</title>
 	<link rel="stylesheet" href="static/jquery/ui/1.12.1/themes/smoothness/jquery-ui.css">
-	<link rel="stylesheet" href="static/teslalogger_style.css?v=4">
+	<link rel="stylesheet" href="static/teslalogger_style.css?v=5">
 	<script src="static/jquery/jquery-1.12.4.js"></script>
 	<script src="static/jquery/ui/1.12.1/jquery-ui.js"></script>
 	<script src="static/jquery/jquery-migrate-1.4.1.min.js"></script>
@@ -172,7 +172,11 @@ else
 			$('#battery_level').text(jsonData["battery_level"]);
 			if (jsonData["car_version"]) {
 				var car_version = jsonData["car_version"];
-				car_version = car_version.substring(0,car_version.lastIndexOf(" "));
+
+				var hashpos = car_version.lastIndexOf(" ");
+				if (hashpos > 0)
+					car_version = car_version.substring(0, hashpos);
+				
 				$('#car_version').text(car_version);
 				$('#car_version_link').attr("href", "https://www.notateslaapp.com/software-updates/version/"+ car_version +"/release-notes");
 			}
@@ -246,7 +250,17 @@ else
 				var text = "<?php t("Online"); ?>";
 
 				if (jsonData["is_preconditioning"])
-					text = text + "<br><?php t("Preconditioning"); ?> " + parseFloat(jsonData["inside_temperature"]).toFixed(1) +"°C";
+				{
+					text = text + "<br><?php t("Preconditioning"); ?> ";
+					if (TemperatureUnit == "fahrenheit")
+					{
+						text += (parseFloat(jsonData["inside_temperature"]) * 9/5 + 32).toFixed(1) + " °F";
+					}
+					else
+					{
+						text += parseFloat(jsonData["inside_temperature"]).toFixed(1) + " °C";
+					}
+				}
 
 				if (jsonData["sentry_mode"])
 					text = text + "<br><?php t("Sentry Mode"); ?>";
@@ -407,7 +421,14 @@ else
 		if (jsonData["SMTCellTempAvg"])
 		{
 			$('#CellTempRow').show();
-			$('#CellTemp').text(Math.round(jsonData["SMTCellTempAvg"] * 10)/10 + "°C");
+			if (TemperatureUnit == "fahrenheit")
+			{
+				$('#CellTemp').text(Math.round((jsonData["SMTCellTempAvg"] * 9/5 + 32) * 10)/10 + "°F");
+			}
+			else
+			{
+				$('#CellTemp').text(Math.round(jsonData["SMTCellTempAvg"] * 10)/10 + "°C");
+			}
 		}
 		else
 		{
@@ -453,7 +474,25 @@ else
   </head>
   <body>
   <?php
-    echo(menu("Teslalogger"));
+	$teslaloggername = "Teslalogger";
+	if (isDockerNet8())
+		$teslaloggername = "Teslalogger Docker NET8";
+	else if (isDocker())
+		$teslaloggername = "Teslalogger <span style=color:red>Docker MONO</span>";
+	else if (isRaspberryNET8())
+	{
+		$teslaloggername = "Teslalogger NET8";
+	}
+	else
+	{
+		exec('lsb_release -cs', $out);
+		if (strpos($out[0], 'buster') !== false)
+			$teslaloggername = "Teslalogger <span style=color:red>MONO</span>"; // Buster with MONO
+		else
+			$teslaloggername = "Teslalogger <span style=color:red>MONO old</span>"; // old Raspberry with MONO (stretch)
+	}
+
+    echo(menu($teslaloggername));
 ?>
 
   <div id="content" style="max-width:1036px;">
@@ -496,7 +535,7 @@ else
 	  <tr><td><b><?php t("Distance"); ?>:</b></td><td><span id="trip_distance">---</span> <span id="lt_trip_distance_km"><?php t("km"); ?></span></td></tr>
 	  <tr><td><b><?php t("Consumption"); ?>:</b></td><td><span id="trip_kwh">---</span> <?php t("kWh"); ?></td></tr>
 	  <tr><td><b><?php t("Ø Consumption"); ?>:</b></td><td><span id="trip_avg_kwh">---</span> <span id="lt_whkm"><?php t("Wh/km"); ?></span></td></tr>
-	  <tr><td><b><?php t("Max km/h"); ?>:</b></td><td><span id="max_speed">---</span> <?php t("km/h"); ?></span> </td></tr>
+	  <tr><td><b><?php t("Max km/h"); ?>:</b></td><td><span id="max_speed">---</span> <span id='lt_kmh'><?php t("km/h"); ?></span> </td></tr>
   </table>
   </div>
 

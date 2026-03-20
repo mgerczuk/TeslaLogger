@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Text;
 using Newtonsoft.Json;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace TeslaLogger
 {
@@ -76,7 +77,7 @@ namespace TeslaLogger
         }
 
         [SuppressMessage("Security", "CA2100:Review SQL queries for security vulnerabilities")]
-        public void SendAllChargingData()
+        public async Task SendAllChargingDataAsync()
         {
             if (!shareData)
             {
@@ -198,9 +199,9 @@ ORDER BY
                                     {
 
                                         DateTime start = DateTime.UtcNow;
-                                        HttpResponseMessage result = client.PostAsync(new Uri("http://teslalogger.de/share_charging.php"), content).Result;
-                                        string r = result.Content.ReadAsStringAsync().Result;
-                                        DBHelper.AddMothershipDataToDB("teslalogger.de/share_charging.php", start, (int)result.StatusCode, car.CarInDB);
+                                        HttpResponseMessage result = await client.PostAsync(new Uri("http://teslalogger.de/share_charging.php"), content);
+                                        string r = await result.Content.ReadAsStringAsync();
+                                        await DBHelper.AddMothershipDataToDBAsync("teslalogger.de/share_charging.php", start, (int)result.StatusCode, car.CarInDB);
 
                                         //resultContent = result.Content.ReadAsStringAsync();
                                         car.Log("ShareData: " + r);
@@ -318,7 +319,7 @@ ORDER BY
             }
         }
 
-        public void SendAllDrivingData()
+        public async Task SendAllDrivingDataAsync()
         {
             if (!shareData)
             {
@@ -370,7 +371,7 @@ ORDER BY
                     using (MySqlDataAdapter da = new MySqlDataAdapter(sql, DBHelper.DBConnectionstring))
                     {
                         da.SelectCommand.CommandTimeout = 600;
-                        SQLTracer.TraceDA(dt, da);
+                        await da.FillAsync(dt);
                         ms = Environment.TickCount - ms;
                         car.Log("ShareData: SELECT drivestate ms: " + ms);
 
@@ -407,9 +408,9 @@ ORDER BY
                                 {
 
                                     DateTime start = DateTime.UtcNow;
-                                    HttpResponseMessage result = client.PostAsync(new Uri("http://teslalogger.de/share_drivestate.php"), content).Result;
-                                    string r = result.Content.ReadAsStringAsync().Result;
-                                    DBHelper.AddMothershipDataToDB("teslalogger.de/share_drivestate.php", start, (int)result.StatusCode, car.CarInDB);
+                                    HttpResponseMessage result = await client.PostAsync(new Uri("http://teslalogger.de/share_drivestate.php"), content);
+                                    string r = await result.Content.ReadAsStringAsync();
+                                    _ = DBHelper.AddMothershipDataToDBAsync("teslalogger.de/share_drivestate.php", start, (int)result.StatusCode, car.CarInDB);
 
                                     //resultContent = result.Content.ReadAsStringAsync();
                                     car.Log("ShareData: " + r);
@@ -419,7 +420,7 @@ ORDER BY
                                         var ids = from myrow in dt.AsEnumerable() select myrow["hostid"];
                                         var l =  String.Join(",", ids.ToArray());
 
-                                        DBHelper.ExecuteSQLQuery($"update drivestate set export = {ProtocolVersion} where id in ({l})");
+                                        await DBHelper.ExecuteSQLQueryAsync($"update drivestate set export = {ProtocolVersion} where id in ({l})");
                                     }
 
                                     car.Log("ShareData: SendAllDrivingData end");
@@ -449,13 +450,15 @@ ORDER BY
             }
         }
 
-        public void SendDegradationData()
+        public async Task SendDegradationDataAsync()
         {
 
             if (!shareData)
             {
                 return;
             }
+
+            car.lastSendDegradationData = DateTime.Now;
 
             try
             {
@@ -508,7 +511,7 @@ GROUP BY
                     {
                         da.SelectCommand.Parameters.AddWithValue("@carid", car.CarInDB);
                         da.SelectCommand.CommandTimeout = 600;
-                        SQLTracer.TraceDA(dt, da);
+                        await da.FillAsync(dt);
                         ms = Environment.TickCount - ms;
                         car.Log("ShareData: SELECT degradation Data ms: " + ms);
 
@@ -549,9 +552,9 @@ GROUP BY
                                 {
 
                                     DateTime start = DateTime.UtcNow;
-                                    HttpResponseMessage result = client.PostAsync(new Uri("http://teslalogger.de/share_degradation.php"), content).Result;
-                                    string r = result.Content.ReadAsStringAsync().Result;
-                                    DBHelper.AddMothershipDataToDB("teslalogger.de/share_degradation.php", start, (int)result.StatusCode, car.CarInDB);
+                                    HttpResponseMessage result = await client.PostAsync(new Uri("http://teslalogger.de/share_degradation.php"), content);
+                                    string r = await result.Content.ReadAsStringAsync();
+                                    await DBHelper.AddMothershipDataToDBAsync("teslalogger.de/share_degradation.php", start, (int)result.StatusCode, car.CarInDB);
 
                                     //resultContent = result.Content.ReadAsStringAsync();
                                     car.Log("ShareData: " + r);

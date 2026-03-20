@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using System.Diagnostics;
 using TeslaLoggerNET8.Lucid;
+using TeslaLoggerNET8.Kafka;
 
 namespace TeslaLogger
 {
@@ -86,6 +87,8 @@ namespace TeslaLogger
                 GetAllCars();
 
                 InitNearbySuCService();
+
+                OnlineUpdateGeofenceInBackground();
             }
             catch (Exception ex)
             {
@@ -123,10 +126,13 @@ namespace TeslaLogger
         {
             try
             {
-                if (File.Exists("TESLALOGGERNET8"))
+                var net8version = Tools.GetNET8Version();
+                if (net8version?.Contains("8.") == true)
                 {
-                    var net8version = Tools.GetNET8Version();
-                    if (net8version?.Contains("8.") == true)
+#if NET8_0
+                    return;
+#endif
+                    if (!File.Exists("NOTUSETESLALOGGERNET8") && NET8TaskerToken())
                     {
                         Logfile.Log("Start Teslalogger.net8");
 
@@ -149,7 +155,7 @@ namespace TeslaLogger
 
                         Thread.Sleep(5000);
 
-                        Thread.CurrentThread.Abort();
+                        Environment.Exit(0);
                     }
                 }
             }
@@ -157,6 +163,24 @@ namespace TeslaLogger
             {
                 ex.ToExceptionless().FirstCarUserID().Submit();
                 Logfile.Log(ex.ToString());
+            }
+        }
+
+        private static bool NET8TaskerToken()
+        {
+            try
+            {
+                return true;
+                
+                /*
+                    WaitForDB();
+                    return DBHelper.NET8TaskerToken();
+                */
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log("NET8TaskerToken: cannot connect to DB: " + ex.ToString());
+                return false;
             }
         }
 
@@ -171,12 +195,20 @@ namespace TeslaLogger
                     {
                         Thread mqttThread = new Thread(() =>
                         {
-                        MQTT.GetSingleton().RunMqtt();
+                            try
+                            {
+                                MQTT.GetSingleton().RunMqtt();
+                            }
+                            catch (Exception ex)
+                            {
+                                ex.ToExceptionless().FirstCarUserID().Submit();
+                                Logfile.Log(ex.ToString());
+                            }
                         })
                         {
                             Name = "MqttThread"
                         };
-                        mqttThread.Start();
+                        mqttThread.Start(); 
                     }
                 }
                 else
@@ -196,16 +228,9 @@ namespace TeslaLogger
         {
             try
             {
-                
-                Thread threadNearbySuCService = new Thread(() =>
-                {
-                    NearbySuCService.GetSingleton().Run();
-                })
-                {
-                    Name = "NearbySuCServiceThread"
-                };
-                threadNearbySuCService.Start();
-                
+                Task.Run(async() => {                    
+                    await NearbySuCService.GetSingleton().Run();
+                });                
             }
             catch (Exception ex)
             {
@@ -225,7 +250,7 @@ namespace TeslaLogger
                     Thread.Sleep(500);
                 }
                 dt.Clear();
-            }
+            } 
         }
 
         internal static void StartCarThread(DataRow r, Car.TeslaState oldCarState = Car.TeslaState.Start)
@@ -241,13 +266,11 @@ namespace TeslaLogger
                 {
                     string komoot_vin = Komoot.CheckVIN(id, r["vin"].ToString());
                     Komoot _komoot = new Komoot(id, Name.Replace("KOMOOT:", string.Empty), Password);
-                    Thread komootThread = new Thread(() =>
+                    Task.Run(async() =>
                     {
-                        _komoot.Run();
+                        await _komoot.RunAsync();
                     });
-                    komootThread.Name = $"KomootThread_{id}";
                     Logfile.Log($"starting Komoot thread for ID {id} {Name.Replace("KOMOOT:", string.Empty)} <{komoot_vin}>");
-                    komootThread.Start();
                     return; // do not start a car thread for komoot "cars"
                 }
                 String tesla_token = r["tesla_token"] as String ?? "";
@@ -278,6 +301,7 @@ namespace TeslaLogger
                 double? wh_tr = r["wh_tr"] as double?;
                 string wheel_type = r["wheel_type"] as String ?? "";
                 bool raven = false;
+                bool isKafkaCar = false;
                 if (r["raven"] != DBNull.Value && Convert.ToInt32(r["raven"]) == 1)
                     raven = true;
 
@@ -288,6 +312,8 @@ namespace TeslaLogger
                 bool virtualKey = false;
                 if (r["virtualkey"] != DBNull.Value && Convert.ToInt32(r["virtualkey"]) == 1)
                     virtualKey = true;
+                else if (r["virtualkey"] != DBNull.Value && Convert.ToInt32(r["virtualkey"]) == 2)
+                    isKafkaCar = true;
 
                 string access_type = "";
                 if (r["access_type"] != DBNull.Value)
@@ -297,6 +323,10 @@ namespace TeslaLogger
                 if (car_type == "LUCID")
                 {
                     LucidCar car = new LucidCar(id, Name, Password, car_id_in_account, "LUCID", tesla_token_expire, Model_Name, car_type, car_special_type, car_trim_badging, display_name, vin, tasker_hash, wh_tr, fleetAPI, oldCarState, wheel_type);
+                }
+                else if (isKafkaCar)
+                {
+                    KafkaCar car = new (id, Name, Password, car_id_in_account, tesla_token, tesla_token_expire, Model_Name, car_type, car_special_type, car_trim_badging, display_name, vin, tasker_hash, wh_tr, fleetAPI, oldCarState, wheel_type);
                 }
                 else
                 {
@@ -399,6 +429,12 @@ namespace TeslaLogger
         private static void InitStage2()
         {
             TestEncryption();
+            Logfile.Log("Path of settings.json: " + FileManager.GetFilePath(TLFilename.SettingsFilename));
+            Logfile.Log("Path of invoices: " + FileManager.GetInvoicePath());
+            Logfile.Log("Path of nohup.out: " + FileManager.GetLogfilePath());
+            Logfile.Log("Path of backup folder: " + FileManager.GetBackupPath());
+            Logfile.Log("Path of Map Cache: " + FileManager.GetMapCachePath());
+            Logfile.Log("Path of SRTM Data: " + FileManager.GetSRTMDataPath());
 
             KeepOnlineMinAfterUsage = Tools.GetSettingsInt("KeepOnlineMinAfterUsage", ApplicationSettings.Default.KeepOnlineMinAfterUsage);
             SuspendAPIMinutes = Tools.GetSettingsInt("SuspendAPIMinutes", ApplicationSettings.Default.SuspendAPIMinutes);
@@ -519,7 +555,18 @@ namespace TeslaLogger
 
         private static void InitConnectToDB()
         {
-            for (int x = 1; x <= 30; x++) // try 30 times until DB is up and running
+            WaitForDB();
+
+            UpdateTeslalogger.Start();
+            _ = Task.Factory.StartNew(() =>
+            {
+                UpdateTeslalogger.UpdateGrafana();
+            }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+        }
+
+        private static void WaitForDB()
+        {
+            for (int x = 1; x <= 300; x++) // try 300 times until DB is up and running
             {
                 try
                 {
@@ -533,7 +580,7 @@ namespace TeslaLogger
                         || ex.Message.Contains("Unable to connect to any of the specified MySQL hosts")
                         || ex.Message.Contains("Reading from the stream has failed."))
                     {
-                        Logfile.Log($"Wait for DB ({x}/30): Connection refused.");
+                        Logfile.Log($"Wait for DB ({x}/300): Connection refused.");
                     }
                     else
                     {
@@ -544,11 +591,6 @@ namespace TeslaLogger
                     Thread.Sleep(15000);
                 }
             }
-
-            UpdateTeslalogger.Start();
-            _ = Task.Factory.StartNew(() => {
-                UpdateTeslalogger.UpdateGrafana();
-            }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
         }
 
         private static void InitCheckDocker()
@@ -623,7 +665,7 @@ namespace TeslaLogger
 
         public static string GetDefaultConfigFileContent()
         {
-            return "{\"SleepTimeSpanStart\":\"\",\"SleepTimeSpanEnd\":\"\",\"SleepTimeSpanEnable\":\"false\",\"Power\":\"hp\",\"Temperature\":\"celsius\",\"Length\":\"km\",\"Language\":\"en\",\"URL_Admin\":\"\",\"ScanMyTesla\":\"false\"}";
+            return "{\"SleepTimeSpanStart\":\"\",\"SleepTimeSpanEnd\":\"\",\"SleepTimeSpanEnable\":\"false\",\"Power\":\"hp\",\"Temperature\":\"celsius\",\"Length\":\"km\",\"Pressure\":\"bar\",\"Language\":\"en\",\"URL_Admin\":\"\",\"ScanMyTesla\":\"false\"}";
         }
 
         internal static void RunHousekeepingInBackground()
@@ -638,7 +680,7 @@ namespace TeslaLogger
                 DateTime start = DateTime.Now;
                 Logfile.Log("RunHousekeepingInBackground started");
                 Tools.Housekeeping();
-                DBHelper.UpdateCO2();
+                DBHelper.UpdateCO2Async().Wait();
                 GeocodeCache.Cleanup();
                 Logfile.Log("RunHousekeepingInBackground finished, took " + (DateTime.Now - start).TotalMilliseconds + "ms");
             })
@@ -646,6 +688,24 @@ namespace TeslaLogger
                 Priority = ThreadPriority.BelowNormal
             };
             Housekeeper.Start();
+        }
+
+        internal static void OnlineUpdateGeofenceInBackground()
+        {
+            Thread GeofenceOnlineUpdater = new Thread(() =>
+            {
+                // initially sleep 5min
+                Thread.Sleep(300000); // 5min
+                while (true)
+                {
+                    Geofence.GetInstance().OnlineUpdate();
+                    Thread.Sleep(86400000); // 24h
+                }
+            })
+            {
+                Priority = ThreadPriority.BelowNormal
+            };
+            GeofenceOnlineUpdater.Start();
         }
 
         private static void ExitTeslaLogger(string _msg, int _exitcode = 0)
@@ -692,15 +752,15 @@ namespace TeslaLogger
             }
 
 
-            Thread DBUpdater = new Thread(() =>
+            Task.Run(async () =>
             {
                 try
                 {
                     // wait for DB updates
                     while (!UpdateTeslalogger.done.IsCancellationRequested)
-                        Thread.Sleep(5000);
+                        await Task.Delay(5000);
 
-                    Thread.Sleep(30000);
+                    await Task.Delay(30000);
 
                     DateTime start = DateTime.Now;
                     Logfile.Log("UpdateDbInBackground started");
@@ -728,9 +788,9 @@ namespace TeslaLogger
                     {
                         Car c = Car.Allcars[x];
                         ShareData sd = new ShareData(c);
-                        sd.SendAllChargingData();
-                        sd.SendDegradationData();
-                        sd.SendAllDrivingData();
+                        await sd.SendAllChargingDataAsync();
+                        await sd.SendDegradationDataAsync();
+                        await sd.SendAllDrivingDataAsync();
                     }
 
                     DBHelper.UpdateCarIDNull();
@@ -761,12 +821,7 @@ namespace TeslaLogger
                     ex.ToExceptionless().FirstCarUserID().Submit();
                     Logfile.Log(ex.ToString());
                 }
-            })
-            {
-                Priority = ThreadPriority.BelowNormal
-            };
-            DBUpdater.Name = "DBUpdaterThread";
-            DBUpdater.Start();
+            });
         }
     }
 }

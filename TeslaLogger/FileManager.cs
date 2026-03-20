@@ -1,8 +1,9 @@
-﻿using System;
+﻿using Exceptionless;
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
-using Exceptionless;
 
 namespace TeslaLogger
 {
@@ -76,6 +77,34 @@ namespace TeslaLogger
 
             return Path.Combine(GetExecutingPath(), Filenames[filename]);
         }
+
+        public static string GetLogfilePath()
+        {
+            string logfilepath = Logfile.Logfilepath;
+            if (Tools.IsRaspberry_NET8())
+                logfilepath = "/etc/teslalogger/nohup.out";
+
+            return logfilepath;
+        }
+
+        public static string GetInvoicePath()
+        {
+            string invoiceDir = Path.Combine(Logfile.GetExecutingPath(), "tesla_invoices");
+            if (Tools.IsRaspberry_NET8())
+                invoiceDir = "/etc/teslalogger/tesla_invoices";
+
+            return invoiceDir;
+        }
+
+        public static string GetBackupPath()
+        {
+            var path = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "backup");
+            if (Tools.IsRaspberry_NET8())
+                path = "/etc/teslalogger/backup";
+
+            return path;
+        }
+
 
         internal static string GetFilePath(string filename)
         {
@@ -175,6 +204,9 @@ namespace TeslaLogger
         internal static string GetSRTMDataPath()
         {
             string path = Path.Combine(GetExecutingPath(), "SRTM-Data");
+            if (Tools.IsDockerNET8())
+                path = "/etc/teslalogger/data/SRTM-Data";
+
             if (!Directory.Exists(path))
             {
                 Directory.CreateDirectory(path);
@@ -186,6 +218,9 @@ namespace TeslaLogger
         internal static string GetMapCachePath()
         {
             string path = Path.Combine(GetExecutingPath(), "MAP-Data");
+            if (Tools.IsDockerNET8())
+                path = "/etc/teslalogger/data/MAP-Data";
+
             if (!Directory.Exists(path))
             {
                 Directory.CreateDirectory(path);

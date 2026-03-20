@@ -4,7 +4,9 @@ using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Org.BouncyCastle.Tls;
 using uPLibrary.Networking.M2Mqtt;
 using uPLibrary.Networking.M2Mqtt.Messages;
 
@@ -40,10 +42,10 @@ namespace TeslaLogger
             mqttClient = new MqttClient(config.Hostname, config.Port, config.Secure, MqttSslProtocols.TLSv1_2,
                 UserCertificateValidationCallback, UserCertificateSelectionCallback);
 
-            mqttClient.MqttMsgPublishReceived += MqttClient_MqttMsgPublishReceived;
+            mqttClient.MqttMsgPublishReceived += (sender, e) => { _ = MqttClient_MqttMsgPublishReceivedAsync(sender, e); };
             mqttClient.ConnectionClosed += MqttClient_ConnectionClosed;
 
-            t = new Thread(Run);
+            t = new Thread(() => { RunAsync().Wait(); });
             t.Start();
 
             if (Connect())
@@ -77,7 +79,7 @@ namespace TeslaLogger
         }
 
 
-        private void MqttClient_MqttMsgPublishReceived(object sender, MqttMsgPublishEventArgs e)
+        private async Task MqttClient_MqttMsgPublishReceivedAsync(object sender, MqttMsgPublishEventArgs e)
         {
             var topic = e.Topic.Split('/');
             var msg = Encoding.UTF8.GetString(e.Message);
@@ -91,11 +93,11 @@ namespace TeslaLogger
             switch (topic[2])
             {
                 case "v":
-                    parser.handleMessage(msg);
+                    await parser.handleMessageAsync(msg);
                     break;
 
                 case "alerts":
-                    parser.handleMessage(msg);
+                    await parser.handleMessageAsync(msg);
                     break;
 
                 case "connectivity":
@@ -143,7 +145,7 @@ namespace TeslaLogger
             return true;
         }
 
-        private void Run()
+        private async Task RunAsync()
         {
             while (true)
             {

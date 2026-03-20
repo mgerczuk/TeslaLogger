@@ -34,6 +34,7 @@ namespace TeslaLogger
         private static string _power = "hp";
         private static string _temperature = "celsius";
         private static string _length = "km";
+        private static string _pressure = "bar";
         private static string _language = "de";
         private static string _URL_Admin = "";
         private static string _URL_Grafana = "http://raspberry:3000/";
@@ -200,7 +201,7 @@ namespace TeslaLogger
 
         public static void StartOVMS()
         {
-            string OVMSClientPath = "/etc/teslalogger/OVMS/OVMS.exe";
+            string OVMSClientPath = "/etc/teslalogger/OVMS/OVMS.dll";
 
             try
             {
@@ -217,7 +218,7 @@ namespace TeslaLogger
                 {
                     proc.StartInfo.UseShellExecute = false;
                     proc.StartInfo.RedirectStandardOutput = true;
-                    proc.StartInfo.FileName = "mono";
+                    proc.StartInfo.FileName = "dotnet";
                     proc.StartInfo.Arguments = OVMSClientPath + " nodate";
 
                     proc.Start();
@@ -1120,7 +1121,7 @@ namespace TeslaLogger
             return UpdateType.all;
         }
 
-        internal static void GrafanaSettings(out string power, out string temperature, out string length, out string language, out string URL_Admin, out string Range, out string URL_Grafana, out string defaultcar, out string defaultcarid)
+        internal static void GrafanaSettings(out string power, out string temperature, out string length, out string pressure, out string language, out string URL_Admin, out string Range, out string URL_Grafana, out string defaultcar, out string defaultcarid)
         {
             TimeSpan ts = DateTime.UtcNow - lastGrafanaSettings;
             if (ts.TotalMinutes < 10)
@@ -1128,6 +1129,7 @@ namespace TeslaLogger
                 power = _power;
                 temperature = _temperature;
                 length = _length;
+                pressure = _pressure;
                 language = _language;
                 URL_Admin = _URL_Admin;
                 Range = _Range;
@@ -1140,6 +1142,7 @@ namespace TeslaLogger
             power = "hp";
             temperature = "celsius";
             length = "km";
+            pressure = "bar";
             language = "de";
             URL_Admin = "";
             Range = "IR";
@@ -1176,6 +1179,11 @@ namespace TeslaLogger
                 if (IsPropertyExist(j, "Length"))
                 {
                     length = j["Length"];
+                }
+
+                if (IsPropertyExist(j, "Pressure"))
+                {
+                    pressure = j["Pressure"];
                 }
 
                 if (IsPropertyExist(j, "Language"))
@@ -1226,6 +1234,7 @@ namespace TeslaLogger
                 _power = power;
                 _temperature = temperature;
                 _length = length;
+                _pressure = pressure;
                 _language = language;
                 _URL_Admin = URL_Admin;
                 _Range = Range;
@@ -1375,6 +1384,14 @@ namespace TeslaLogger
             return Environment.Version?.ToString()?.StartsWith("8.0") == true;
         }
 
+        public static bool IsRaspberry_NET8()
+        {
+            if (!Tools.IsDocker() && !Tools.IsDockerNET8() && Tools.IsDotnet8() && RunOnLinux())
+                return true;
+            
+            return false;
+        }
+
         public static bool IsDockerNET8()
         {
             try
@@ -1405,7 +1422,13 @@ namespace TeslaLogger
                     return File.Exists("/tmp/sharedata.txt");
                 }
 
-                string filepath = Path.Combine(FileManager.GetExecutingPath(), "sharedata.txt");
+                string filepath = Path.Combine("/etc/teslalogger", "sharedata.txt");
+                if (File.Exists(filepath))
+                {
+                    return true;
+                }
+
+                filepath = Path.Combine(FileManager.GetExecutingPath(), "sharedata.txt");
                 if (File.Exists(filepath))
                 {
                     return true;
@@ -1705,7 +1728,8 @@ namespace TeslaLogger
         {
             try
             {
-                var nohup = Logfile.Logfilepath;
+                var nohup = FileManager.GetLogfilePath();
+
                 // check if nohup.out is bigger than 10MB
                 if (new FileInfo(nohup).Length > 10000000)
                 {
@@ -1774,7 +1798,8 @@ namespace TeslaLogger
                 return;
             }
 
-            DirectoryInfo di = new DirectoryInfo(Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "backup"));
+            var path = FileManager.GetBackupPath();
+            var di = new DirectoryInfo(path);
 
             if (di.Exists)
             {
@@ -1835,6 +1860,12 @@ namespace TeslaLogger
                     }
                 }
             }
+            else
+            {
+                Logfile.Log("Directory for Backup does not exist: " + path);
+            }
+
+
             if (filesFoundForDeletion)
             {
                 Logfile.Log($"Housekeeping: {countDeletedFiles} file(s) deleted in Backup directory, Free Disk Space now: {FreeDiskSpaceMB()} MB");
@@ -2037,9 +2068,12 @@ WHERE
             {
                 _ = ExecMono("/usr/bin/du", "-sk " + Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) + "/Exception", true, true);
             }
-            if (File.Exists(Logfile.Logfilepath))
+
+            var logfilePath = FileManager.GetLogfilePath();
+
+            if (File.Exists(logfilePath))
             {
-                _ = ExecMono("/usr/bin/du", "-sk " + Logfile.Logfilepath, true, true);
+                _ = ExecMono("/usr/bin/du", "-sk " + logfilePath, true, true);
             }
         }
 

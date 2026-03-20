@@ -25,9 +25,10 @@ namespace TeslaLogger
         private readonly string logDir;
         private readonly string url = "http://teslacan-esp.lan";
 
-        private bool run = true;
-        private Thread thread;
         private readonly TeslaCanHost teslaCan;
+
+        CancellationTokenSource cancellationTokenSource = new();
+        Task taskLoop;
 
         internal TeslaCanSync(Car c)
         {
@@ -40,29 +41,30 @@ namespace TeslaLogger
                 logDir = Path.Combine(Logfile.GetExecutingPath(), "logs", $"teslacan-{c.CarInDB}");
 
                 teslaCan = new TeslaCanHost($"teslacan-{c.CarInDB}");
-                thread = new Thread(Start);
-                thread.Name = "TeslaCAN_" + car.CarInDB;
-                thread.Start();
+                taskLoop = Task.Run(async () =>
+                {
+                    await Start();
+                });
             }
         }
 
         private bool WaitConnected(string hostName)
         {
-            if (run && teslaCan.IsConnected())
+            if (!cancellationTokenSource.IsCancellationRequested && teslaCan.IsConnected())
             {
                 return true;
             }
 
             var connected = false;
-            while (run && !connected)
+            while (!cancellationTokenSource.IsCancellationRequested && !connected)
             {
                 connected = teslaCan.WaitForInstance(30000);
             }
 
-            return run && connected;
+            return !cancellationTokenSource.IsCancellationRequested && connected;
         }
 
-        private void Start()
+        private async Task Start()
         {
             if (!Tools.UseScanMyTesla())
             {
@@ -74,18 +76,18 @@ namespace TeslaLogger
             hostName = hostName.Substring(0, hostName.Length - 4);
             car.Log($"Start refactored TeslaCAN Thread with host {hostName}");
 
-            while (run)
+            while (!cancellationTokenSource.IsCancellationRequested)
             {
                 var connected = WaitConnected(hostName);
 
-                if (run && connected)
+                if (!cancellationTokenSource.IsCancellationRequested && connected)
                     car.Log($"Connected to TeslaCAN host {hostName}");
 
                 try
                 {
-                    if (run && connected) GetLogFiles().Wait();
+                    if (!cancellationTokenSource.IsCancellationRequested && connected) GetLogFiles().Wait();
 
-                    while (run && connected)
+                    while (!cancellationTokenSource.IsCancellationRequested && connected)
                     {
                         var data = GetTeslaCanData().Result;
 
@@ -93,15 +95,15 @@ namespace TeslaLogger
                         {
                             // car sleeping...
                             connected = false;
-                            Thread.Sleep(1000);
+                            await Task.Delay(1000, cancellationTokenSource.Token);
                         }
                         else
                         {
-                            foreach (var d in data) SaveData(d);
+                            foreach (var d in data) await SaveData(d);
 
                             var lag = DateTime.Now - data.Last().Timestamp;
                             if (lag < TimeSpan.FromSeconds(Seconds))
-                                Thread.Sleep((int)(Seconds - lag.TotalSeconds + 0.5) * 1000);
+                                await Task.Delay((int)(Seconds - lag.TotalSeconds + 0.5) * 1000, cancellationTokenSource.Token);
                         }
                     }
                 }
@@ -117,7 +119,7 @@ namespace TeslaLogger
                     connected = false;
                 }
 
-                if (run)
+                if (!cancellationTokenSource.IsCancellationRequested)
                     car.Log($"Disconnected from TeslaCAN host {hostName}");
             }
         }
@@ -186,7 +188,7 @@ namespace TeslaLogger
                 var result = await client.GetAsync(new Uri(url + "/getdata?limit=12")).ConfigureAwait(true);
                 var resultContent = await result.Content.ReadAsStringAsync().ConfigureAwait(true);
 
-                DBHelper.AddMothershipDataToDB(url + "/getdata", start, (int)result.StatusCode, car.CarInDB);
+                await DBHelper.AddMothershipDataToDBAsync(url + "/getdata", start, (int)result.StatusCode, car.CarInDB);
 
                 try
                 {
@@ -213,7 +215,7 @@ namespace TeslaLogger
             }
         }
 
-        private void SaveData(Data data)
+        private async Task SaveData(Data data)
         {
             car.CurrentJSON.lastScanMyTeslaReceived = data.Timestamp;
             car.CurrentJSON.CreateCurrentJSON();
@@ -270,7 +272,6 @@ namespace TeslaLogger
                         {
                             car.CurrentJSON.SMTSpeed = Convert.ToDouble(line.Value, Tools.ciEnUS);
                         }
-
                         break;
                     case "43":
                         car.CurrentJSON.SMTBatteryPower = Convert.ToDouble(line.Value, Tools.ciEnUS);
@@ -305,14 +306,14 @@ namespace TeslaLogger
 
             using (MySqlConnection con = new MySqlConnection(DBHelper.DBConnectionstring))
             {
-                con.Open();
+                await con.OpenAsync(cancellationTokenSource.Token);
 #pragma warning disable CA2100 // SQL-Abfragen auf Sicherheitsrisiken überprüfen
                 using (MySqlCommand cmd = new MySqlCommand(sb.ToString(), con))
 #pragma warning restore CA2100 // SQL-Abfragen auf Sicherheitsrisiken überprüfen
                 {
                     try
                     {
-                        _ = SQLTracer.TraceNQ(cmd, out _);
+                        await cmd.ExecuteNonQueryAsync(cancellationTokenSource.Token);
                     }
                     catch (MySqlException ex)
                     {
@@ -326,7 +327,7 @@ namespace TeslaLogger
                     {
                         using (MySqlConnection con2 = new MySqlConnection(DBHelper.DBConnectionstring))
                         {
-                            con2.Open();
+                            await con2.OpenAsync(cancellationTokenSource.Token);
                             using (MySqlCommand cmd2 = new MySqlCommand("update cars set lastscanmytesla=@lastscanmytesla where id=@id", con2))
                             {
                                 cmd2.Parameters.AddWithValue("@id", car.CarInDB);
@@ -343,17 +344,16 @@ namespace TeslaLogger
 
         public void StopThread()
         {
-            run = false;
+            cancellationTokenSource.Cancel(); 
             teslaCan.StopWait();
-            thread.Join(1000);
         }
 
         public void KillThread()
         {
             try
             {
-                thread?.Abort();
-                thread = null;
+                cancellationTokenSource.Cancel();
+                taskLoop.Wait();
             }
             catch (Exception ex)
             {

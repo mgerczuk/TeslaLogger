@@ -1,0 +1,199 @@
+﻿using Confluent.Kafka;
+using System.Text.RegularExpressions;
+using Telemetry.VehicleAlerts;
+using Telemetry.VehicleData;
+using Telemetry.VehicleError;
+using Telemetry.VehicleMetrics;
+using TeslaLogger;
+
+namespace KafkaConnector
+{
+    public class KafkaConnector
+    {
+        readonly CancellationTokenSource ct = new();
+        IConsumer<string, byte[]> consumer;
+        readonly string bootstrapServers = "";
+        string groupID = "";
+        static System.Collections.Concurrent.BlockingCollection<(string vin, string msg)> queue;
+        static HashSet<string> vins;
+
+        public KafkaConnector(ref System.Collections.Concurrent.BlockingCollection<(string vin, string msg)> queue,
+            ref HashSet<string> vins) {
+            KafkaConnector.queue = queue;
+            KafkaConnector.vins = vins;
+
+            bootstrapServers = "kafka:9092";
+            groupID = Environment.GetEnvironmentVariable("KAFKA_GROUP_ID") ?? "teslaloggeronlinedev";
+            GetTopics();
+
+            var cc = new ConsumerConfig
+            {
+                GroupId = groupID,
+                //SecurityProtocol = SecurityProtocol.Plaintext,
+                //LogConnectionClose = true,
+                //LogQueue = true,
+                //LogThreadName = true,
+                BootstrapServers = this.bootstrapServers
+            };
+
+            if (false) // xxx earlierst
+            {
+                Console.WriteLine("*** AutoOffsetReset.Earliest ***");
+                cc.AutoOffsetReset = AutoOffsetReset.Earliest;
+            }
+            else
+                cc.AutoOffsetReset = AutoOffsetReset.Latest;
+
+            Console.WriteLine("Kafka Server: " + this.bootstrapServers);
+            consumer = new ConsumerBuilder<string, byte[]>(cc).Build();
+            string KafkaSubscribe = "tesla_telemetry_V"; // "tesla_telemetry_V,tesla_telemetry_alerts,tesla_telemetry_errors";
+            var subscribe = KafkaSubscribe.Split(",").Select(s => s.Trim()).ToArray();
+            Console.WriteLine("Kafka subscribe: " + String.Join(", ", subscribe));
+            consumer.Subscribe(subscribe);
+
+            Task.Run(async () => {await RunAsync(); });
+        }
+
+        public async Task RunAsync()
+        {
+            await Task.Delay(1000);
+            Logfile.Log("*** Kafka Start consume ***");
+            long msgcounter= 0;
+
+            int lastLog = Environment.TickCount;
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    var r = consumer.Consume(ct.Token);
+                    msgcounter++;
+
+                    if (Environment.TickCount > lastLog)
+                    {
+                        Logfile.Log("Kafka Consume: " + msgcounter + " messages + / Queue: " + queue.Count);
+                        lastLog = Environment.TickCount + 30000;
+                    }
+
+                    // Interlocked.Increment(ref Metrics.consume_counter);
+
+                    // Log(r.Message.Key, "Kafka Consume");
+
+                    Headers headers = r.Message.Headers;
+                    string Type = "";
+                    string Receiver = "";
+                    string vin = "";
+                    string txtype = "";
+
+                    foreach (var h in headers)
+                    {
+                        switch (h.Key)
+                        {
+                            case "Type":
+                                Type = System.Text.Encoding.ASCII.GetString(h.GetValueBytes());
+                                break;
+                            case "Receiver":
+                                Receiver = System.Text.Encoding.ASCII.GetString(h.GetValueBytes());
+                                break;
+                            case "vin":
+                                vin = System.Text.Encoding.ASCII.GetString(h.GetValueBytes());
+
+                                break;
+                            case "txtype":
+                                txtype = System.Text.Encoding.ASCII.GetString(h.GetValueBytes());
+                                break;
+                            default:
+                                // System.Diagnostics.Debug.WriteLine("Message Header unknown: " + h.Key);
+                                break;
+                        }
+                    }
+                    if (!vins.Contains(vin))
+                        continue;
+
+                    if (txtype == "V")
+                    {
+                        Payload pl = null;
+                        pl = Payload.Parser.ParseFrom(r.Message.Value);
+                        string str = pl.ToString();
+                        
+                        queue.Add((vin, str));
+                    }
+                }
+                catch (OperationCanceledException ex2)
+                {
+                    Logfile.Log("EventServerKafka Stop! " + ex2.ToString());
+                }
+                catch (Exception ex)
+                {
+                    Logfile.Log(ex.ToString());
+                }
+            }
+        }
+
+        private void GetTopics()
+        {
+            while (true)
+            {
+                try
+                {
+                    Console.WriteLine("Get Topics");
+                    var adminConfig = new AdminClientConfig()
+                    {
+                        BootstrapServers = this.bootstrapServers,
+                        SecurityProtocol = SecurityProtocol.Plaintext,
+                        LogConnectionClose = true,
+                        LogQueue = true,
+                        LogThreadName = true
+                    };
+                    using (var adminClient = new AdminClientBuilder(adminConfig).Build())
+                    {
+                        var metadata = adminClient.GetMetadata(TimeSpan.FromSeconds(10));
+                        var topicsMetadata = metadata.Topics;
+                        var topicNames = metadata.Topics.Select(a => a.Topic).ToList();
+
+                        Logfile.Log("Topics received: " + String.Join(", ", topicNames));
+
+                        SendTestmessage();
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logfile.Log("Error getting topics: " + ex.ToString());
+                }
+                Thread.Sleep(5000);
+            }
+        }
+
+        public void SendTestmessage()
+        {
+            try
+            {
+                Console.WriteLine("SendTestmessage to Kafka");
+
+                var config = new ProducerConfig
+                {
+                    BootstrapServers = this.bootstrapServers
+                };
+                using var producer = new ProducerBuilder<string, string>(config).Build();
+
+                var topic = "test";
+                var message = new Message<string, string> { Key = "PING", Value = "Ping from " + groupID + " Time: " + DateTime.Now.ToString() };
+                producer.Produce(topic, message, deliveryReport =>
+                {
+                    Logfile.Log(" Delivery Report: " + deliveryReport.Error.ToString() + " / " + deliveryReport.Message.Value);
+                });
+                Logfile.Log("Produce");
+                Thread.Sleep(1000);
+                producer.Flush();
+                Logfile.Log("Flush");
+                Thread.Sleep(1000);
+            }
+            catch (Exception ex)
+            {
+                Logfile.Log(ex.ToString());
+            }
+        }
+
+    }
+}
