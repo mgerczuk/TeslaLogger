@@ -12,13 +12,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+        with:
+          fetch-depth: 0
 
       - name: Get release version
         id: version
-      shell: bash
-      run: |
+        shell: bash
+        run: |
           TAG=${{ github.event.release.tag_name }}
           echo "Tag is: $TAG"
           VERSION=${TAG#v}  # entfernt führendes 'v'
@@ -26,8 +26,8 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
   
       - name: Update AssemblyInfo.cs with release version
-      shell: bash
-      run: |
+        shell: bash
+        run: |
           VERSION=${{ steps.version.outputs.version }}
           FILE="TeslaLogger/Properties/AssemblyInfo.cs"
           echo "Updating $FILE to version $VERSION"
@@ -40,51 +40,51 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-    - name: Restore dependencies
-      run: dotnet restore TeslaLoggerNET8.sln
+      - name: Restore dependencies
+        run: dotnet restore TeslaLoggerNET8.sln
 
       - name: Publish
         run: dotnet publish --no-restore -o publish TeslaLogger/TeslaLoggerNET8.csproj
 
       - name: Login to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
+        uses: docker/login-action@v3
+        with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
     
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
     
-    - name: Build and push Teslalogger
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile
-        push: true
-        tags: |
+      - name: Build and push Teslalogger
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
             ghcr.io/mgerczuk/teslalogger:latest
             ghcr.io/mgerczuk/teslalogger:${{ steps.version.outputs.version }}
-        platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64
 
-    - name: Build and push Webserver
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile-Webserver
-        push: true
-        tags: | 
+      - name: Build and push Webserver
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile-Webserver
+          push: true
+          tags: | 
             ghcr.io/mgerczuk/teslalogger-webserver:latest
             ghcr.io/mgerczuk/teslalogger-webserver:${{ steps.version.outputs.version }}
-        platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64
     
-    - name: Build and push Grafana
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile-Grafana
-        push: true
-        tags: | 
+      - name: Build and push Grafana
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile-Grafana
+          push: true
+          tags: | 
             ghcr.io/mgerczuk/teslalogger-grafana:latest
             ghcr.io/mgerczuk/teslalogger-grafana:${{ steps.version.outputs.version }}
-        platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64

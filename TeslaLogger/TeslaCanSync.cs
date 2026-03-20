@@ -332,7 +332,7 @@ namespace TeslaLogger
                             {
                                 cmd2.Parameters.AddWithValue("@id", car.CarInDB);
                                 cmd2.Parameters.AddWithValue("@lastscanmytesla", DateTime.Now);
-                                _ = SQLTracer.TraceNQ(cmd2, out _);
+                                await cmd2.ExecuteReaderAsync(cancellationTokenSource.Token);
                             }
                         }
                     }
