@@ -6,32 +6,39 @@
 #
 services:
   teslalogger:
-    image: bassmaster187/teslalogger:latest
+    image: ghcr.io/mgerczuk/teslalogger:latest
+    #build:
+    #  context: .
+    #  dockerfile: Dockerfile
     container_name: teslalogger
     restart: always
     volumes:
+      - ${APPDATA_PATH:-./volumes}/bin/TeslaLoggerNET8.dll.config:/etc/teslalogger/TeslaLoggerNET8.dll.config
+      - ${APPDATA_PATH:-./volumes}/bin/fleet-telemetry-mqtt.json:/etc/teslalogger/fleet-telemetry-mqtt.json
+      - ${APPDATA_PATH:-./volumes}/bin/backup.sh:/etc/teslalogger/backup.sh
       - teslalogger-net8-tmp:/tmp/
       - teslalogger-net8-sqlschema:/etc/teslalogger/sqlschema
       - teslalogger-net8-grafanadashboards:/var/lib/grafana/dashboards/
       - teslalogger-net8-grafanaplugins:/var/lib/grafana/plugins/
-      - ${APPDATA_PATH:-.}/backup:/etc/teslalogger/backup
-      - ${APPDATA_PATH:-.}/invoices:/etc/teslalogger/Debug/net8.0/tesla_invoices
+      - ${APPDATA_PATH:-./volumes}/backup:/etc/teslalogger/backup
+      - ${APPDATA_PATH:-./volumes}/invoices:/etc/teslalogger/Debug/net8.0/tesla_invoices
       - teslalogger-net8-data:/etc/teslalogger/data
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - database
+      - mariadb
     environment:
       - TZ=${TZ:-Europe/Berlin}
+      - TESLALOGGER_LOGFILE=/tmp/teslalogger.log
     ports:
       - ${TESLALOGGER_PORT:-5010}:5000
-    labels:
-      - com.centurylinklabs.watchtower.enable=${WATCHTOWER_ENABLE:-true}
-      - com.centurylinklabs.watchtower.scope=teslalogger-stack
+    #labels:
+      #- com.centurylinklabs.watchtower.enable=${WATCHTOWER_ENABLE:-true}
+      #- com.centurylinklabs.watchtower.scope=teslalogger-stack
       
       
-  database:
+  mariadb:
     image: mariadb:10.4.7
-    container_name: teslalogger-db
+    container_name: mariadb
     restart: always
     env_file:
       - .env
@@ -42,9 +49,9 @@ services:
       - MYSQL_DATABASE=teslalogger
       - MYSQL_ROOT_PASSWORD=teslalogger
     volumes:
-      - teslalogger-net8-sqlschema:/docker-entrypoint-initdb.d
-      - ${APPDATA_PATH:-.}/mysql:/var/lib/mysql
-    #ports:
+      - ${APPDATA_PATH:-./volumes}/db/init:/docker-entrypoint-initdb.d
+      - ${APPDATA_PATH:-./volumes}/db/data:/var/lib/mysql
+     #ports:
     #  - 3306:3306      # No need to expose the DB to the public, communication is stack-internal
     #healthcheck:
     #  test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
@@ -52,13 +59,26 @@ services:
     #  interval: 10s
     #  timeout: 5s
     #  retries: 3
-    labels:
-      - com.centurylinklabs.watchtower.enable=${WATCHTOWER_ENABLE:-true}
-      - com.centurylinklabs.watchtower.scope=teslalogger-stack
-      
+    #labels:
+      #- com.centurylinklabs.watchtower.enable=${WATCHTOWER_ENABLE:-true}
+      #- com.centurylinklabs.watchtower.scope=teslalogger-stack
+
+  phpmyadmin:
+    image: phpmyadmin
+    container_name: phpmyadmin
+    restart: always
+    ports:
+      - 8082:80
+    environment:
+      - PMA_HOST=mariadb
+      - UPLOAD_LIMIT=100M
+      - MAX_EXECUTION_TIME=600
       
   grafana:
-    image: bassmaster187/teslalogger-grafana:latest
+    image: ghcr.io/mgerczuk/teslalogger-grafana:latest
+    #build:
+    #  context: .
+    #  dockerfile: Dockerfile-Grafana
     container_name: teslalogger-grafana
     restart: always
     volumes: 
@@ -70,7 +90,7 @@ services:
     ports:
       - ${GRAFANA_PORT:-3000}:3000
     depends_on:
-      - database
+      - mariadb
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
       interval: 30s
@@ -82,7 +102,10 @@ services:
       
       
   webserver:
-    image: bassmaster187/teslalogger-webserver:latest
+    image: ghcr.io/mgerczuk/teslalogger-webserver:latest
+    #build:
+    #   context: .
+    #   dockerfile: Dockerfile-Webserver
     container_name: teslalogger-webserver
     restart: always
     volumes:
@@ -95,6 +118,7 @@ services:
       - ${WEBSERVER_PORT:-8888}:80
     environment:
       - TZ=${TZ:-Europe/Berlin}
+      - TESLALOGGER_LOGFILE=/tmp/teslalogger.log
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/"]
       interval: 30s
@@ -107,22 +131,33 @@ services:
       
       
   # watchtower updates label "teslalogger-stack" only
-  watchtower:
-    image: nickfedor/watchtower:latest
-    container_name: teslalogger-watchtower
-    restart: always
-    volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
-    command: --debug --http-api-update --scope teslalogger-stack
-    environment:
-      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_TOKEN}
-      - WATCHTOWER_LABEL_ENABLE=true
-      - WATCHTOWER_SCOPE=teslalogger-stack
+#  watchtower:
+#    image: nickfedor/watchtower:latest
+#    container_name: teslalogger-watchtower
+#    restart: always
+#    volumes:
+#        - /var/run/docker.sock:/var/run/docker.sock
+#    command: --debug --http-api-update --scope teslalogger-stack
+#    environment:
+#      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_TOKEN}
+#      - WATCHTOWER_LABEL_ENABLE=true
+#      - WATCHTOWER_SCOPE=teslalogger-stack
       
       
 volumes:
     teslalogger-net8-tmp:
+      name: teslalogger-net8-tmp
+      external: true
     teslalogger-net8-data:
+      name: teslalogger-net8-data
+      external: true
     teslalogger-net8-sqlschema:
+      name: teslalogger-net8-sqlschema
+      external: true
     teslalogger-net8-grafanadashboards:
+      name: teslalogger-net8-grafanadashboards
+      external: true
     teslalogger-net8-grafanaplugins:
+      name: teslalogger-net8-grafanaplugins
+      external: true
+
