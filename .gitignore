@@ -129,5 +129,6 @@ TeslaLogger/delete-REDIRECTDOCKERTOHOST.cmd
 /mysql
 /invoices
 /publish
+/volumes
 /TLUpdate/.vs
 /UnitTestsTeslalogger/.vs

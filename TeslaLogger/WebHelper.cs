@@ -658,114 +658,118 @@ namespace TeslaLogger
 
         private string UpdateTeslaTokenFromRefreshTokenFromFleetAPI(string refresh_token)
         {
-            try
+            for (int retry = 0; retry < 5; retry++ )
             {
-                var ts = DateTime.UtcNow - lastRefreshToken;
-                if (ts.TotalMinutes < 5)
+                try
                 {
-                    car.Log("ERROR: Refresh Token Spam!!!");
-                    return "";
-                }
+                    var ts = DateTime.UtcNow - lastRefreshToken;
+                    if (ts.TotalMinutes < 5)
+                    {
+                        car.Log("ERROR: Refresh Token Spam!!!");
+                        return "";
+                    }
 
-                lastRefreshToken = DateTime.UtcNow;
 
                 Log("Update Access Token From Refresh Token - FleetAPI!");
-                if (String.IsNullOrEmpty(refresh_token))
-                {
-                    car.Log("No Refresh Token");
-                    return "";
-                }
-
-                using (var formContent = new FormUrlEncodedContent(new[]
-            {
-                new KeyValuePair<string, string>("refresh_token", refresh_token),
-                new KeyValuePair<string, string>("taskertoken", car.TaskerHash),
-                new KeyValuePair<string, string>("vin", car.Vin),
-            }))
-                {
-
-                    var response = httpclient_teslalogger_de.PostAsync(new Uri(ApplicationSettings.Default.RefreshTokenURL), formContent).Result;
-                    string result = response.Content.ReadAsStringAsync().Result;
-                    if (response.IsSuccessStatusCode)
+                    if (String.IsNullOrEmpty(refresh_token))
                     {
-                        if (result.Contains("User revoked consent"))
-                            car.CreateExeptionlessLog("User revoked consent", "Teslalogger won't work anymore!", LogLevel.Warn).Submit();
+                        car.Log("No Refresh Token");
+                        return "";
+                    }
 
-                        if (result.Contains("\"error\""))
+                    using (var formContent = new FormUrlEncodedContent(new[]
                         {
-                            string error = result;
+                            new KeyValuePair<string, string>("refresh_token", refresh_token),
+                            new KeyValuePair<string, string>("taskertoken", car.TaskerHash),
+                            new KeyValuePair<string, string>("vin", car.Vin),
+                        }))
+                    {
 
-                            try
+                        var response = httpclient_teslalogger_de.PostAsync(new Uri(ApplicationSettings.Default.RefreshTokenURL), formContent).Result;
+                        string result = response.Content.ReadAsStringAsync().Result;
+                        lastRefreshToken = DateTime.UtcNow;
+                        if (response.IsSuccessStatusCode)
+                        {
+                            if (result.Contains("User revoked consent"))
+                                car.CreateExeptionlessLog("User revoked consent", "Teslalogger won't work anymore!", LogLevel.Warn).Submit();
+
+                            if (result.Contains("\"error\""))
                             {
-                                dynamic j2 = JsonConvert.DeserializeObject(result);
-                                error = j2["error"];
-                            }
-                            catch (Exception)
-                            { }
+                                string error = result;
 
-                            car.CreateExeptionlessLog("UpdateTeslaTokenFromRefreshTokenFromFleetAPI", error, LogLevel.Error)
+                                try
+                                {
+                                    dynamic j2 = JsonConvert.DeserializeObject(result);
+                                    error = j2["error"];
+                                }
+                                catch (Exception)
+                                { }
+
+                                car.CreateExeptionlessLog("UpdateTeslaTokenFromRefreshTokenFromFleetAPI", error, LogLevel.Error)
+                                    .AddObject(result, "Result Content")
+                                    .Submit();
+                                car.Log(result);
+                                Thread.Sleep(30000);
+                                return "";
+                            }
+
+                            dynamic jsonResult = JsonConvert.DeserializeObject(result);
+                            if (jsonResult.ContainsKey("expires_in"))
+                            {
+                                var t = DateTime.UtcNow.AddSeconds((int)(jsonResult["expires_in"])).AddHours(-2);
+                                if (t > DateTime.UtcNow.AddHours(1))
+                                    nextTeslaTokenFromRefreshToken = t;
+                                else
+                                {
+                                    t = DateTime.UtcNow.AddSeconds((int)(jsonResult["expires_in"]));
+                                    nextTeslaTokenFromRefreshToken = t;
+                                }
+
+                                Log("access token expires: " + nextTeslaTokenFromRefreshToken.ToLocalTime());
+
+                                /*
+                                CacheItemPolicy policy = new CacheItemPolicy();
+                                policy.AbsoluteExpiration = DateTime.Now.AddSeconds((int)(jsonResult["expires_in"])).AddMinutes(-5);
+                                policy.RemovedCallback = new CacheEntryRemovedCallback((CacheEntryRemovedArguments _) =>
+                                {
+                                    Tools.DebugLog($"#{car.CarInDB}: access token will expire in 5 minutes");
+                                    UpdateTeslaTokenFromRefreshToken();
+                                });
+                                _ = MemoryCache.Default.Add("RefreshToken_" + car.CarInDB+ $"_{Environment.TickCount}", policy, policy);
+                                */
+                            }
+                            string access_token = jsonResult["access_token"];
+
+                            string new_refresh_token = jsonResult["refresh_token"];
+                            CheckNewRefreshToken(refresh_token, new_refresh_token);
+
+                            SetNewAccessToken(access_token);
+                            return access_token;
+                        }
+                        else
+                        {
+                            car.CreateExeptionlessLog("UpdateTeslaTokenFromRefreshTokenFromFleetAPI", response.StatusCode.ToString(), LogLevel.Error)
                                 .AddObject(result, "Result Content")
                                 .Submit();
-                            car.Log(result);
+
+                            Log("Error getting Access Token from Refreh Token: " + (int)response.StatusCode + " / " + response.StatusCode.ToString());
                             Thread.Sleep(30000);
                             return "";
                         }
-
-                        dynamic jsonResult = JsonConvert.DeserializeObject(result);
-                        if (jsonResult.ContainsKey("expires_in"))
-                        {
-                            var t = DateTime.UtcNow.AddSeconds((int)(jsonResult["expires_in"])).AddHours(-2);
-                            if (t > DateTime.UtcNow.AddHours(1))
-                                nextTeslaTokenFromRefreshToken = t;
-                            else
-                            {
-                                t = DateTime.UtcNow.AddSeconds((int)(jsonResult["expires_in"]));
-                                nextTeslaTokenFromRefreshToken = t;
-                            }
-
-                            Log("access token expires: " + nextTeslaTokenFromRefreshToken.ToLocalTime());
-
-                            /*
-                            CacheItemPolicy policy = new CacheItemPolicy();
-                            policy.AbsoluteExpiration = DateTime.Now.AddSeconds((int)(jsonResult["expires_in"])).AddMinutes(-5);
-                            policy.RemovedCallback = new CacheEntryRemovedCallback((CacheEntryRemovedArguments _) =>
-                            {
-                                Tools.DebugLog($"#{car.CarInDB}: access token will expire in 5 minutes");
-                                UpdateTeslaTokenFromRefreshToken();
-                            });
-                            _ = MemoryCache.Default.Add("RefreshToken_" + car.CarInDB+ $"_{Environment.TickCount}", policy, policy);
-                            */
-                        }
-                        string access_token = jsonResult["access_token"];
-
-                        string new_refresh_token = jsonResult["refresh_token"];
-                        CheckNewRefreshToken(refresh_token, new_refresh_token);
-
-                        SetNewAccessToken(access_token);
-                        return access_token;
-                    }
-                    else
-                    {
-                        car.CreateExeptionlessLog("UpdateTeslaTokenFromRefreshTokenFromFleetAPI", response.StatusCode.ToString(), LogLevel.Error)
-                            .AddObject(result, "Result Content")
-                            .Submit();
-
-                        Log("Error getting Access Token from Refreh Token: " + (int)response.StatusCode + " / " + response.StatusCode.ToString());
-                        Thread.Sleep(30000);
-                        return "";
                     }
                 }
-            }
-            catch (ThreadAbortException)
-            {
-                System.Diagnostics.Debug.WriteLine("Thread Stop!");
-            }
-            catch (Exception ex)
-            {
-                car.Log(ex.ToString());
-                car.CreateExceptionlessClient(ex).MarkAsCritical().Submit();
-                ExceptionlessClient.Default.ProcessQueueAsync();
-                Thread.Sleep(30000);
+                catch (ThreadAbortException)
+                {
+                    System.Diagnostics.Debug.WriteLine("Thread Stop!");
+                    return "";
+                }
+                catch (Exception ex)
+                {                
+                    car.Log("UpdateTeslaTokenFromRefreshTokenFromFleetAPI exception:\n" + ex.ToString() + $"\n ---> retrying {retry}/5");
+                    car.CreateExceptionlessClient(ex).MarkAsCritical().Submit();
+                    ExceptionlessClient.Default.ProcessQueueAsync();
+                    Thread.Sleep(5000);
+                }
             }
 
             return "";
