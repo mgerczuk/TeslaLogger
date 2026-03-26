@@ -768,7 +768,7 @@ namespace TeslaLogger
                     car.Log("UpdateTeslaTokenFromRefreshTokenFromFleetAPI exception:\n" + ex.ToString() + $"\n ---> retrying {retry}/5");
                     car.CreateExceptionlessClient(ex).MarkAsCritical().Submit();
                     ExceptionlessClient.Default.ProcessQueueAsync();
-                    Thread.Sleep(5000);
+                    Thread.Sleep(30000);
                 }
             }
 
