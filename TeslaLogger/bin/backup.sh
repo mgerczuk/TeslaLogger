@@ -23,7 +23,7 @@ fi
 
 # perform backups
 if test -f "/tmp/teslalogger-DOCKER"; then
-    mysqldump -uteslalogger -pteslalogger -hmariadb --single-transaction --routines --triggers teslalogger | gzip -9 > $SQLDUMP.gz
+    mysqldump -uteslalogger -pteslalogger -hmariadb --single-transaction --routines --triggers teslalogger | gzip -9 > $SQLDUMP
 else
     mysqldump -uroot -pteslalogger  --single-transaction --routines --triggers teslalogger | gzip -9 > $SQLDUMP
 fi
