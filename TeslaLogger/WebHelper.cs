@@ -271,11 +271,11 @@ namespace TeslaLogger
 
                 if (ts.TotalDays < 8)
                 { */
-                    Tesla_token = car.Tesla_Token;
-                    lastTokenRefresh = car.Tesla_Token_Expire;
+                Tesla_token = car.Tesla_Token;
+                lastTokenRefresh = car.Tesla_Token_Expire;
 
-                    Log("Restore Token OK. Valid: " + car.Tesla_Token_Expire.ToString(Tools.ciEnUS));
-                    return true;
+                Log("Restore Token OK. Valid: " + car.Tesla_Token_Expire.ToString(Tools.ciEnUS));
+                return true;
 
                 /*
                 }
@@ -575,7 +575,7 @@ namespace TeslaLogger
             try
             {
                 _ = IsOnlineAsync(true).Result; // get new Tesla_Streamingtoken;
-                                           // restart streaming thread with new token
+                                                // restart streaming thread with new token
                 RestartStreamThreadWithTask();
             }
             catch (Exception ex)
@@ -658,7 +658,7 @@ namespace TeslaLogger
 
         private string UpdateTeslaTokenFromRefreshTokenFromFleetAPI(string refresh_token)
         {
-            for (int retry = 0; retry < 5; retry++ )
+            for (int retry = 0; retry < 5; retry++)
             {
                 try
                 {
@@ -670,7 +670,7 @@ namespace TeslaLogger
                     }
 
 
-                Log("Update Access Token From Refresh Token - FleetAPI!");
+                    Log("Update Access Token From Refresh Token - FleetAPI!");
                     if (String.IsNullOrEmpty(refresh_token))
                     {
                         car.Log("No Refresh Token");
@@ -684,7 +684,7 @@ namespace TeslaLogger
                             new KeyValuePair<string, string>("vin", car.Vin),
                         }))
                     {
-
+                        car.Log($"Requesting new access token from URL {ApplicationSettings.Default.RefreshTokenURL}...");
                         var response = httpclient_teslalogger_de.PostAsync(new Uri(ApplicationSettings.Default.RefreshTokenURL), formContent).Result;
                         string result = response.Content.ReadAsStringAsync().Result;
                         lastRefreshToken = DateTime.UtcNow;
@@ -764,7 +764,7 @@ namespace TeslaLogger
                     return "";
                 }
                 catch (Exception ex)
-                {                
+                {
                     car.Log("UpdateTeslaTokenFromRefreshTokenFromFleetAPI exception:\n" + ex.ToString() + $"\n ---> retrying {retry}/5");
                     car.CreateExceptionlessClient(ex).MarkAsCritical().Submit();
                     ExceptionlessClient.Default.ProcessQueueAsync();
@@ -802,7 +802,7 @@ namespace TeslaLogger
                 new KeyValuePair<string, string>("client_id", ApplicationSettings.Default.TelemetryClientID),
             }))
                 {
-
+                    car.Log("Requesting new access token from URL https://auth.tesla.com/oauth2/v3/token...");
                     var response = httpclient_teslalogger_de.PostAsync(new Uri("https://auth.tesla.com/oauth2/v3/token"), formContent).Result;
                     string result = response.Content.ReadAsStringAsync().Result;
                     if (response.IsSuccessStatusCode)
@@ -998,7 +998,7 @@ namespace TeslaLogger
             }, CancellationToken.None, TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
         }
 
-       
+
         private string lastCharging_State = "";
 
         public void ResetLastChargingState()
@@ -1334,7 +1334,7 @@ namespace TeslaLogger
                     System.Diagnostics.Debug.WriteLine(DateTime.Now.ToString() + " : " + OnlineState);
 
                     string display_name = r2["display_name"].ToString();
-                    if(string.IsNullOrEmpty(display_name) && string.IsNullOrEmpty(car.DisplayName))
+                    if (string.IsNullOrEmpty(display_name) && string.IsNullOrEmpty(car.DisplayName))
                     {
                         // Grafana dashboards break, if Car's display_name is null or empty, so
                         // if display_name is null from API and car.DisplayName is also null already
@@ -2111,7 +2111,7 @@ namespace TeslaLogger
         public void UpdateEfficiency()
         {
             //string eff = "0.190052356";
-            
+
             Tools.VINDecoder(car.Vin, out int year, out string vinCarType, out bool AWD, out bool MIC, out string battery, out string motor, out bool MIG);
 
             if (car.CarType == "model3" || vinCarType == "Model 3")
@@ -2626,7 +2626,7 @@ namespace TeslaLogger
 
                 if (resultContent == INSERVICE)
                 {
-                    await Task.Delay(10000,  car.cts.Token);
+                    await Task.Delay(10000, car.cts.Token);
                     return false;
                 }
 
@@ -2775,7 +2775,7 @@ namespace TeslaLogger
                         longitude = 0;
                     }
 
-                    if(car.CurrentJSON.current_inside_temperature != null)
+                    if (car.CurrentJSON.current_inside_temperature != null)
                     {
                         inside_temp = (double)car.CurrentJSON.current_inside_temperature;
                     }
@@ -2791,7 +2791,7 @@ namespace TeslaLogger
             }
             catch (Exception ex)
             {
-                if (resultContent == null || resultContent == "NULL" )
+                if (resultContent == null || resultContent == "NULL")
                 {
                     Log("IsDriving = NULL!");
                     Thread.Sleep(10000);
@@ -3233,7 +3233,8 @@ namespace TeslaLogger
                     car.DbHelper.InsertPosAsync(v[0], latitude, longitude, ispeed, dpower, dodometer_km, ideal_battery_range_km, battery_range_km, isoc, inside_temp, outside_temp, String.Empty).Wait();
                 }
             }
-            if (int.TryParse(heading, out int iheading)) {  // heading in degrees
+            if (int.TryParse(heading, out int iheading))
+            {  // heading in degrees
                 car.CurrentJSON.heading = iheading;
             }
         }
@@ -3316,7 +3317,7 @@ namespace TeslaLogger
                 {
                     await Task.Delay(6000 - elapsed);
                 }
-                lastGeocoding = Environment.TickCount;  
+                lastGeocoding = Environment.TickCount;
 
                 using (WebClient webClient = new WebClient())
                 {
@@ -4491,7 +4492,7 @@ WHERE
                     return "";
 
                 HttpClient httpclientgetChargingHistoryV2 = GethttpclientgetChargingHistoryV2();
-                using (var request = new HttpRequestMessage(HttpMethod.Get, new Uri($"{apiaddress}api/1/dx/charging/history?pageNo={pageNumber}{(!string.IsNullOrEmpty(vin)?"&vin="+vin:"")}")))
+                using (var request = new HttpRequestMessage(HttpMethod.Get, new Uri($"{apiaddress}api/1/dx/charging/history?pageNo={pageNumber}{(!string.IsNullOrEmpty(vin) ? "&vin=" + vin : "")}")))
                 {
                     Tools.DebugLog($"GetChargingHistoryV2 #{car.CarInDB} request: {request.RequestUri}");
                     request.Headers.Add("Authorization", "Bearer " + Tesla_token);
@@ -4751,7 +4752,7 @@ WHERE
                 Tools.SetThreadEnUS();
 
                 Tools.GrafanaSettings(out string power, out string temperature, out string length, out string pressure,
-				    out string language, out string URL_Admin, out string Range, out _, out _, out _);
+                    out string language, out string URL_Admin, out string Range, out _, out _, out _);
 
                 TimeSpan ts = DateTime.Now - lastTaskerWakeupfile;
 
@@ -4835,6 +4836,7 @@ WHERE
                     string query = content.ReadAsStringAsync().Result;
 
                     DateTime start = DateTime.UtcNow;
+                    car.Log("Requesting wake file from URL http://teslalogger.de/wakefile.php...");
                     Task<HttpResponseMessage> resultTask = httpclient_teslalogger_de.PostAsync("http://teslalogger.de/wakefile.php", content);
 
                     HttpResponseMessage result = resultTask.Result;
@@ -5230,7 +5232,7 @@ WHERE
                 {
                     Tools.SetThreadEnUS();
                     HttpClient httpClientTeslaAPI = GetHttpClientTeslaAPI();
-                    using (var request = new HttpRequestMessage(HttpMethod.Post, new Uri( ApplicationSettings.Default.TeslaHttpProxyURL + "/api/1/vehicles/fleet_status")))
+                    using (var request = new HttpRequestMessage(HttpMethod.Post, new Uri(ApplicationSettings.Default.TeslaHttpProxyURL + "/api/1/vehicles/fleet_status")))
                     {
                         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Tesla_token);
                         request.Content = content;
